@@ -1,0 +1,23 @@
+[project]
+name = "workflow-backend"
+version = "0.1.0"
+description = "FastAPI backend for workflow operations"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.6",
+  "temporalio>=1.6",
+  "langgraph>=0.2"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "workflow*"]
+
+[tool.uvicorn]
+factory = false
