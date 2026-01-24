@@ -89,10 +89,10 @@ export function WorkflowConfirmDialog({
 
         <div className="mt-6 flex gap-4">
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => handleConfirm(false)}
             disabled={loading}
-            className="flex-1 rounded-xl border-0 bg-white py-3 text-red-500 shadow-sm hover:bg-slate-50 hover:text-red-600"
+            className="flex-1 rounded-xl bg-white py-3 text-red-500 shadow-sm hover:bg-slate-50 hover:text-red-600"
           >
             拒绝
           </Button>

@@ -92,5 +92,34 @@ class ConfirmResponse(BaseModel):
     stage: str
 
 
+# === Graph Visualization Models ===
+
+
+class GraphNode(BaseModel):
+    id: str
+    type: str = "agent"
+    label: str
+    position: dict = Field(default_factory=lambda: {"x": 0, "y": 0})
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+
+
+class WorkflowGraph(BaseModel):
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+
+
+class NodeStatus(BaseModel):
+    node: str
+    status: str  # pending | running | completed | failed
+    timestamp: str
+    output: Optional[str] = None
+    progress: Optional[int] = None
+
+
 def now_iso() -> str:
     return datetime.utcnow().isoformat() + "Z"

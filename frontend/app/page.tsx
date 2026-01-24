@@ -504,9 +504,9 @@ export default function Page() {
                             {run.status === "running" && (
                               <Button
                                 size="sm"
-                                variant="outline"
+                                variant="secondary"
                                 onClick={() => handleOpenConfirmDialog(run.id, "initial")}
-                                className="text-emerald-600 border-emerald-200 hover:bg-emerald-50"
+                                className="text-emerald-600 border border-emerald-200 hover:bg-emerald-50"
                               >
                                 确认
                               </Button>

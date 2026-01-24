@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from .models import (
     ConfirmRequest,
     ConfirmResponse,
+    GraphEdge,
+    GraphNode,
     PagedLogs,
     PagedRuns,
     RunRequest,
@@ -17,6 +22,7 @@ from .models import (
     SaveRequest,
     SaveResponse,
     WorkflowDetail,
+    WorkflowGraph,
     WorkflowLog,
     WorkflowSummary,
     now_iso,
@@ -209,3 +215,165 @@ async def confirm_workflow(
         runId=run_id,
         stage=payload.stage,
     )
+
+
+# === Graph Visualization Endpoints ===
+
+
+def get_workflow_graph_topology() -> WorkflowGraph:
+    """Return the current LangGraph node topology.
+
+    This reflects the graph structure defined in workflow/graph.py
+    """
+    nodes = [
+        GraphNode(id="parse_requirements", label="需求解析", position={"x": 100, "y": 100}),
+        GraphNode(id="peer1_plan", label="Peer1 规划", position={"x": 300, "y": 100}),
+        GraphNode(id="peer2_review", label="Peer2 审核", position={"x": 500, "y": 100}),
+        GraphNode(id="foreman_summary", label="Foreman 汇总", position={"x": 700, "y": 100}),
+        GraphNode(id="dispatch_tasks", label="任务分发", position={"x": 900, "y": 100}),
+    ]
+    edges = [
+        GraphEdge(id="e1", source="parse_requirements", target="peer1_plan"),
+        GraphEdge(id="e2", source="peer1_plan", target="peer2_review"),
+        GraphEdge(id="e3", source="peer2_review", target="foreman_summary"),
+        GraphEdge(id="e4", source="foreman_summary", target="dispatch_tasks"),
+    ]
+    return WorkflowGraph(nodes=nodes, edges=edges)
+
+
+@app.get("/api/workflows/{workflow_id}/graph", response_model=WorkflowGraph)
+def get_workflow_graph(workflow_id: str):
+    """Get the node topology for a workflow."""
+    # Validate workflow exists
+    workflow_exists = any(w.id == workflow_id for w in WORKFLOWS)
+    if not workflow_exists:
+        raise HTTPException(status_code=404, detail="未找到工作流")
+
+    return get_workflow_graph_topology()
+
+
+# Store active SSE connections for each run
+_active_streams: dict[str, asyncio.Queue] = {}
+
+
+async def sse_event_generator(run_id: str):
+    """Generate SSE events for a workflow run."""
+    queue = asyncio.Queue()
+    _active_streams[run_id] = queue
+
+    try:
+        # Send initial state
+        graph = get_workflow_graph_topology()
+        for node in graph.nodes:
+            event_data = {
+                "node": node.id,
+                "status": "pending",
+                "timestamp": now_iso(),
+            }
+            yield f"event: node_update\ndata: {json.dumps(event_data)}\n\n"
+
+        # Stream updates from queue
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                if event is None:  # Sentinel to stop
+                    break
+                yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
+
+                # Check for workflow completion
+                if event.get("event") == "workflow_complete":
+                    break
+            except asyncio.TimeoutError:
+                # Send keepalive
+                yield ": keepalive\n\n"
+    finally:
+        _active_streams.pop(run_id, None)
+
+
+@app.get("/api/workflows/{workflow_id}/runs/{run_id}/stream")
+async def stream_workflow_run(
+    workflow_id: str,
+    run_id: str,
+    demo: bool = Query(False, description="Enable demo mode with simulated events"),
+):
+    """SSE endpoint for real-time workflow execution status.
+
+    Args:
+        workflow_id: The workflow ID
+        run_id: The run ID to stream
+        demo: If True, simulate node execution for frontend development
+    """
+    # Validate workflow exists
+    workflow_exists = any(w.id == workflow_id for w in WORKFLOWS)
+    if not workflow_exists:
+        raise HTTPException(status_code=404, detail="未找到工作流")
+
+    if demo:
+        return StreamingResponse(
+            demo_sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    return StreamingResponse(
+        sse_event_generator(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
+
+
+async def demo_sse_generator():
+    """Generate demo SSE events to simulate workflow execution."""
+    nodes = ["parse_requirements", "peer1_plan", "peer2_review", "foreman_summary", "dispatch_tasks"]
+    outputs = [
+        "需求已解析: MVP focus with human confirmation checkpoints",
+        "规划完成: 1) Define workflow nodes 2) Add confirmation 3) Implement Temporal",
+        "审核通过: Plan is coherent for MVP, no blocking issues",
+        "汇总完成: All peer outputs consolidated, ready for dispatch",
+        "任务已分发: 3 tasks created and assigned",
+    ]
+
+    # Send initial pending state
+    for node in nodes:
+        event_data = {"node": node, "status": "pending", "timestamp": now_iso()}
+        yield f"event: node_update\ndata: {json.dumps(event_data)}\n\n"
+
+    await asyncio.sleep(0.5)
+
+    # Simulate node execution
+    for i, node in enumerate(nodes):
+        # Node starts running
+        event_data = {"node": node, "status": "running", "timestamp": now_iso()}
+        yield f"event: node_update\ndata: {json.dumps(event_data)}\n\n"
+
+        # Simulate some output
+        await asyncio.sleep(1.0)
+        output_data = {"node": node, "output": outputs[i], "timestamp": now_iso()}
+        yield f"event: node_output\ndata: {json.dumps(output_data)}\n\n"
+
+        # Node completes
+        await asyncio.sleep(0.5)
+        event_data = {"node": node, "status": "completed", "timestamp": now_iso()}
+        yield f"event: node_update\ndata: {json.dumps(event_data)}\n\n"
+
+    # Workflow complete
+    complete_data = {"status": "success", "result": {"tasks": 3}, "timestamp": now_iso()}
+    yield f"event: workflow_complete\ndata: {json.dumps(complete_data)}\n\n"
+
+
+def push_node_event(run_id: str, event_type: str, data: dict):
+    """Push an event to a running SSE stream.
+
+    Called from workflow execution to update clients.
+    """
+    queue = _active_streams.get(run_id)
+    if queue:
+        queue.put_nowait({"event": event_type, "data": data})

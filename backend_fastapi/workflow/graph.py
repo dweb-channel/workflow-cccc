@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, TypedDict
+import asyncio
+from typing import Any, Callable, List, Optional, TypedDict
 
 from langgraph.graph import END, StateGraph
 
@@ -76,6 +77,34 @@ def build_planning_graph():
     return graph.compile()
 
 
-def run_planning_graph(state: WorkflowState) -> WorkflowState:
+def run_planning_graph(
+    state: WorkflowState,
+    on_node_event: Optional[Callable[[str, str, Any], None]] = None,
+) -> WorkflowState:
+    """Run the planning graph with optional event callback.
+
+    Args:
+        state: The initial workflow state
+        on_node_event: Optional callback(node_name, status, output)
+                       status is 'running' or 'completed'
+    """
     graph = build_planning_graph()
-    return graph.invoke(state)
+
+    # If no callback, just run normally
+    if on_node_event is None:
+        return graph.invoke(state)
+
+    # Run with streaming to capture node events
+    result = state
+    for event in graph.stream(state):
+        # event is a dict like {'peer1_plan': {'plan': '...'}}
+        for node_name, node_output in event.items():
+            on_node_event(node_name, "completed", node_output)
+            result = {**result, **node_output}
+
+    return result
+
+
+def get_graph_nodes() -> List[str]:
+    """Return the list of node names in execution order."""
+    return ["peer1_plan", "peer2_review", "foreman_summary", "dispatch_tasks"]
