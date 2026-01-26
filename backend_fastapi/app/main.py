@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(__file__).rsplit("/app/", 1)[0])
+from workflow.logging_config import get_sse_logger
+
+logger = get_sse_logger()
 
 from .models import (
     ConfirmRequest,
     ConfirmResponse,
     GraphEdge,
     GraphNode,
+    GraphNodeData,
     PagedLogs,
     PagedRuns,
     RunRequest,
@@ -221,16 +230,36 @@ async def confirm_workflow(
 
 
 def get_workflow_graph_topology() -> WorkflowGraph:
-    """Return the current LangGraph node topology.
+    """Return the current LangGraph node topology in React Flow format.
 
     This reflects the graph structure defined in workflow/graph.py
     """
     nodes = [
-        GraphNode(id="parse_requirements", label="需求解析", position={"x": 100, "y": 100}),
-        GraphNode(id="peer1_plan", label="Peer1 规划", position={"x": 300, "y": 100}),
-        GraphNode(id="peer2_review", label="Peer2 审核", position={"x": 500, "y": 100}),
-        GraphNode(id="foreman_summary", label="Foreman 汇总", position={"x": 700, "y": 100}),
-        GraphNode(id="dispatch_tasks", label="任务分发", position={"x": 900, "y": 100}),
+        GraphNode(
+            id="parse_requirements",
+            data=GraphNodeData(label="需求解析", status="pending"),
+            position={"x": 100, "y": 100},
+        ),
+        GraphNode(
+            id="peer1_plan",
+            data=GraphNodeData(label="Peer1 规划", status="pending"),
+            position={"x": 300, "y": 100},
+        ),
+        GraphNode(
+            id="peer2_review",
+            data=GraphNodeData(label="Peer2 审核", status="pending"),
+            position={"x": 500, "y": 100},
+        ),
+        GraphNode(
+            id="foreman_summary",
+            data=GraphNodeData(label="Foreman 汇总", status="pending"),
+            position={"x": 700, "y": 100},
+        ),
+        GraphNode(
+            id="dispatch_tasks",
+            data=GraphNodeData(label="任务分发", status="pending"),
+            position={"x": 900, "y": 100},
+        ),
     ]
     edges = [
         GraphEdge(id="e1", source="parse_requirements", target="peer1_plan"),
@@ -254,10 +283,13 @@ def get_workflow_graph(workflow_id: str):
 
 # Store active SSE connections for each run
 _active_streams: dict[str, asyncio.Queue] = {}
+# Buffer events before SSE connection is established
+_event_buffers: dict[str, list] = {}
 
 
 async def sse_event_generator(run_id: str):
     """Generate SSE events for a workflow run."""
+    logger.info(f"🔗 Client connected for run_id: {run_id}")
     queue = asyncio.Queue()
     _active_streams[run_id] = queue
 
@@ -271,6 +303,12 @@ async def sse_event_generator(run_id: str):
                 "timestamp": now_iso(),
             }
             yield f"event: node_update\ndata: {json.dumps(event_data)}\n\n"
+
+        # Flush any buffered events that arrived before SSE connection
+        buffered = _event_buffers.pop(run_id, [])
+        logger.info(f"📤 Flushing {len(buffered)} buffered events for {run_id}")
+        for event in buffered:
+            yield f"event: {event['event']}\ndata: {json.dumps(event['data'])}\n\n"
 
         # Stream updates from queue
         while True:
@@ -288,6 +326,7 @@ async def sse_event_generator(run_id: str):
                 yield ": keepalive\n\n"
     finally:
         _active_streams.pop(run_id, None)
+        _event_buffers.pop(run_id, None)  # Clean up any remaining buffer
 
 
 @app.get("/api/workflows/{workflow_id}/runs/{run_id}/stream")
@@ -373,7 +412,34 @@ def push_node_event(run_id: str, event_type: str, data: dict):
     """Push an event to a running SSE stream.
 
     Called from workflow execution to update clients.
+    If SSE connection not yet established, buffer events for later delivery.
     """
+    event = {"event": event_type, "data": data}
     queue = _active_streams.get(run_id)
     if queue:
-        queue.put_nowait({"event": event_type, "data": data})
+        queue.put_nowait(event)
+        logger.info(f"📨 Event sent to queue: {event_type} for {run_id}")
+    else:
+        # Buffer events until SSE connection is established
+        _event_buffers.setdefault(run_id, []).append(event)
+        buffer_size = len(_event_buffers[run_id])
+        logger.info(f"📦 Event buffered ({buffer_size}): {event_type} for {run_id}")
+
+
+# === Internal API for Activity Callbacks ===
+
+
+class InternalEventRequest(BaseModel):
+    event_type: str
+    data: dict
+
+
+@app.post("/api/internal/events/{run_id}")
+async def push_event_endpoint(run_id: str, payload: InternalEventRequest):
+    """Internal endpoint for activities to push SSE events.
+
+    Called by Temporal activities to update workflow execution status.
+    """
+    logger.info(f"📥 Received event via API: {payload.event_type} for {run_id}")
+    push_node_event(run_id, payload.event_type, payload.data)
+    return {"status": "ok", "run_id": run_id}

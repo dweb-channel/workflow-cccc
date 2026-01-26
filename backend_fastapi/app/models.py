@@ -95,10 +95,15 @@ class ConfirmResponse(BaseModel):
 # === Graph Visualization Models ===
 
 
+class GraphNodeData(BaseModel):
+    label: str
+    status: str = "pending"  # pending | running | completed | failed
+
+
 class GraphNode(BaseModel):
     id: str
-    type: str = "agent"
-    label: str
+    type: str = "agentNode"
+    data: GraphNodeData
     position: dict = Field(default_factory=lambda: {"x": 0, "y": 0})
 
 

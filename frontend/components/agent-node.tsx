@@ -3,7 +3,7 @@
 import { memo } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
-export type AgentNodeStatus = "pending" | "running" | "completed" | "failed";
+export type AgentNodeStatus = "pending" | "running" | "completed" | "failed" | "waiting_peer";
 
 export interface AgentNodeData {
   label: string;
@@ -17,6 +17,7 @@ const STATUS_STYLES: Record<AgentNodeStatus, { bg: string; border: string; dot: 
   running: { bg: "bg-blue-50", border: "border-blue-300", dot: "bg-blue-500 animate-pulse" },
   completed: { bg: "bg-emerald-50", border: "border-emerald-300", dot: "bg-emerald-500" },
   failed: { bg: "bg-red-50", border: "border-red-300", dot: "bg-red-500" },
+  waiting_peer: { bg: "bg-purple-50", border: "border-purple-300", dot: "bg-purple-500 animate-pulse" },
 };
 
 function AgentNodeComponent({ data }: NodeProps) {
@@ -34,12 +35,6 @@ function AgentNodeComponent({ data }: NodeProps) {
         <span className={`h-2.5 w-2.5 rounded-full ${styles.dot}`} />
         <span className="font-medium text-slate-800">{nodeData.label}</span>
       </div>
-
-      {nodeData.output && (
-        <div className="mt-2 max-h-[80px] overflow-auto rounded-lg bg-white/60 p-2 text-xs text-slate-600">
-          {nodeData.output}
-        </div>
-      )}
 
       <Handle type="source" position={Position.Right} className="!bg-slate-400" />
     </div>

@@ -151,9 +151,9 @@ export default function CanvasPage() {
   const handleConnect = useCallback(() => {
     if (isConnected) return;
 
-    const cleanup = connectSSE("wf-001", "test-run", handleSSEEvent, { demo: true });
+    const cleanup = connectSSE("wf-001", "test-run", handleSSEEvent);
     setIsConnected(true);
-    setLogs((prev) => [...prev, "[CONNECTED] SSE stream connected (demo mode)"]);
+    setLogs((prev) => [...prev, "[CONNECTED] SSE stream connected"]);
 
     // Cleanup on unmount handled by effect
     return cleanup;

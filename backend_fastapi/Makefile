@@ -13,6 +13,10 @@ help:
 
 # 一键启动所有服务
 dev:
+	@echo "🧹 清理已有进程..."
+	@pkill -f "workflow.run_worker" 2>/dev/null || true
+	@pkill -f "temporal server" 2>/dev/null || true
+	@sleep 1
 	@echo "🚀 启动 Temporal Server..."
 	@temporal server start-dev > /tmp/temporal.log 2>&1 &
 	@sleep 3

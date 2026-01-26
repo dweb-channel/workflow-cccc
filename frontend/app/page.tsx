@@ -1,6 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import {
+  ReactFlow,
+  Controls,
+  Background,
+  useNodesState,
+  useEdgesState,
+  BackgroundVariant,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +45,36 @@ import {
   saveWorkflow,
 } from "@/lib/api";
 import { WorkflowConfirmDialog } from "@/components/workflow-confirm-dialog";
+import { AgentNode, type AgentNodeData, type AgentNodeStatus } from "@/components/agent-node";
+import { NodeDetailPanel } from "@/components/node-detail-panel";
+import { connectSSE, type SSEEvent } from "@/lib/sse";
+
+const nodeTypes = { agentNode: AgentNode };
+
+type FlowNode = {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: AgentNodeData;
+};
+
+type FlowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  animated?: boolean;
+  style?: Record<string, unknown>;
+};
+
+interface GraphData {
+  nodes: Array<{
+    id: string;
+    type: string;
+    data: { label: string; status: AgentNodeStatus };
+    position: { x: number; y: number };
+  }>;
+  edges: Array<{ id: string; source: string; target: string }>;
+}
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: "草稿", color: "bg-slate-500" },
@@ -44,6 +83,25 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
   failed: { label: "失败", color: "bg-red-500" },
   paused: { label: "已暂停", color: "bg-amber-500" },
 };
+
+// Node ID to Chinese label mapping
+const NODE_LABELS: Record<string, string> = {
+  parse_requirements: "需求解析",
+  peer1_plan: "Peer1 规划",
+  peer2_review: "Peer2 审核",
+  foreman_summary: "Foreman 汇总",
+  dispatch_tasks: "任务分发",
+  final_output: "最终输出",
+};
+
+// Execution status for progress display
+interface ExecutionStatus {
+  isRunning: boolean;
+  currentNode: string | null;
+  completedNodes: string[];
+  error: string | null;
+  sseEvents: Array<{ time: string; type: string; message: string }>;
+}
 
 const PRIORITY_OPTIONS = [
   { value: "low", label: "低" },
@@ -91,6 +149,123 @@ export default function Page() {
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
 
+  // Execution status for progress display
+  const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
+    isRunning: false,
+    currentNode: null,
+    completedNodes: [],
+    error: null,
+    sseEvents: [],
+  });
+
+  // React Flow state
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
+
+  // Selected node for detail panel
+  const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+
+  // SSE connection cleanup
+  const sseCleanupRef = useRef<(() => void) | null>(null);
+
+  // Handle SSE events to update node status
+  const handleSSEEvent = useCallback(
+    (event: SSEEvent) => {
+      const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+
+      if (event.type === "node_update") {
+        const { node, status } = event.data;
+        const nodeLabel = NODE_LABELS[node] || node;
+
+        // Update node visual state
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node ? { ...n, data: { ...n.data, status } } : n
+          )
+        );
+
+        // Animate edge when node starts running
+        if (status === "running") {
+          setEdges((eds) =>
+            eds.map((e) =>
+              e.target === node ? { ...e, animated: true } : e
+            )
+          );
+          // Update execution status
+          setExecutionStatus((prev) => ({
+            ...prev,
+            currentNode: node,
+            sseEvents: [
+              { time: timestamp, type: "running", message: `${nodeLabel} 开始执行...` },
+              ...prev.sseEvents.slice(0, 49), // Keep last 50 events
+            ],
+          }));
+        } else if (status === "completed") {
+          setEdges((eds) =>
+            eds.map((e) =>
+              e.target === node ? { ...e, animated: false } : e
+            )
+          );
+          // Update execution status
+          setExecutionStatus((prev) => ({
+            ...prev,
+            currentNode: null,
+            completedNodes: [...prev.completedNodes, node],
+            sseEvents: [
+              { time: timestamp, type: "completed", message: `${nodeLabel} 执行完成` },
+              ...prev.sseEvents.slice(0, 49),
+            ],
+          }));
+        } else if (status === "failed") {
+          setEdges((eds) =>
+            eds.map((e) =>
+              e.target === node ? { ...e, animated: false } : e
+            )
+          );
+          // Update execution status with error
+          setExecutionStatus((prev) => ({
+            ...prev,
+            currentNode: null,
+            error: `${nodeLabel} 执行失败`,
+            isRunning: false,
+            sseEvents: [
+              { time: timestamp, type: "error", message: `${nodeLabel} 执行失败` },
+              ...prev.sseEvents.slice(0, 49),
+            ],
+          }));
+        }
+      } else if (event.type === "node_output") {
+        const { node, output } = event.data;
+        const nodeLabel = NODE_LABELS[node] || node;
+
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node ? { ...n, data: { ...n.data, output } } : n
+          )
+        );
+
+        // Log output event
+        setExecutionStatus((prev) => ({
+          ...prev,
+          sseEvents: [
+            { time: timestamp, type: "output", message: `${nodeLabel} 输出: ${typeof output === 'string' ? output.slice(0, 100) : '...'}`},
+            ...prev.sseEvents.slice(0, 49),
+          ],
+        }));
+      }
+    },
+    [setNodes, setEdges]
+  );
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+      }
+    };
+  }, []);
+
   // Confirm dialog state
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmRunId, setConfirmRunId] = useState<string | null>(null);
@@ -102,6 +277,7 @@ export default function Page() {
   const [schedule, setSchedule] = useState("");
   const [notifyBot, setNotifyBot] = useState(true);
   const [nodeConfig, setNodeConfig] = useState("");
+  const [requestText, setRequestText] = useState("");  // Feature description input
 
   // Pagination state
   const [logsPage, setLogsPage] = useState(1);
@@ -145,6 +321,66 @@ export default function Page() {
     }
   }, []);
 
+  const loadGraph = useCallback(async (workflowId: string) => {
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const res = await fetch(`${baseUrl}/api/workflows/${workflowId}/graph`);
+      const data: GraphData = await res.json();
+
+      // Use API data directly - backend returns React Flow compatible format
+      const flowNodes: FlowNode[] = data.nodes.map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: n.data,
+      }));
+
+      const flowEdges: FlowEdge[] = data.edges.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        style: { stroke: "#94a3b8", strokeWidth: 2 },
+      }));
+
+      setNodes(flowNodes);
+      setEdges(flowEdges);
+    } catch (err) {
+      console.error("加载流程图失败:", err);
+      // Fallback mock data for development
+      setNodes([
+        {
+          id: "parse_requirements",
+          type: "agentNode",
+          position: { x: 100, y: 100 },
+          data: { label: "需求解析", status: "pending" },
+        },
+        {
+          id: "peer1_plan",
+          type: "agentNode",
+          position: { x: 350, y: 50 },
+          data: { label: "Peer1 规划", status: "pending" },
+        },
+        {
+          id: "peer2_review",
+          type: "agentNode",
+          position: { x: 600, y: 100 },
+          data: { label: "Peer2 审核", status: "pending" },
+        },
+        {
+          id: "final_output",
+          type: "agentNode",
+          position: { x: 850, y: 100 },
+          data: { label: "最终输出", status: "pending" },
+        },
+      ]);
+      setEdges([
+        { id: "e1", source: "parse_requirements", target: "peer1_plan", style: { stroke: "#94a3b8", strokeWidth: 2 } },
+        { id: "e2", source: "peer1_plan", target: "peer2_review", style: { stroke: "#94a3b8", strokeWidth: 2 } },
+        { id: "e3", source: "peer2_review", target: "final_output", style: { stroke: "#94a3b8", strokeWidth: 2 } },
+      ]);
+    }
+  }, [setNodes, setEdges]);
+
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -157,6 +393,7 @@ export default function Page() {
             loadWorkflow(workflowId),
             loadLogs(workflowId, 1),
             loadRuns(workflowId, 1),
+            loadGraph(workflowId),
           ]);
         } else {
           setError("未找到工作流");
@@ -168,15 +405,51 @@ export default function Page() {
       }
     }
     init();
-  }, [loadWorkflow, loadLogs, loadRuns]);
+  }, [loadWorkflow, loadLogs, loadRuns, loadGraph]);
 
   const handleRun = async () => {
     if (!workflow) return;
     setRunning(true);
+
+    // Reset execution status
+    setExecutionStatus({
+      isRunning: true,
+      currentNode: null,
+      completedNodes: [],
+      error: null,
+      sseEvents: [{ time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), type: "info", message: "工作流启动中..." }],
+    });
+
     try {
-      await runWorkflow(workflow.id, {
+      // Cleanup previous SSE connection
+      if (sseCleanupRef.current) {
+        sseCleanupRef.current();
+        sseCleanupRef.current = null;
+      }
+
+      // Reset node states to pending
+      setNodes((nds) =>
+        nds.map((n) => ({ ...n, data: { ...n.data, status: "pending" as AgentNodeStatus, output: undefined } }))
+      );
+
+      const result = await runWorkflow(workflow.id, {
+        request: requestText || undefined,
         parameters: { trigger, priority, schedule, notifyBot },
       });
+
+      // Update status after successful start
+      setExecutionStatus((prev) => ({
+        ...prev,
+        sseEvents: [
+          { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), type: "info", message: `工作流已启动 (runId: ${result.runId.slice(0, 8)}...)` },
+          ...prev.sseEvents.slice(0, 49),
+        ],
+      }));
+
+      // Connect SSE to receive real-time updates
+      const cleanup = connectSSE(workflow.id, result.runId, handleSSEEvent);
+      sseCleanupRef.current = cleanup;
+
       // Reload workflow and logs
       await Promise.all([
         loadWorkflow(workflow.id),
@@ -184,7 +457,16 @@ export default function Page() {
         loadRuns(workflow.id, 1),
       ]);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "运行失败");
+      const errorMsg = err instanceof Error ? err.message : "运行失败";
+      setExecutionStatus((prev) => ({
+        ...prev,
+        isRunning: false,
+        error: errorMsg,
+        sseEvents: [
+          { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), type: "error", message: errorMsg },
+          ...prev.sseEvents.slice(0, 49),
+        ],
+      }));
     } finally {
       setRunning(false);
     }
@@ -296,26 +578,78 @@ export default function Page() {
         </CardHeader>
       </Card>
 
+      {/* Execution Status Banner */}
+      {(executionStatus.isRunning || executionStatus.currentNode || executionStatus.error || executionStatus.sseEvents.length > 0) && (
+        <Card className={`border-l-4 ${executionStatus.error ? 'border-l-red-500 bg-red-50' : executionStatus.isRunning ? 'border-l-emerald-500 bg-emerald-50' : 'border-l-slate-300 bg-slate-50'}`}>
+          <CardContent className="py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {executionStatus.isRunning && !executionStatus.error && (
+                  <div className="h-3 w-3 animate-pulse rounded-full bg-emerald-500" />
+                )}
+                {executionStatus.error && (
+                  <div className="h-3 w-3 rounded-full bg-red-500" />
+                )}
+                <div>
+                  <p className={`text-sm font-medium ${executionStatus.error ? 'text-red-700' : 'text-slate-700'}`}>
+                    {executionStatus.error
+                      ? `执行失败: ${executionStatus.error}`
+                      : executionStatus.currentNode
+                        ? `正在执行: ${NODE_LABELS[executionStatus.currentNode] || executionStatus.currentNode}`
+                        : executionStatus.isRunning
+                          ? "工作流运行中..."
+                          : executionStatus.completedNodes.length > 0
+                            ? `已完成 ${executionStatus.completedNodes.length} 个节点`
+                            : "就绪"
+                    }
+                  </p>
+                  {executionStatus.completedNodes.length > 0 && !executionStatus.error && (
+                    <p className="text-xs text-slate-500">
+                      已完成: {executionStatus.completedNodes.map(n => NODE_LABELS[n] || n).join(" → ")}
+                    </p>
+                  )}
+                </div>
+              </div>
+              {executionStatus.sseEvents.length > 0 && (
+                <Badge variant="outline" className="text-xs">
+                  {executionStatus.sseEvents.length} 条事件
+                </Badge>
+              )}
+            </div>
+            {/* Recent SSE Events */}
+            {executionStatus.sseEvents.length > 0 && (
+              <div className="mt-2 max-h-24 overflow-y-auto rounded bg-white/50 p-2 text-xs font-mono">
+                {executionStatus.sseEvents.slice(0, 5).map((event, idx) => (
+                  <div key={idx} className={`${event.type === 'error' ? 'text-red-600' : event.type === 'completed' ? 'text-emerald-600' : 'text-slate-600'}`}>
+                    <span className="text-slate-400">[{event.time}]</span> {event.message}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
         <Card className="flex h-[520px] flex-col">
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between py-3">
             <CardTitle>流程画布</CardTitle>
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm">
-                放大
-              </Button>
-              <Button variant="secondary" size="sm">
-                缩小
-              </Button>
-              <Button variant="secondary" size="sm">
-                自动布局
-              </Button>
-            </div>
           </CardHeader>
-          <CardContent className="flex-1">
-            <div className="flex h-full flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-400">
-              拖拽节点到画布以构建流程
-            </div>
+          <CardContent className="flex-1 p-0">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(_, node) => setSelectedNode(node as FlowNode)}
+              onPaneClick={() => setSelectedNode(null)}
+              nodeTypes={nodeTypes}
+              fitView
+              className="bg-slate-50"
+            >
+              <Controls />
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+            </ReactFlow>
           </CardContent>
         </Card>
 
@@ -324,6 +658,16 @@ export default function Page() {
             <CardTitle>运行参数</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
+            <div className="space-y-2">
+              <Label className="text-base font-medium">功能描述</Label>
+              <Textarea
+                placeholder="请输入你想实现的功能，例如：实现一个用户登录功能，支持邮箱和手机号登录"
+                value={requestText}
+                onChange={(e) => setRequestText(e.target.value)}
+                className="min-h-[80px] border-emerald-200 focus:border-emerald-500"
+              />
+              <p className="text-xs text-slate-500">这是工作流的第一步输入，将被解析并分发给各个 Agent 处理</p>
+            </div>
             <div className="space-y-2">
               <Label>触发人</Label>
               <Select value={trigger} onValueChange={setTrigger}>
@@ -559,6 +903,12 @@ export default function Page() {
         runId={confirmRunId || ""}
         stage={confirmStage}
         onConfirmed={handleConfirmed}
+      />
+
+      {/* Node Detail Panel */}
+      <NodeDetailPanel
+        node={selectedNode}
+        onClose={() => setSelectedNode(null)}
       />
     </main>
   );

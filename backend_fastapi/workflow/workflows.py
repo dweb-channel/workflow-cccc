@@ -22,12 +22,14 @@ class BusinessWorkflow:
 
     @workflow.run
     async def run(self, request: str) -> dict:
-        self._state = {"request": request}
+        # Include run_id for SSE event tracking
+        run_id = workflow.info().workflow_id
+        self._state = {"request": request, "run_id": run_id}
 
         self._state = await workflow.execute_activity(
             parse_requirements,
             self._state,
-            schedule_to_close_timeout=timedelta(seconds=30),
+            schedule_to_close_timeout=timedelta(minutes=2),
         )
 
         await workflow.wait_condition(lambda: self._initial_decision is not None)
@@ -46,7 +48,7 @@ class BusinessWorkflow:
         self._state = await workflow.execute_activity(
             plan_review_dispatch,
             self._state,
-            schedule_to_close_timeout=timedelta(seconds=30),
+            schedule_to_close_timeout=timedelta(minutes=10),
         )
 
         await workflow.wait_condition(lambda: self._final_decision is not None)
