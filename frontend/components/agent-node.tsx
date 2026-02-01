@@ -46,30 +46,30 @@ function AgentNodeComponent({ data }: NodeProps) {
 
   return (
     <div
-      className={`min-w-[180px] rounded-xl border-2 px-4 py-3 shadow-sm ${styles.bg} ${styles.border} ${
+      className={`min-w-[140px] max-w-[200px] rounded-lg border-2 px-3 py-2 shadow-sm ${styles.bg} ${styles.border} ${
         isEdit ? "ring-1 ring-blue-200" : ""
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className={isEdit ? "!h-3 !w-3 !bg-blue-400 !border-2 !border-white" : "!bg-slate-400"}
+        className={isEdit ? "!h-2.5 !w-2.5 !bg-blue-400 !border-2 !border-white" : "!bg-slate-400"}
       />
 
-      <div className="flex items-center gap-2">
-        <span className={`h-2.5 w-2.5 rounded-full ${styles.dot}`} />
-        {isEdit && <span className="text-sm">{icon}</span>}
-        <span className="font-medium text-slate-800">{nodeData.label}</span>
+      <div className="flex items-center gap-1.5">
+        <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
+        {isEdit && <span className="text-xs">{icon}</span>}
+        <span className="text-sm font-medium text-slate-800">{nodeData.label}</span>
       </div>
 
       {isEdit && nodeData.nodeType && (
-        <p className="mt-1 text-[10px] text-slate-400">{nodeData.nodeType}</p>
+        <p className="mt-0.5 text-[10px] text-slate-400">{nodeData.nodeType}</p>
       )}
 
       <Handle
         type="source"
         position={Position.Right}
-        className={isEdit ? "!h-3 !w-3 !bg-blue-400 !border-2 !border-white" : "!bg-slate-400"}
+        className={isEdit ? "!h-2.5 !w-2.5 !bg-blue-400 !border-2 !border-white" : "!bg-slate-400"}
       />
     </div>
   );

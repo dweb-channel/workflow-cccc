@@ -32,26 +32,67 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
   const [label, setLabel] = useState("");
   const [nodeType, setNodeType] = useState("");
   const [configJson, setConfigJson] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [initialized, setInitialized] = useState(false);
 
+  // Only re-initialize when a different node is selected (by id), not on every data change
+  const nodeId = node?.id;
   useEffect(() => {
     if (node) {
       setLabel(node.data.label || "");
       setNodeType(node.data.nodeType || "");
       setConfigJson(JSON.stringify(node.data.config || {}, null, 2));
+      setErrors({});
+      setInitialized(false);
+      requestAnimationFrame(() => setInitialized(true));
     }
-  }, [node]);
+  }, [nodeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!node) return null;
-
-  const handleSave = () => {
+  // Auto-save to node data whenever label, nodeType, or configJson changes
+  useEffect(() => {
+    if (!node || !initialized) return;
     let config: Record<string, unknown> = {};
     try {
       config = JSON.parse(configJson);
     } catch {
-      // keep existing config on parse failure
       config = (node.data.config as Record<string, unknown>) || {};
     }
     onUpdate(node.id, { label, nodeType, config });
+  }, [label, nodeType, configJson]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!node) return null;
+
+  const validate = (): boolean => {
+    const errs: Record<string, string> = {};
+    if (!label.trim()) errs.label = "显示名称不能为空";
+    if (!nodeType) errs.nodeType = "请选择节点类型";
+
+    // Type-specific required field validation
+    let config: Record<string, unknown> = {};
+    try { config = JSON.parse(configJson); } catch { config = (node.data.config as Record<string, unknown>) || {}; }
+
+    if (nodeType === "llm_agent" && !((config.prompt as string) || "").trim()) {
+      errs.prompt = "LLM Agent 的 Prompt 不能为空";
+    }
+    if (nodeType === "cccc_peer") {
+      if (!((config.peer_id as string) || "").trim()) errs.peer_id = "Peer ID 不能为空";
+      if (!((config.prompt as string) || "").trim()) errs.prompt = "Prompt 不能为空";
+      if (!((config.group_id as string) || "").trim()) errs.group_id = "Group ID 不能为空";
+    }
+    if (nodeType === "http_request" && !((config.url as string) || "").trim()) {
+      errs.url = "URL 不能为空";
+    }
+    if (nodeType === "condition" && !((config.condition as string) || "").trim()) {
+      errs.condition = "条件表达式不能为空";
+    }
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSave = () => {
+    if (!validate()) return;
+    onClose();
   };
 
   const handleDelete = () => {
@@ -83,19 +124,21 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
 
           {/* Label */}
           <div className="space-y-1">
-            <Label>显示名称</Label>
+            <RequiredLabel>显示名称</RequiredLabel>
             <Input
               value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              onChange={(e) => { setLabel(e.target.value); setErrors((prev) => { const { label: _, ...rest } = prev; return rest; }); }}
               placeholder="节点名称"
+              className={errors.label ? "border-red-300 focus-visible:ring-red-400" : ""}
             />
+            <FieldError message={errors.label} />
           </div>
 
           {/* Node Type */}
           <div className="space-y-1">
-            <Label>节点类型</Label>
-            <Select value={nodeType} onValueChange={setNodeType}>
-              <SelectTrigger>
+            <RequiredLabel>节点类型</RequiredLabel>
+            <Select value={nodeType} onValueChange={(v) => { setNodeType(v); setErrors((prev) => { const { nodeType: _, ...rest } = prev; return rest; }); }}>
+              <SelectTrigger className={errors.nodeType ? "border-red-300 focus-visible:ring-red-400" : ""}>
                 <SelectValue placeholder="选择类型" />
               </SelectTrigger>
               <SelectContent>
@@ -108,7 +151,18 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
                 <SelectItem value="output">📤 输出</SelectItem>
               </SelectContent>
             </Select>
+            <FieldError message={errors.nodeType} />
           </div>
+
+          {/* Validation summary for type-specific fields */}
+          {(errors.prompt || errors.peer_id || errors.group_id || errors.url || errors.condition) && (
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
+              <p className="text-xs font-medium text-red-600">请补充必填字段：</p>
+              {Object.entries(errors).filter(([k]) => !["label", "nodeType"].includes(k)).map(([key, msg]) => (
+                <p key={key} className="text-[11px] text-red-500">- {msg}</p>
+              ))}
+            </div>
+          )}
 
           {/* Type-specific config fields */}
           {nodeType === "llm_agent" && (
@@ -172,6 +226,20 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
 
 // ============ Type-specific config forms ============
 
+function RequiredLabel({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <Label className={className}>
+      {children}
+      <span className="ml-0.5 text-red-500">*</span>
+    </Label>
+  );
+}
+
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <p className="text-[11px] text-red-500">{message}</p>;
+}
+
 function LLMAgentConfig({
   config,
   onChange,
@@ -192,6 +260,7 @@ function LLMAgentConfig({
     (config.timeout as number) || 300
   );
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     onChange({
@@ -203,19 +272,23 @@ function LLMAgentConfig({
     });
   }, [prompt, systemPrompt, cwd, timeout]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const promptError = touched && !prompt.trim() ? "Prompt 不能为空" : undefined;
+
   return (
     <div className="space-y-4 rounded-md border border-indigo-200 bg-indigo-50/50 p-3">
       <p className="text-xs font-medium text-indigo-600">LLM Agent 配置</p>
 
       {/* Prompt */}
       <div className="space-y-1">
-        <Label className="text-xs">Prompt 模板</Label>
+        <RequiredLabel className="text-xs">Prompt 模板</RequiredLabel>
         <Textarea
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => { setPrompt(e.target.value); setTouched(true); }}
+          onBlur={() => setTouched(true)}
           placeholder="请分析以下需求：&#10;&#10;{request}&#10;&#10;输出格式：JSON"
-          className="min-h-[100px] font-mono text-xs"
+          className={`min-h-[100px] font-mono text-xs ${promptError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
         />
+        <FieldError message={promptError} />
         <p className="text-[10px] text-slate-400">
           使用 {"{字段名}"} 引用上游节点输出
         </p>
@@ -284,6 +357,7 @@ function CCCCPeerConfig({
   const [timeout, setTimeout_] = useState(
     (config.timeout as number) || 120
   );
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     onChange({
@@ -296,19 +370,25 @@ function CCCCPeerConfig({
     });
   }, [peerId, prompt, command, groupId, timeout]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const peerIdError = touched.peer_id && !peerId.trim() ? "Peer ID 不能为空" : undefined;
+  const promptError = touched.prompt && !prompt.trim() ? "Prompt 不能为空" : undefined;
+  const groupIdError = touched.group_id && !groupId.trim() ? "Group ID 不能为空" : undefined;
+
   return (
     <div className="space-y-4 rounded-md border border-amber-200 bg-amber-50/50 p-3">
       <p className="text-xs font-medium text-amber-600">CCCC Peer 配置</p>
 
       {/* Peer ID */}
       <div className="space-y-1">
-        <Label className="text-xs">Peer ID</Label>
+        <RequiredLabel className="text-xs">Peer ID</RequiredLabel>
         <Input
           value={peerId}
-          onChange={(e) => setPeerId(e.target.value)}
-          placeholder="peer-impl"
-          className="text-xs"
+          onChange={(e) => { setPeerId(e.target.value); setTouched((t) => ({ ...t, peer_id: true })); }}
+          onBlur={() => setTouched((t) => ({ ...t, peer_id: true }))}
+          placeholder="domain-expert"
+          className={`text-xs ${peerIdError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
         />
+        <FieldError message={peerIdError} />
         <p className="text-[10px] text-slate-400">
           CCCC 组中的 peer actor ID
         </p>
@@ -316,13 +396,15 @@ function CCCCPeerConfig({
 
       {/* Prompt */}
       <div className="space-y-1">
-        <Label className="text-xs">Prompt 模板</Label>
+        <RequiredLabel className="text-xs">Prompt 模板</RequiredLabel>
         <Textarea
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => { setPrompt(e.target.value); setTouched((t) => ({ ...t, prompt: true })); }}
+          onBlur={() => setTouched((t) => ({ ...t, prompt: true }))}
           placeholder="请根据规划文档实现以下功能：&#10;&#10;{plan}"
-          className="min-h-[100px] font-mono text-xs"
+          className={`min-h-[100px] font-mono text-xs ${promptError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
         />
+        <FieldError message={promptError} />
         <p className="text-[10px] text-slate-400">
           使用 {"{字段名}"} 引用上游节点输出
         </p>
@@ -341,13 +423,15 @@ function CCCCPeerConfig({
           <p className="text-[10px] text-slate-400">可选，如 /brainstorm</p>
         </div>
         <div className="flex-1 space-y-1">
-          <Label className="text-xs">Group ID</Label>
+          <RequiredLabel className="text-xs">Group ID</RequiredLabel>
           <Input
             value={groupId}
-            onChange={(e) => setGroupId(e.target.value)}
-            placeholder="默认使用环境变量"
-            className="text-xs"
+            onChange={(e) => { setGroupId(e.target.value); setTouched((t) => ({ ...t, group_id: true })); }}
+            onBlur={() => setTouched((t) => ({ ...t, group_id: true }))}
+            placeholder="g_xxxxxx"
+            className={`text-xs ${groupIdError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
           />
+          <FieldError message={groupIdError} />
         </div>
       </div>
 
@@ -383,7 +467,7 @@ function HttpRequestConfig({
     <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-medium text-slate-500">HTTP 请求配置</p>
       <div className="space-y-1">
-        <Label className="text-xs">URL</Label>
+        <RequiredLabel className="text-xs">URL</RequiredLabel>
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -426,7 +510,7 @@ function ConditionConfig({
     <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-medium text-slate-500">条件分支配置</p>
       <div className="space-y-1">
-        <Label className="text-xs">条件表达式</Label>
+        <RequiredLabel className="text-xs">条件表达式</RequiredLabel>
         <Input
           value={condition}
           onChange={(e) => setCondition(e.target.value)}

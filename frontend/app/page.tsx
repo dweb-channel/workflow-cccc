@@ -26,6 +26,8 @@ import {
   runWorkflow,
   updateWorkflow,
   saveWorkflowGraph,
+  createWorkflow,
+  deleteWorkflow,
 } from "@/lib/api";
 import { AgentNode, type AgentNodeData, type AgentNodeStatus } from "@/components/agent-node";
 import { NodeDetailPanel } from "@/components/node-detail-panel";
@@ -92,10 +94,14 @@ let nodeIdCounter = 0;
 
 function WorkflowPage() {
   const [workflow, setWorkflow] = useState<V2WorkflowResponse | null>(null);
+  const [workflowList, setWorkflowList] = useState<V2WorkflowResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // Editor mode
   const [editorMode, setEditorMode] = useState<EditorMode>("view");
@@ -248,15 +254,19 @@ function WorkflowPage() {
     }
   }, [setNodes, setEdges, editorMode]);
 
+  const refreshWorkflowList = useCallback(async () => {
+    const result = await listWorkflows();
+    setWorkflowList(result.items);
+    return result.items;
+  }, []);
+
   useEffect(() => {
     async function init() {
       setLoading(true);
       try {
-        const result = await listWorkflows();
-        if (result.items.length > 0) {
-          await loadWorkflow(result.items[0].id);
-        } else {
-          setError("未找到工作流");
+        const items = await refreshWorkflowList();
+        if (items.length > 0) {
+          await loadWorkflow(items[0].id);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "初始化失败");
@@ -265,7 +275,65 @@ function WorkflowPage() {
       }
     }
     init();
-  }, [loadWorkflow]);
+  }, [loadWorkflow, refreshWorkflowList]);
+
+  const handleCreateWorkflow = useCallback(async () => {
+    const name = prompt("请输入工作流名称：", `工作流-${new Date().toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit" })}`);
+    if (!name?.trim()) return;
+    setCreating(true);
+    try {
+      const newWf = await createWorkflow({ name: name.trim() });
+      await refreshWorkflowList();
+      await loadWorkflow(newWf.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setCreating(false);
+    }
+  }, [refreshWorkflowList, loadWorkflow]);
+
+  const handleDeleteWorkflow = useCallback(async (id: string) => {
+    if (!confirm("确定删除此工作流？")) return;
+    try {
+      await deleteWorkflow(id);
+      const items = await refreshWorkflowList();
+      if (workflow?.id === id) {
+        if (items.length > 0) {
+          await loadWorkflow(items[0].id);
+        } else {
+          setWorkflow(null);
+          setNodes([]);
+          setEdges([]);
+        }
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "删除失败");
+    }
+  }, [refreshWorkflowList, loadWorkflow, workflow, setNodes, setEdges]);
+
+  const handleSwitchWorkflow = useCallback(async (id: string) => {
+    if (id === workflow?.id) return;
+    await loadWorkflow(id);
+  }, [workflow, loadWorkflow]);
+
+  const handleStartRename = useCallback((wf: V2WorkflowResponse, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRenamingId(wf.id);
+    setRenameValue(wf.name);
+  }, []);
+
+  const handleConfirmRename = useCallback(async (id: string) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) { setRenamingId(null); return; }
+    try {
+      const updated = await updateWorkflow(id, { name: trimmed });
+      await refreshWorkflowList();
+      if (workflow?.id === id) setWorkflow(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "重命名失败");
+    }
+    setRenamingId(null);
+  }, [renameValue, refreshWorkflowList, workflow]);
 
   // ============ Editor handlers ============
 
@@ -381,7 +449,6 @@ function WorkflowPage() {
         )
       );
       setGraphChanged(true);
-      setSelectedNode(null);
     },
     [setNodes]
   );
@@ -397,6 +464,37 @@ function WorkflowPage() {
 
   const handleSaveGraph = useCallback(async () => {
     if (!workflow) return;
+
+    // Client-side validation: check required fields per node type
+    const validationErrors: string[] = [];
+    for (const node of nodes) {
+      const data = node.data as AgentNodeData;
+      const cfg = (data.config as Record<string, unknown>) || {};
+      const nodeLabel = data.label || node.id;
+      const nodeType = data.nodeType || "";
+
+      if (nodeType === "llm_agent") {
+        if (!((cfg.prompt as string) || "").trim()) {
+          validationErrors.push(`「${nodeLabel}」: Prompt 不能为空`);
+        }
+      } else if (nodeType === "cccc_peer") {
+        if (!((cfg.peer_id as string) || "").trim()) {
+          validationErrors.push(`「${nodeLabel}」: Peer ID 不能为空`);
+        }
+        if (!((cfg.prompt as string) || "").trim()) {
+          validationErrors.push(`「${nodeLabel}」: Prompt 不能为空`);
+        }
+        if (!((cfg.group_id as string) || "").trim()) {
+          validationErrors.push(`「${nodeLabel}」: Group ID 不能为空`);
+        }
+      }
+    }
+
+    if (validationErrors.length > 0) {
+      alert("请补充必填字段：\n\n" + validationErrors.join("\n"));
+      return;
+    }
+
     setSavingGraph(true);
     try {
       const definition = toWorkflowDefinition(nodes, edges, workflow.name);
@@ -506,18 +604,88 @@ function WorkflowPage() {
     );
   }
 
-  if (!workflow) {
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-slate-500">未找到工作流</p>
-      </main>
-    );
-  }
-
-  const statusInfo = STATUS_MAP[workflow.status] || { label: workflow.status, color: "bg-slate-500" };
+  const statusInfo = workflow
+    ? STATUS_MAP[workflow.status] || { label: workflow.status, color: "bg-slate-500" }
+    : null;
 
   return (
-    <main className="mx-auto flex h-screen max-w-[1400px] flex-col gap-4 overflow-hidden px-6 py-6">
+    <main className="flex h-screen overflow-hidden">
+      {/* Workflow List Sidebar */}
+      <aside className="flex w-[220px] shrink-0 flex-col border-r border-slate-200 bg-slate-50">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <h2 className="text-sm font-semibold text-slate-700">工作流</h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-lg"
+            onClick={handleCreateWorkflow}
+            disabled={creating}
+          >
+            {creating ? "…" : "+"}
+          </Button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          {workflowList.length === 0 ? (
+            <p className="px-2 py-4 text-center text-xs text-slate-400">暂无工作流，点击 + 创建</p>
+          ) : (
+            workflowList.map((wf) => {
+              const active = wf.id === workflow?.id;
+              const wfStatus = STATUS_MAP[wf.status] || { label: wf.status, color: "bg-slate-500" };
+              return (
+                <div
+                  key={wf.id}
+                  className={`group mb-1 cursor-pointer rounded-lg px-3 py-2 transition-colors ${
+                    active ? "bg-white shadow-sm ring-1 ring-slate-200" : "hover:bg-white/60"
+                  }`}
+                  onClick={() => handleSwitchWorkflow(wf.id)}
+                  onDoubleClick={(e) => handleStartRename(wf, e)}
+                >
+                  <div className="flex items-center justify-between">
+                    {renamingId === wf.id ? (
+                      <input
+                        className="w-full rounded border border-blue-300 bg-white px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-blue-400"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onBlur={() => handleConfirmRename(wf.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleConfirmRename(wf.id);
+                          if (e.key === "Escape") setRenamingId(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        autoFocus
+                      />
+                    ) : (
+                      <span className={`truncate text-sm ${active ? "font-medium text-slate-900" : "text-slate-600"}`}>
+                        {wf.name}
+                      </span>
+                    )}
+                    {renamingId !== wf.id && (
+                      <button
+                        className="ml-1 hidden shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500 group-hover:block"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteWorkflow(wf.id); }}
+                        title="删除"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5">
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${wfStatus.color}`} />
+                    <span className="text-[10px] text-slate-400">{wfStatus.label}</span>
+                    <span className="text-[10px] text-slate-300">·</span>
+                    <span className="text-[10px] text-slate-400">{formatRelativeTime(wf.updated_at)}</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <div className="flex flex-1 flex-col gap-4 overflow-hidden px-6 py-6">
+      {workflow ? (
+      <>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
@@ -528,8 +696,8 @@ function WorkflowPage() {
           </div>
           <div className="flex items-center gap-3">
             <Badge>
-              <span className={`h-2 w-2 rounded-full ${statusInfo.color}`} />
-              {statusInfo.label}
+              <span className={`h-2 w-2 rounded-full ${statusInfo!.color}`} />
+              {statusInfo!.label}
             </Badge>
             <div className="flex items-center gap-2">
               <Button onClick={handleRun} disabled={running || editorMode === "edit"}>
@@ -545,57 +713,6 @@ function WorkflowPage() {
           </div>
         </CardHeader>
       </Card>
-
-      {/* Execution Status Banner */}
-      {(executionStatus.isRunning || executionStatus.currentNode || executionStatus.error || executionStatus.sseEvents.length > 0) && (
-        <Card className={`border-l-4 ${executionStatus.error ? 'border-l-red-500 bg-red-50' : executionStatus.isRunning ? 'border-l-emerald-500 bg-emerald-50' : 'border-l-slate-300 bg-slate-50'}`}>
-          <CardContent className="py-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {executionStatus.isRunning && !executionStatus.error && (
-                  <div className="h-3 w-3 animate-pulse rounded-full bg-emerald-500" />
-                )}
-                {executionStatus.error && (
-                  <div className="h-3 w-3 rounded-full bg-red-500" />
-                )}
-                <div>
-                  <p className={`text-sm font-medium ${executionStatus.error ? 'text-red-700' : 'text-slate-700'}`}>
-                    {executionStatus.error
-                      ? `执行失败: ${executionStatus.error}`
-                      : executionStatus.currentNode
-                        ? `正在执行: ${executionStatus.currentNode}`
-                        : executionStatus.isRunning
-                          ? "工作流运行中..."
-                          : executionStatus.completedNodes.length > 0
-                            ? `已完成 ${executionStatus.completedNodes.length} 个节点`
-                            : "就绪"
-                    }
-                  </p>
-                  {executionStatus.completedNodes.length > 0 && !executionStatus.error && (
-                    <p className="text-xs text-slate-500">
-                      已完成: {executionStatus.completedNodes.join(" → ")}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {executionStatus.sseEvents.length > 0 && (
-                <Badge className="text-xs border-slate-200 bg-slate-50 text-slate-700">
-                  {executionStatus.sseEvents.length} 条事件
-                </Badge>
-              )}
-            </div>
-            {executionStatus.sseEvents.length > 0 && (
-              <div className="mt-2 max-h-24 overflow-y-auto rounded bg-white/50 p-2 text-xs font-mono">
-                {executionStatus.sseEvents.slice(0, 5).map((event, idx) => (
-                  <div key={idx} className={`${event.type === 'error' ? 'text-red-600' : event.type === 'completed' ? 'text-emerald-600' : 'text-slate-600'}`}>
-                    <span className="text-slate-400">[{event.time}]</span> {event.message}
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       <section className="flex min-h-0 flex-1 gap-4">
         {/* Node Palette - visible in edit mode */}
@@ -638,6 +755,7 @@ function WorkflowPage() {
               nodesConnectable={editorMode === "edit"}
               deleteKeyCode={editorMode === "edit" ? "Backspace" : null}
               fitView
+              fitViewOptions={{ maxZoom: 1 }}
               className={editorMode === "edit" ? "bg-blue-50/30" : "bg-slate-50"}
             >
               <Controls />
@@ -699,11 +817,11 @@ function WorkflowPage() {
         )}
       </section>
 
-      {/* SSE Events Log */}
-      {executionStatus.sseEvents.length > 0 && (
+      {/* SSE Events Log (view mode only) */}
+      {editorMode === "view" && executionStatus.sseEvents.length > 0 && (
         <Card>
           <CardHeader className="py-3">
-            <CardTitle className="text-sm">执行事件</CardTitle>
+            <CardTitle className="text-sm">执行日志</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="max-h-48 overflow-y-auto rounded bg-slate-50 p-3 text-xs font-mono">
@@ -724,6 +842,15 @@ function WorkflowPage() {
           onClose={() => setSelectedNode(null)}
         />
       )}
+      </>
+      ) : (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <p className="text-slate-400">请从左侧选择工作流，或点击 + 创建新工作流</p>
+          </div>
+        </div>
+      )}
+      </div>
     </main>
   );
 }

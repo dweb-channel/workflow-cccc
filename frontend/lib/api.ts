@@ -10,7 +10,7 @@ export interface WorkflowParameters {
 }
 
 export interface ApiError {
-  detail: string;
+  detail: string | { message?: string; errors?: string[] };
 }
 
 // ============ V2 Types ============
@@ -98,7 +98,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
     const error: ApiError = await response.json().catch(() => ({
       detail: `HTTP ${response.status}: ${response.statusText}`,
     }));
-    throw new Error(error.detail);
+    const detail = error.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" && detail !== null
+          ? (detail as { message?: string }).message ?? JSON.stringify(detail)
+          : `HTTP ${response.status}: ${response.statusText}`;
+    throw new Error(message);
   }
   return response.json();
 }
@@ -152,7 +159,14 @@ export async function deleteWorkflow(id: string): Promise<void> {
     const error: ApiError = await response.json().catch(() => ({
       detail: `HTTP ${response.status}: ${response.statusText}`,
     }));
-    throw new Error(error.detail);
+    const detail = error.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" && detail !== null
+          ? (detail as { message?: string }).message ?? JSON.stringify(detail)
+          : `HTTP ${response.status}: ${response.statusText}`;
+    throw new Error(message);
   }
 }
 

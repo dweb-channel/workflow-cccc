@@ -21,10 +21,36 @@ async def run_claude_agent(
     Returns:
         The complete output from Claude CLI
     """
-    output_lines = []
-    async for line in stream_claude_agent(prompt, cwd, timeout):
-        output_lines.append(line)
-    return "\n".join(output_lines)
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "-p", prompt,
+            "--output-format", "text",
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return "[Error] Claude CLI not found. Please install Claude Code CLI."
+
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(),
+            timeout=timeout,
+        )
+
+        output = stdout.decode("utf-8").rstrip()
+
+        if proc.returncode != 0:
+            err_msg = stderr.decode("utf-8").rstrip()
+            return f"[Error] Claude CLI exited with code {proc.returncode}: {err_msg}"
+
+        return output
+
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return f"[Error] Claude CLI timed out after {timeout}s"
 
 
 async def stream_claude_agent(
@@ -55,18 +81,29 @@ async def stream_claude_agent(
         yield "[Error] Claude CLI not found. Please install Claude Code CLI."
         return
 
+    deadline = asyncio.get_event_loop().time() + timeout
+
     try:
-        async def read_stream():
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    break
-                yield line.decode("utf-8").rstrip()
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            try:
+                line = await asyncio.wait_for(
+                    proc.stdout.readline(),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                raise
+            if not line:
+                break
+            yield line.decode("utf-8").rstrip()
 
-        async for line in read_stream():
-            yield line
-
-        await asyncio.wait_for(proc.wait(), timeout=timeout)
+        remaining = deadline - asyncio.get_event_loop().time()
+        if remaining > 0:
+            await asyncio.wait_for(proc.wait(), timeout=remaining)
+        else:
+            raise asyncio.TimeoutError()
 
         if proc.returncode != 0:
             stderr = await proc.stderr.read()
@@ -74,6 +111,7 @@ async def stream_claude_agent(
 
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()
         yield f"[Error] Claude CLI timed out after {timeout}s"
 
 
