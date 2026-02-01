@@ -1,0 +1,975 @@
+openapi: 3.0.3
+info:
+  title: 动态工作流编排平台 API
+  description: |
+    动态工作流平台的 REST API 规范。
+
+    支持功能：
+    - 工作流定义的 CRUD 操作
+    - 节点类型查询
+    - 工作流执行和监控
+    - SSE 实时事件流
+
+  version: 1.0.0
+  contact:
+    name: domain-expert
+    email: dev@example.com
+
+servers:
+  - url: http://localhost:8000
+    description: 本地开发环境
+  - url: http://127.0.0.1:8000
+    description: 本地开发环境 (IPv4)
+
+tags:
+  - name: workflows
+    description: 工作流管理
+  - name: node-types
+    description: 节点类型查询
+  - name: execution
+    description: 工作流执行和监控
+
+paths:
+  # ==================== 工作流管理 ====================
+
+  /api/workflows:
+    get:
+      summary: 列出所有工作流
+      tags: [workflows]
+      responses:
+        '200':
+          description: 成功返回工作流列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WorkflowSummary'
+
+    post:
+      summary: 创建新工作流
+      tags: [workflows]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWorkflowRequest'
+      responses:
+        '201':
+          description: 工作流创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetail'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    get:
+      summary: 获取工作流元数据
+      tags: [workflows]
+      responses:
+        '200':
+          description: 成功返回工作流详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDetail'
+        '404':
+          description: 工作流不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      summary: 删除工作流
+      tags: [workflows]
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          description: 工作流不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}/definition:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    get:
+      summary: 获取工作流定义（完整 JSON）
+      tags: [workflows]
+      responses:
+        '200':
+          description: 成功返回工作流定义
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        '404':
+          description: 工作流不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      summary: 更新工作流定义
+      tags: [workflows]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkflowRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 工作流不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}/validate:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    post:
+      summary: 验证工作流定义
+      description: |
+        验证工作流是否合法：
+        - 是否存在环路
+        - 是否存在悬空节点
+        - 节点配置是否完整
+        - 字段引用是否正确
+      tags: [workflows]
+      responses:
+        '200':
+          description: 验证结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  # ==================== 节点类型 ====================
+
+  /api/node-types:
+    get:
+      summary: 列出可用节点类型
+      description: 返回所有注册的节点类型及其配置 schema
+      tags: [node-types]
+      responses:
+        '200':
+          description: 成功返回节点类型列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NodeType'
+
+  /api/node-types/{type}:
+    parameters:
+      - name: type
+        in: path
+        required: true
+        schema:
+          type: string
+        description: 节点类型标识
+        example: llm_agent
+
+    get:
+      summary: 获取节点类型详情
+      tags: [node-types]
+      responses:
+        '200':
+          description: 成功返回节点类型详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeType'
+        '404':
+          description: 节点类型不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ==================== 工作流执行 ====================
+
+  /api/workflows/{workflow_id}/run:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    post:
+      summary: 运行工作流
+      tags: [execution]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunRequest'
+      responses:
+        '200':
+          description: 工作流启动成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+        '400':
+          description: 请求参数错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 工作流不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Temporal 服务不可用
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}/runs:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    get:
+      summary: 获取运行历史
+      tags: [execution]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 成功返回运行历史
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedRuns'
+
+  /api/workflows/{workflow_id}/runs/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+      - $ref: '#/components/parameters/RunId'
+
+    get:
+      summary: 获取运行详情
+      tags: [execution]
+      responses:
+        '200':
+          description: 成功返回运行详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+        '404':
+          description: 运行记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}/runs/{run_id}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+      - $ref: '#/components/parameters/RunId'
+
+    post:
+      summary: 发送确认信号（Human-in-the-loop）
+      tags: [execution]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200':
+          description: 信号发送成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmResponse'
+        '404':
+          description: 运行记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/workflows/{workflow_id}/stream/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+      - $ref: '#/components/parameters/RunId'
+
+    get:
+      summary: 订阅 SSE 事件流
+      description: |
+        实时推送工作流执行事件：
+        - node_update: 节点状态更新
+        - node_output: 节点输出
+        - workflow_completed: 工作流完成
+      tags: [execution]
+      responses:
+        '200':
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  event: node_update
+                  data: {"node": "node-1", "status": "running", "timestamp": "2026-01-31T08:00:00Z"}
+
+                  event: node_output
+                  data: {"node": "node-1", "output": "输出内容", "timestamp": "2026-01-31T08:00:01Z"}
+
+  /api/workflows/{workflow_id}/logs:
+    parameters:
+      - $ref: '#/components/parameters/WorkflowId'
+
+    get:
+      summary: 获取执行日志
+      tags: [execution]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 成功返回日志列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagedLogs'
+
+  # ==================== 内部端点（Worker 使用）====================
+
+  /api/internal/events/{run_id}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+
+    post:
+      summary: 推送 SSE 事件（内部接口）
+      description: Worker 调用此接口推送事件到 SSE 流
+      tags: [internal]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushEventRequest'
+      responses:
+        '200':
+          description: 事件推送成功
+        '404':
+          description: 运行记录不存在
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+# ==================== Components ====================
+
+components:
+  parameters:
+    WorkflowId:
+      name: workflow_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 工作流唯一标识
+      example: wf-001
+
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 运行记录唯一标识
+      example: run-001
+
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: 页码
+
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+      description: 每页大小
+
+  schemas:
+    # ==================== 工作流相关 ====================
+
+    WorkflowSummary:
+      type: object
+      required: [id, name, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: 工作流唯一标识
+          example: wf-001
+        name:
+          type: string
+          description: 工作流名称
+          example: 自定义业务流程
+        description:
+          type: string
+          description: 工作流描述
+          example: 3 节点流程：需求 → 分析 → 输出
+        status:
+          type: string
+          enum: [draft, published, archived]
+          description: 工作流状态
+          example: published
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+          example: 2026-01-31T08:00:00Z
+        updated_at:
+          type: string
+          format: date-time
+          description: 更新时间
+          example: 2026-01-31T09:00:00Z
+
+    WorkflowDetail:
+      allOf:
+        - $ref: '#/components/schemas/WorkflowSummary'
+        - type: object
+          properties:
+            version:
+              type: integer
+              description: 版本号
+              example: 1
+            node_count:
+              type: integer
+              description: 节点数量
+              example: 5
+            parameters:
+              type: object
+              description: 工作流参数
+              properties:
+                trigger:
+                  type: string
+                  example: manual
+
+    WorkflowDefinition:
+      type: object
+      required: [id, name, nodes, edges, entry_point]
+      properties:
+        id:
+          type: string
+          description: 工作流唯一标识
+          example: wf-001
+        name:
+          type: string
+          description: 工作流名称
+          example: 自定义工作流
+        description:
+          type: string
+          description: 工作流描述
+          example: 用于处理用户需求的工作流
+        version:
+          type: integer
+          description: 版本号
+          example: 1
+        nodes:
+          type: array
+          description: 节点列表
+          items:
+            $ref: '#/components/schemas/NodeDefinition'
+        edges:
+          type: array
+          description: 边列表
+          items:
+            $ref: '#/components/schemas/EdgeDefinition'
+        entry_point:
+          type: string
+          description: 入口节点 ID
+          example: node-1
+        created_at:
+          type: string
+          format: date-time
+          description: 创建时间
+          example: 2026-01-31T08:00:00Z
+        updated_at:
+          type: string
+          format: date-time
+          description: 更新时间
+          example: 2026-01-31T09:00:00Z
+
+    NodeDefinition:
+      type: object
+      required: [id, type, label, config, position]
+      properties:
+        id:
+          type: string
+          description: 节点唯一标识
+          example: node-1
+        type:
+          type: string
+          description: 节点类型
+          enum: [llm_agent, cccc_peer, conditional, script]
+          example: llm_agent
+        label:
+          type: string
+          description: 节点显示名称
+          example: 需求解析
+        config:
+          type: object
+          description: 节点配置参数（根据节点类型不同）
+          additionalProperties: true
+          example:
+            prompt_template: "分析需求：{request}"
+            input_fields: ["request"]
+            output_field: "parsed"
+        position:
+          type: object
+          required: [x, y]
+          description: 画布位置
+          properties:
+            x:
+              type: number
+              format: float
+              example: 100.0
+            y:
+              type: number
+              format: float
+              example: 100.0
+
+    EdgeDefinition:
+      type: object
+      required: [id, source, target]
+      properties:
+        id:
+          type: string
+          description: 边唯一标识
+          example: edge-1
+        source:
+          type: string
+          description: 源节点 ID
+          example: node-1
+        target:
+          type: string
+          description: 目标节点 ID (使用 __END__ 表示结束)
+          example: node-2
+        condition:
+          type: string
+          nullable: true
+          description: 条件表达式（Phase 4）
+          example: "state.approval == true"
+
+    CreateWorkflowRequest:
+      type: object
+      required: [name, nodes, edges, entry_point]
+      properties:
+        name:
+          type: string
+          example: 我的工作流
+        description:
+          type: string
+          example: 描述信息
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeDefinition'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeDefinition'
+        entry_point:
+          type: string
+          example: node-1
+
+    UpdateWorkflowRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: 更新后的名称
+        description:
+          type: string
+          example: 更新后的描述
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeDefinition'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/EdgeDefinition'
+        entry_point:
+          type: string
+          example: node-1
+
+    ValidationResult:
+      type: object
+      required: [valid, errors, warnings]
+      properties:
+        valid:
+          type: boolean
+          description: 是否合法
+          example: true
+        errors:
+          type: array
+          description: 错误列表
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                example: CIRCULAR_DEPENDENCY
+              message:
+                type: string
+                example: 检测到环路：node-1 → node-2 → node-1
+              node_id:
+                type: string
+                example: node-1
+        warnings:
+          type: array
+          description: 警告列表
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                example: DANGLING_NODE
+              message:
+                type: string
+                example: 节点 node-3 没有输出连接
+              node_id:
+                type: string
+                example: node-3
+
+    # ==================== 节点类型相关 ====================
+
+    NodeType:
+      type: object
+      required: [type, label, category, config_schema]
+      properties:
+        type:
+          type: string
+          description: 节点类型标识
+          example: llm_agent
+        label:
+          type: string
+          description: 显示名称
+          example: LLM Agent
+        category:
+          type: string
+          enum: [executor, condition, integration]
+          description: 节点分类
+          example: executor
+        icon:
+          type: string
+          description: 图标名称
+          example: brain
+        description:
+          type: string
+          description: 节点描述
+          example: 调用 Claude CLI 执行 LLM 任务
+        config_schema:
+          type: array
+          description: 配置字段定义
+          items:
+            $ref: '#/components/schemas/ConfigField'
+
+    ConfigField:
+      type: object
+      required: [name, type, required]
+      properties:
+        name:
+          type: string
+          description: 字段名
+          example: prompt_template
+        type:
+          type: string
+          enum: [string, number, boolean, array, object]
+          description: 字段类型
+          example: string
+        required:
+          type: boolean
+          description: 是否必填
+          example: true
+        default:
+          description: 默认值
+          nullable: true
+        description:
+          type: string
+          description: 字段描述
+          example: Prompt 模板
+        options:
+          type: array
+          nullable: true
+          description: 下拉选项（如果有）
+          items:
+            type: string
+
+    # ==================== 运行相关 ====================
+
+    RunRequest:
+      type: object
+      properties:
+        request:
+          type: string
+          description: 用户输入
+          example: 帮我分析这个需求
+        parameters:
+          type: object
+          description: 运行参数
+          additionalProperties: true
+          example:
+            mode: production
+
+    RunResponse:
+      type: object
+      required: [runId, status]
+      properties:
+        runId:
+          type: string
+          description: 运行记录唯一标识
+          example: run-001
+        status:
+          type: string
+          description: 运行状态
+          enum: [running, completed, failed]
+          example: running
+
+    PagedRuns:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSummary'
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 100
+
+    RunSummary:
+      type: object
+      required: [id, workflowId, status, started_at]
+      properties:
+        id:
+          type: string
+          example: run-001
+        workflowId:
+          type: string
+          example: wf-001
+        status:
+          type: string
+          enum: [running, completed, failed]
+          example: completed
+        started_at:
+          type: string
+          format: date-time
+          example: 2026-01-31T08:00:00Z
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: 2026-01-31T08:05:00Z
+        triggered_by:
+          type: string
+          example: manual
+
+    RunDetail:
+      allOf:
+        - $ref: '#/components/schemas/RunSummary'
+        - type: object
+          properties:
+            input_data:
+              type: object
+              description: 输入数据
+            output_data:
+              type: object
+              description: 输出数据
+            node_executions:
+              type: array
+              description: 节点执行记录
+              items:
+                $ref: '#/components/schemas/NodeExecution'
+
+    NodeExecution:
+      type: object
+      required: [node_id, node_type, status]
+      properties:
+        node_id:
+          type: string
+          example: node-1
+        node_type:
+          type: string
+          example: llm_agent
+        status:
+          type: string
+          enum: [pending, running, completed, failed, waiting_peer]
+          example: completed
+        started_at:
+          type: string
+          format: date-time
+          example: 2026-01-31T08:00:00Z
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: 2026-01-31T08:00:10Z
+        input_data:
+          type: object
+        output_data:
+          type: object
+        error_message:
+          type: string
+          nullable: true
+
+    ConfirmRequest:
+      type: object
+      required: [stage, approved]
+      properties:
+        stage:
+          type: string
+          enum: [initial, final]
+          description: 确认阶段
+          example: initial
+        approved:
+          type: boolean
+          description: 是否批准
+          example: true
+        feedback:
+          type: string
+          description: 反馈意见
+          example: 看起来不错，继续执行
+
+    ConfirmResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: 信号已发送
+
+    PagedLogs:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LogEntry'
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 500
+
+    LogEntry:
+      type: object
+      required: [id, runId, time, level, message, source]
+      properties:
+        id:
+          type: string
+          example: log-001
+        runId:
+          type: string
+          example: run-001
+        time:
+          type: string
+          format: date-time
+          example: 2026-01-31T08:00:00Z
+        level:
+          type: string
+          enum: [info, warning, error]
+          example: info
+        message:
+          type: string
+          example: 节点执行完成
+        source:
+          type: string
+          example: node-1
+
+    # ==================== 内部接口 ====================
+
+    PushEventRequest:
+      type: object
+      required: [event_type, data]
+      properties:
+        event_type:
+          type: string
+          enum: [node_update, node_output, workflow_completed]
+          example: node_update
+        data:
+          type: object
+          description: 事件数据
+          additionalProperties: true
+
+    # ==================== 通用 ====================
+
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: 错误详情
+          example: 未找到工作流
+        code:
+          type: string
+          description: 错误代码
+          example: WORKFLOW_NOT_FOUND

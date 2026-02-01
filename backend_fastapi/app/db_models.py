@@ -1,0 +1,254 @@
+"""SQLAlchemy ORM models for the workflow platform.
+
+Tables:
+- workflows: Workflow definitions with graph configuration
+- workflow_runs: Execution records for each workflow run
+- execution_logs: Detailed logs for each run
+- node_executions: Per-node execution records within a run
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .database import Base
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _gen_uuid() -> str:
+    return str(uuid.uuid4())
+
+
+# ─── Workflow Definition ─────────────────────────────────────────────
+
+
+class WorkflowModel(Base):
+    """Persistent workflow definition.
+
+    Stores the full graph configuration (nodes + edges) as JSON,
+    along with metadata like name, version, and status.
+    """
+
+    __tablename__ = "workflows"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="draft",
+        comment="draft | published | archived",
+    )
+    version: Mapped[str] = mapped_column(String(32), nullable=False, default="v1.0")
+
+    # Graph definition stored as JSON
+    graph_definition: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="WorkflowDefinition JSON: {nodes, edges, entry_point}",
+    )
+
+    # Parameters / configuration
+    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Default workflow parameters",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+
+    # Relationships
+    runs: Mapped[List["WorkflowRunModel"]] = relationship(
+        back_populates="workflow", cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_workflows_status", "status"),
+        Index("ix_workflows_updated_at", "updated_at"),
+    )
+
+
+# ─── Workflow Run ────────────────────────────────────────────────────
+
+
+class WorkflowRunModel(Base):
+    """Record of a single workflow execution.
+
+    Tracks run status, timing, input/output, and links to per-node executions.
+    """
+
+    __tablename__ = "workflow_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    workflow_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending",
+        comment="pending | running | completed | failed | cancelled",
+    )
+    triggered_by: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # Temporal integration
+    temporal_workflow_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, comment="Temporal workflow execution ID",
+    )
+    temporal_run_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, comment="Temporal run ID",
+    )
+
+    # Input / output
+    input_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Run input parameters",
+    )
+    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Final run output",
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # Relationships
+    workflow: Mapped["WorkflowModel"] = relationship(back_populates="runs")
+    node_executions: Mapped[List["NodeExecutionModel"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan",
+    )
+    logs: Mapped[List["ExecutionLogModel"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_runs_workflow_id", "workflow_id"),
+        Index("ix_runs_status", "status"),
+        Index("ix_runs_started_at", "started_at"),
+    )
+
+
+# ─── Node Execution ─────────────────────────────────────────────────
+
+
+class NodeExecutionModel(Base):
+    """Per-node execution record within a workflow run.
+
+    Tracks individual node status, timing, input/output, and execution order.
+    """
+
+    __tablename__ = "node_executions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    node_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, comment="Node ID within the workflow graph",
+    )
+    node_type: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="Node type from registry",
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending",
+        comment="pending | running | completed | failed | skipped",
+    )
+    execution_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+
+    # Input / output
+    input_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True,
+    )
+    output_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True,
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timing
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    duration_ms: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True, comment="Execution duration in milliseconds",
+    )
+
+    # Relationship
+    run: Mapped["WorkflowRunModel"] = relationship(back_populates="node_executions")
+
+    __table_args__ = (
+        Index("ix_node_exec_run_id", "run_id"),
+        Index("ix_node_exec_node_id", "node_id"),
+        Index("ix_node_exec_status", "status"),
+    )
+
+
+# ─── Execution Log ──────────────────────────────────────────────────
+
+
+class ExecutionLogModel(Base):
+    """Detailed execution log entries.
+
+    Stores structured log messages from workflow execution,
+    supporting filtering by level, source, and time range.
+    """
+
+    __tablename__ = "execution_logs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    run_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=False,
+    )
+    node_id: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, comment="Associated node ID (null for workflow-level logs)",
+    )
+    level: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="info",
+        comment="debug | info | warning | error",
+    )
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="system",
+        comment="system | worker | api | node",
+    )
+    extra_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Additional structured log data",
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+
+    # Relationship
+    run: Mapped["WorkflowRunModel"] = relationship(back_populates="logs")
+
+    __table_args__ = (
+        Index("ix_logs_run_id", "run_id"),
+        Index("ix_logs_level", "level"),
+        Index("ix_logs_timestamp", "timestamp"),
+        Index("ix_logs_node_id", "node_id"),
+    )

@@ -23,7 +23,7 @@ export function connectSSE(
   options?: { demo?: boolean }
 ): () => void {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const url = `${baseUrl}/api/workflows/${workflowId}/runs/${runId}/stream${options?.demo ? "?demo=true" : ""}`;
+  const url = `${baseUrl}/api/v2/workflows/${workflowId}/runs/${runId}/stream${options?.demo ? "?demo=true" : ""}`;
 
   const eventSource = new EventSource(url);
 

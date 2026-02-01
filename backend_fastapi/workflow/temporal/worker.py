@@ -3,9 +3,9 @@ import asyncio
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from .activities import parse_requirements, plan_review_dispatch
-from .config import TASK_QUEUE
-from .workflows import BusinessWorkflow
+from .activities import execute_dynamic_graph_activity
+from ..config import TASK_QUEUE
+from .workflows import DynamicWorkflow
 
 
 async def main() -> None:
@@ -13,8 +13,8 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,
-        workflows=[BusinessWorkflow],
-        activities=[parse_requirements, plan_review_dispatch],
+        workflows=[DynamicWorkflow],
+        activities=[execute_dynamic_graph_activity],
     )
     await worker.run()
 

@@ -79,7 +79,7 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
         {/* Status */}
         <div className="mb-4">
           <h3 className="mb-2 text-sm font-medium text-slate-500">状态</h3>
-          <Badge variant="outline" className="text-sm">
+          <Badge className="text-sm border-slate-200 bg-slate-50 text-slate-700">
             <span className={`mr-2 h-2 w-2 rounded-full ${statusInfo.color}`} />
             {statusInfo.label}
           </Badge>

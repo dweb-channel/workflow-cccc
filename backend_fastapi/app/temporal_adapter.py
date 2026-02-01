@@ -1,3 +1,8 @@
+"""Temporal Client Adapter
+
+Manages Temporal client lifecycle and provides workflow start functions.
+"""
+
 from __future__ import annotations
 
 import os
@@ -13,16 +18,6 @@ TEMPORAL_TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "business-workflow-task-q
 _client: Optional[Client] = None
 
 
-def resolve_workflow_name() -> str:
-    try:
-        from workflow.workflows import BusinessWorkflow
-    except Exception as exc:  # pragma: no cover
-        raise RuntimeError(
-            "无法导入 workflow.workflows.BusinessWorkflow。"
-        ) from exc
-    return BusinessWorkflow.__name__
-
-
 async def init_temporal_client() -> Optional[Client]:
     """Initialize and return Temporal client singleton.
 
@@ -35,7 +30,7 @@ async def init_temporal_client() -> Optional[Client]:
             print(f"✅ Temporal 已连接: {TEMPORAL_ADDRESS}")
         except Exception as e:
             print(f"⚠️ Temporal 未连接 ({TEMPORAL_ADDRESS}): {e}")
-            print("   /run 和 /confirm 接口将返回 503，其他接口正常工作")
+            print("   工作流执行接口将返回 503，其他接口正常工作")
             _client = None
     return _client
 
@@ -61,39 +56,30 @@ async def get_client() -> Client:
     return _client
 
 
-async def start_business_workflow(request_text: str) -> str:
-    """Start a new BusinessWorkflow and return run ID."""
-    workflow_type = resolve_workflow_name()
+async def start_dynamic_workflow(
+    workflow_definition: dict,
+    initial_state: dict,
+) -> str:
+    """Start a DynamicWorkflow via Temporal and return run ID.
+
+    Args:
+        workflow_definition: Serialized WorkflowDefinition dict
+        initial_state: Initial input values for the workflow
+
+    Returns:
+        Temporal workflow run ID
+    """
+    from workflow.temporal.workflows import DynamicWorkflow
+
     client = await get_client()
+    params = {
+        "workflow_definition": workflow_definition,
+        "initial_state": initial_state,
+    }
     run = await client.start_workflow(
-        workflow_type,
-        request_text,
-        id=f"wf-run-{uuid4()}",
+        DynamicWorkflow.__name__,
+        params,
+        id=f"dyn-run-{uuid4()}",
         task_queue=TEMPORAL_TASK_QUEUE,
     )
     return run.id
-
-
-async def send_confirm_signal(
-    run_id: str, stage: str, approved: bool, feedback: str = ""
-) -> None:
-    """Send confirm signal to a running workflow.
-
-    Args:
-        run_id: The workflow run ID
-        stage: Either "initial" or "final"
-        approved: Whether the confirmation is approved
-        feedback: Optional feedback message
-    """
-    client = await get_client()
-    handle = client.get_workflow_handle(run_id)
-
-    # Temporal signal() accepts a single arg; pack multiple params as a list
-    signal_args = [approved, feedback]
-
-    if stage == "initial":
-        await handle.signal("confirm_initial", signal_args)
-    elif stage == "final":
-        await handle.signal("confirm_final", signal_args)
-    else:
-        raise ValueError(f"Invalid stage: {stage}. Must be 'initial' or 'final'.")

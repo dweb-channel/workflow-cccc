@@ -1,0 +1,384 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-31",
+  "schema_version": "1.0",
+  "description": "Single source of truth for workflow validation testing across front-end and back-end",
+  "validation_test_cases": [
+    {
+      "id": "circular_dependency",
+      "since_version": "1.0",
+      "phase": "Phase 1",
+      "priority": "P0",
+      "tags": ["graph-structure", "error", "blocking"],
+      "description": "检测节点之间的环路依赖。当工作流中存在循环引用时（A→B→C→A），系统应阻止执行并提供清晰的环路路径。",
+      "workflow": {
+        "name": "circular_dependency_test",
+        "nodes": [
+          {
+            "id": "node-1",
+            "type": "data_processor",
+            "config": {
+              "name": "处理器A",
+              "input_field": "{{node-3.result}}"
+            }
+          },
+          {
+            "id": "node-2",
+            "type": "data_processor",
+            "config": {
+              "name": "处理器B",
+              "input_field": "{{node-1.result}}"
+            }
+          },
+          {
+            "id": "node-3",
+            "type": "data_processor",
+            "config": {
+              "name": "处理器C",
+              "input_field": "{{node-2.result}}"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-1",
+            "source": "node-3",
+            "target": "node-1"
+          },
+          {
+            "id": "edge-2",
+            "source": "node-1",
+            "target": "node-2"
+          },
+          {
+            "id": "edge-3",
+            "source": "node-2",
+            "target": "node-3"
+          }
+        ]
+      },
+      "expected_validation_result": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "CIRCULAR_DEPENDENCY",
+            "message": "检测到环路依赖：node-1 → node-2 → node-3 → node-1",
+            "severity": "error",
+            "node_ids": ["node-1", "node-2", "node-3"],
+            "context": {
+              "cycle_path": ["node-1", "node-2", "node-3", "node-1"]
+            }
+          }
+        ],
+        "warnings": []
+      },
+      "test_instructions": {
+        "frontend": "使用 context.cycle_path 高亮显示环路路径；提供'删除边'建议打破循环",
+        "backend": "使用 DFS 或拓扑排序检测环路；返回完整的 cycle_path 包含起始节点的重复",
+        "ci_gate": "此测试必须在 5 秒内完成（P0 性能要求）"
+      }
+    },
+    {
+      "id": "missing_field_reference",
+      "since_version": "1.0",
+      "phase": "Phase 1",
+      "priority": "P0",
+      "tags": ["field-validation", "error", "blocking"],
+      "description": "检测字段引用不存在的情况。当节点引用上游不存在的字段时，系统应提供可用字段列表以指导用户修正。",
+      "workflow": {
+        "name": "missing_field_reference_test",
+        "nodes": [
+          {
+            "id": "node-1",
+            "type": "data_source",
+            "config": {
+              "name": "数据源",
+              "output_schema": {
+                "user_id": "string",
+                "user_name": "string",
+                "created_at": "timestamp"
+              }
+            }
+          },
+          {
+            "id": "node-2",
+            "type": "data_processor",
+            "config": {
+              "name": "数据处理器",
+              "input_field": "{{node-1.user_email}}"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-1",
+            "source": "node-1",
+            "target": "node-2"
+          }
+        ]
+      },
+      "expected_validation_result": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "MISSING_FIELD_REFERENCE",
+            "message": "节点 node-2 引用的字段 'node-1.user_email' 不存在",
+            "severity": "error",
+            "node_ids": ["node-2"],
+            "context": {
+              "field": "node-1.user_email",
+              "available_fields": [
+                "node-1.user_id",
+                "node-1.user_name",
+                "node-1.created_at"
+              ],
+              "upstream_node_ids": ["node-1"]
+            }
+          }
+        ],
+        "warnings": [
+          {
+            "code": "NO_OUTGOING_EDGE",
+            "message": "节点 node-2 无出边（可能是终止节点，请确认）",
+            "severity": "warning",
+            "node_ids": ["node-2"],
+            "context": {
+              "connection_suggestions": ["__END__"]
+            }
+          }
+        ]
+      },
+      "test_instructions": {
+        "frontend": "使用 context.available_fields 渲染字段选择器 UI；零防御性检查（字段保证非空）",
+        "backend": "基于拓扑排序计算 available_fields；保证字段列表非空（至少包含上游节点的输出字段）",
+        "ci_gate": "此测试必须在 5 秒内完成（P0 性能要求）"
+      }
+    },
+    {
+      "id": "dangling_node",
+      "since_version": "1.0",
+      "phase": "Phase 1",
+      "priority": "P1",
+      "tags": ["graph-structure", "warning", "non-blocking"],
+      "description": "检测没有连接到任何边的悬空节点。这是警告级别，不阻止保存，但提醒用户可能的配置遗漏。",
+      "workflow": {
+        "name": "dangling_node_test",
+        "nodes": [
+          {
+            "id": "node-1",
+            "type": "data_source",
+            "config": {
+              "name": "数据源"
+            }
+          },
+          {
+            "id": "node-2",
+            "type": "data_processor",
+            "config": {
+              "name": "处理器A"
+            }
+          },
+          {
+            "id": "node-3",
+            "type": "data_processor",
+            "config": {
+              "name": "孤立节点"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-1",
+            "source": "node-1",
+            "target": "node-2"
+          }
+        ]
+      },
+      "expected_validation_result": {
+        "valid": true,
+        "errors": [],
+        "warnings": [
+          {
+            "code": "NO_OUTGOING_EDGE",
+            "message": "节点 node-2 无出边（可能是终止节点，请确认）",
+            "severity": "warning",
+            "node_ids": ["node-2"],
+            "context": {
+              "connection_suggestions": ["node-3"]
+            }
+          },
+          {
+            "code": "NO_INCOMING_EDGE",
+            "message": "节点 node-3 无入边且非入口点，可能永远不会被执行",
+            "severity": "warning",
+            "node_ids": ["node-3"],
+            "context": {
+              "connection_suggestions": ["node-1", "node-2"]
+            }
+          },
+          {
+            "code": "NO_OUTGOING_EDGE",
+            "message": "节点 node-3 无出边（可能是终止节点，请确认）",
+            "severity": "warning",
+            "node_ids": ["node-3"],
+            "context": {
+              "connection_suggestions": ["__END__"]
+            }
+          }
+        ]
+      },
+      "test_instructions": {
+        "frontend": "显示警告徽章但允许保存；使用 context.connection_suggestions 提供连接建议",
+        "backend": "检测入度和出度均为 0 的节点；可选提供 connection_suggestions",
+        "ci_gate": "此测试属于 P1，不在快速 CI 流程中"
+      }
+    },
+    {
+      "id": "invalid_node_config",
+      "since_version": "1.0",
+      "phase": "Phase 1",
+      "priority": "P0",
+      "tags": ["config-validation", "error", "blocking"],
+      "description": "检测节点配置不符合节点类型 schema 的情况。每个节点类型都有必需字段和格式要求。",
+      "workflow": {
+        "name": "invalid_node_config_test",
+        "nodes": [
+          {
+            "id": "node-1",
+            "type": "http_request",
+            "config": {
+              "name": "API 调用",
+              "url": "not-a-valid-url",
+              "method": "INVALID_METHOD"
+            }
+          }
+        ],
+        "edges": []
+      },
+      "expected_validation_result": {
+        "valid": false,
+        "errors": [
+          {
+            "code": "INVALID_NODE_CONFIG",
+            "message": "节点 node-1 配置无效",
+            "severity": "error",
+            "node_ids": ["node-1"],
+            "context": {
+              "node_type": "http_request",
+              "validation_errors": [
+                {
+                  "field": "url",
+                  "error": "必须是有效的 URL 格式"
+                },
+                {
+                  "field": "method",
+                  "error": "必须是 GET, POST, PUT, DELETE, PATCH 之一"
+                }
+              ]
+            }
+          }
+        ],
+        "warnings": []
+      },
+      "test_instructions": {
+        "frontend": "使用 context.validation_errors 在配置面板中高亮错误字段；每个字段旁显示具体错误信息",
+        "backend": "根据节点类型的 JSON Schema 验证配置；返回字段级别的错误列表",
+        "ci_gate": "此测试必须在 5 秒内完成（P0 性能要求）"
+      }
+    },
+    {
+      "id": "jump_reference",
+      "since_version": "1.0",
+      "phase": "Phase 1",
+      "priority": "P1",
+      "tags": ["field-validation", "warning", "non-blocking"],
+      "description": "检测跳跃引用（引用非直接上游节点的字段）。在 DAG 中，节点只能引用拓扑排序中位于其前面的节点字段。",
+      "workflow": {
+        "name": "jump_reference_test",
+        "nodes": [
+          {
+            "id": "node-1",
+            "type": "data_source",
+            "config": {
+              "name": "数据源",
+              "output_schema": {
+                "raw_data": "string"
+              }
+            }
+          },
+          {
+            "id": "node-2",
+            "type": "data_processor",
+            "config": {
+              "name": "中间处理器",
+              "input_field": "{{node-1.raw_data}}",
+              "output_schema": {
+                "processed_data": "string"
+              }
+            }
+          },
+          {
+            "id": "node-3",
+            "type": "data_processor",
+            "config": {
+              "name": "最终处理器",
+              "input_field": "{{node-1.raw_data}}"
+            }
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-1",
+            "source": "node-1",
+            "target": "node-2"
+          },
+          {
+            "id": "edge-2",
+            "source": "node-2",
+            "target": "node-3"
+          }
+        ]
+      },
+      "expected_validation_result": {
+        "valid": true,
+        "errors": [],
+        "warnings": [
+          {
+            "code": "JUMP_REFERENCE",
+            "message": "节点 node-3 跳跃引用了 node-1 的字段（跳过中间节点 node-2）",
+            "severity": "warning",
+            "node_ids": ["node-3", "node-1", "node-2"],
+            "context": {
+              "referenced_field": "node-1.raw_data",
+              "intermediate_nodes": ["node-2"],
+              "suggestion": "考虑使用 node-2.processed_data 或添加直接边从 node-1 到 node-3"
+            }
+          }
+        ]
+      },
+      "test_instructions": {
+        "frontend": "显示警告但允许保存；使用 context.intermediate_nodes 可视化跳跃路径；提供添加直接边的建议",
+        "backend": "检测字段引用是否跳过边定义的直接路径；提供 intermediate_nodes 列表",
+        "ci_gate": "此测试属于 P1，不在快速 CI 流程中"
+      }
+    }
+  ],
+  "metadata": {
+    "usage_notes": [
+      "前端 FixtureLoader 使用 TypeScript 读取此文件",
+      "后端 FixtureLoader 使用 Python 读取此文件",
+      "所有测试用例 ID 必须全局唯一",
+      "priority 决定 CI 执行：P0 在快速 CI 中运行（<5秒），P1 在完整 CI 中运行",
+      "context 字段保证完整性：available_fields 非空，cycle_path 至少 3 个节点"
+    ],
+    "version_history": [
+      {
+        "version": "1.0",
+        "date": "2026-01-31",
+        "changes": "✅ v1.0 LOCKED - 初始版本：5 个核心验证场景（circular_dependency, missing_field_reference, dangling_node, invalid_node_config, jump_reference）| 三层 Review 完成（domain-expert ✅, superpowers-peer ✅, code-simplifier ✅）| jump_reference 标签修复 | fixtureAdapter.ts 实现完成",
+        "reviewers": ["domain-expert", "superpowers-peer", "code-simplifier"],
+        "review_status": "APPROVED"
+      }
+    ]
+  }
+}

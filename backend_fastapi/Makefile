@@ -14,14 +14,14 @@ help:
 # 一键启动所有服务
 dev:
 	@echo "🧹 清理已有进程..."
-	@pkill -f "workflow.run_worker" 2>/dev/null || true
+	@pkill -f "workflow.temporal.worker" 2>/dev/null || true
 	@pkill -f "temporal server" 2>/dev/null || true
 	@sleep 1
 	@echo "🚀 启动 Temporal Server..."
 	@temporal server start-dev > /tmp/temporal.log 2>&1 &
 	@sleep 3
 	@echo "⚙️  启动 Worker..."
-	@.venv/bin/python -m workflow.run_worker > /tmp/worker.log 2>&1 &
+	@.venv/bin/python -m workflow.temporal.worker > /tmp/worker.log 2>&1 &
 	@sleep 1
 	@echo "🌐 启动 FastAPI（Ctrl+C 停止所有服务）..."
 	@.venv/bin/uvicorn app.main:app --reload --port 8000 || make stop
@@ -30,7 +30,7 @@ dev:
 stop:
 	@echo "停止服务..."
 	@pkill -f "temporal server" 2>/dev/null || true
-	@pkill -f "workflow.run_worker" 2>/dev/null || true
+	@pkill -f "workflow.temporal.worker" 2>/dev/null || true
 	@pkill -f "uvicorn app.main:app" 2>/dev/null || true
 	@echo "✅ 所有服务已停止"
 
@@ -42,7 +42,7 @@ temporal:
 # 仅启动 Worker
 worker:
 	@echo "⚙️  启动 Worker..."
-	@.venv/bin/python -m workflow.run_worker
+	@.venv/bin/python -m workflow.temporal.worker
 
 # 仅启动 FastAPI
 api:

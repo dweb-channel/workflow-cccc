@@ -1,0 +1,454 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { AgentNodeData } from "@/components/agent-node";
+
+interface FlowNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: AgentNodeData;
+}
+
+interface NodeConfigPanelProps {
+  node: FlowNode | null;
+  onClose: () => void;
+  onUpdate: (nodeId: string, data: Partial<AgentNodeData>) => void;
+  onDelete: (nodeId: string) => void;
+}
+
+export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfigPanelProps) {
+  const [label, setLabel] = useState("");
+  const [nodeType, setNodeType] = useState("");
+  const [configJson, setConfigJson] = useState("");
+
+  useEffect(() => {
+    if (node) {
+      setLabel(node.data.label || "");
+      setNodeType(node.data.nodeType || "");
+      setConfigJson(JSON.stringify(node.data.config || {}, null, 2));
+    }
+  }, [node]);
+
+  if (!node) return null;
+
+  const handleSave = () => {
+    let config: Record<string, unknown> = {};
+    try {
+      config = JSON.parse(configJson);
+    } catch {
+      // keep existing config on parse failure
+      config = (node.data.config as Record<string, unknown>) || {};
+    }
+    onUpdate(node.id, { label, nodeType, config });
+  };
+
+  const handleDelete = () => {
+    onDelete(node.id);
+    onClose();
+  };
+
+  return (
+    <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <h3 className="font-semibold text-slate-800">节点配置</h3>
+        <button
+          onClick={onClose}
+          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex flex-col gap-4">
+          {/* Node ID (read-only) */}
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">节点 ID</Label>
+            <Input value={node.id} disabled className="bg-slate-50 font-mono text-xs" />
+          </div>
+
+          {/* Label */}
+          <div className="space-y-1">
+            <Label>显示名称</Label>
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="节点名称"
+            />
+          </div>
+
+          {/* Node Type */}
+          <div className="space-y-1">
+            <Label>节点类型</Label>
+            <Select value={nodeType} onValueChange={setNodeType}>
+              <SelectTrigger>
+                <SelectValue placeholder="选择类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="llm_agent">🤖 LLM Agent</SelectItem>
+                <SelectItem value="cccc_peer">👥 CCCC Peer</SelectItem>
+                <SelectItem value="data_source">💾 数据源</SelectItem>
+                <SelectItem value="data_processor">⚙️ 数据处理</SelectItem>
+                <SelectItem value="http_request">🌐 HTTP 请求</SelectItem>
+                <SelectItem value="condition">🔀 条件分支</SelectItem>
+                <SelectItem value="output">📤 输出</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Type-specific config fields */}
+          {nodeType === "llm_agent" && (
+            <LLMAgentConfig
+              config={(node.data.config as Record<string, unknown>) || {}}
+              onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
+            />
+          )}
+
+          {nodeType === "cccc_peer" && (
+            <CCCCPeerConfig
+              config={(node.data.config as Record<string, unknown>) || {}}
+              onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
+            />
+          )}
+
+          {nodeType === "http_request" && (
+            <HttpRequestConfig
+              config={(node.data.config as Record<string, unknown>) || {}}
+              onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
+            />
+          )}
+
+          {nodeType === "condition" && (
+            <ConditionConfig
+              config={(node.data.config as Record<string, unknown>) || {}}
+              onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
+            />
+          )}
+
+          {/* Raw config JSON */}
+          <div className="space-y-1">
+            <Label className="text-xs text-slate-500">高级配置 (JSON)</Label>
+            <Textarea
+              value={configJson}
+              onChange={(e) => setConfigJson(e.target.value)}
+              className="min-h-[120px] font-mono text-xs"
+              placeholder="{}"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+        <Button variant="destructive" size="sm" onClick={handleDelete}>
+          删除节点
+        </Button>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            取消
+          </Button>
+          <Button size="sm" onClick={handleSave}>
+            保存
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ Type-specific config forms ============
+
+function LLMAgentConfig({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (cfg: Record<string, unknown>) => void;
+}) {
+  const [prompt, setPrompt] = useState(
+    (config.prompt as string) || ""
+  );
+  const [systemPrompt, setSystemPrompt] = useState(
+    (config.system_prompt as string) || ""
+  );
+  const [cwd, setCwd] = useState(
+    (config.cwd as string) || "."
+  );
+  const [timeout, setTimeout_] = useState(
+    (config.timeout as number) || 300
+  );
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEffect(() => {
+    onChange({
+      ...config,
+      prompt,
+      system_prompt: systemPrompt,
+      cwd,
+      timeout,
+    });
+  }, [prompt, systemPrompt, cwd, timeout]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-4 rounded-md border border-indigo-200 bg-indigo-50/50 p-3">
+      <p className="text-xs font-medium text-indigo-600">LLM Agent 配置</p>
+
+      {/* Prompt */}
+      <div className="space-y-1">
+        <Label className="text-xs">Prompt 模板</Label>
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="请分析以下需求：&#10;&#10;{request}&#10;&#10;输出格式：JSON"
+          className="min-h-[100px] font-mono text-xs"
+        />
+        <p className="text-[10px] text-slate-400">
+          使用 {"{字段名}"} 引用上游节点输出
+        </p>
+      </div>
+
+      {/* Advanced Settings */}
+      <button
+        onClick={() => setShowAdvanced(!showAdvanced)}
+        className="flex w-full items-center justify-between text-xs text-slate-500 hover:text-slate-700"
+      >
+        <span>高级设置</span>
+        <span>{showAdvanced ? "▼" : "▶"}</span>
+      </button>
+      {showAdvanced && (
+        <div className="space-y-3 border-t border-indigo-100 pt-3">
+          <div className="space-y-1">
+            <Label className="text-xs">System Prompt</Label>
+            <Textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder="可选，系统提示词"
+              className="min-h-[60px] text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">工作目录 (cwd)</Label>
+            <Input
+              value={cwd}
+              onChange={(e) => setCwd(e.target.value)}
+              placeholder="."
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">超时 (秒)</Label>
+            <Input
+              type="number"
+              value={timeout}
+              onChange={(e) => setTimeout_(Number(e.target.value))}
+              className="text-xs"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CCCCPeerConfig({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (cfg: Record<string, unknown>) => void;
+}) {
+  const [peerId, setPeerId] = useState((config.peer_id as string) || "");
+  const [prompt, setPrompt] = useState(
+    (config.prompt as string) || ""
+  );
+  const [command, setCommand] = useState(
+    (config.command as string) || ""
+  );
+  const [groupId, setGroupId] = useState(
+    (config.group_id as string) || ""
+  );
+  const [timeout, setTimeout_] = useState(
+    (config.timeout as number) || 120
+  );
+
+  useEffect(() => {
+    onChange({
+      ...config,
+      peer_id: peerId,
+      prompt,
+      command: command || undefined,
+      group_id: groupId || undefined,
+      timeout,
+    });
+  }, [peerId, prompt, command, groupId, timeout]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-4 rounded-md border border-amber-200 bg-amber-50/50 p-3">
+      <p className="text-xs font-medium text-amber-600">CCCC Peer 配置</p>
+
+      {/* Peer ID */}
+      <div className="space-y-1">
+        <Label className="text-xs">Peer ID</Label>
+        <Input
+          value={peerId}
+          onChange={(e) => setPeerId(e.target.value)}
+          placeholder="peer-impl"
+          className="text-xs"
+        />
+        <p className="text-[10px] text-slate-400">
+          CCCC 组中的 peer actor ID
+        </p>
+      </div>
+
+      {/* Prompt */}
+      <div className="space-y-1">
+        <Label className="text-xs">Prompt 模板</Label>
+        <Textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="请根据规划文档实现以下功能：&#10;&#10;{plan}"
+          className="min-h-[100px] font-mono text-xs"
+        />
+        <p className="text-[10px] text-slate-400">
+          使用 {"{字段名}"} 引用上游节点输出
+        </p>
+      </div>
+
+      {/* Command & Group ID row */}
+      <div className="flex gap-2">
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs">命令前缀</Label>
+          <Input
+            value={command}
+            onChange={(e) => setCommand(e.target.value)}
+            placeholder="/brainstorm"
+            className="text-xs"
+          />
+          <p className="text-[10px] text-slate-400">可选，如 /brainstorm</p>
+        </div>
+        <div className="flex-1 space-y-1">
+          <Label className="text-xs">Group ID</Label>
+          <Input
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            placeholder="默认使用环境变量"
+            className="text-xs"
+          />
+        </div>
+      </div>
+
+      {/* Timeout */}
+      <div className="space-y-1">
+        <Label className="text-xs">超时 (秒)</Label>
+        <Input
+          type="number"
+          value={timeout}
+          onChange={(e) => setTimeout_(Number(e.target.value))}
+          className="text-xs"
+        />
+      </div>
+    </div>
+  );
+}
+
+function HttpRequestConfig({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (cfg: Record<string, unknown>) => void;
+}) {
+  const [url, setUrl] = useState((config.url as string) || "");
+  const [method, setMethod] = useState((config.method as string) || "GET");
+
+  useEffect(() => {
+    onChange({ ...config, url, method });
+  }, [url, method]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-medium text-slate-500">HTTP 请求配置</p>
+      <div className="space-y-1">
+        <Label className="text-xs">URL</Label>
+        <Input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://api.example.com/..."
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">方法</Label>
+        <Select value={method} onValueChange={setMethod}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["GET", "POST", "PUT", "DELETE", "PATCH"].map((m) => (
+              <SelectItem key={m} value={m}>{m}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+function ConditionConfig({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (cfg: Record<string, unknown>) => void;
+}) {
+  const [condition, setCondition] = useState((config.condition as string) || "");
+  const [trueBranch, setTrueBranch] = useState((config.true_branch as string) || "");
+  const [falseBranch, setFalseBranch] = useState((config.false_branch as string) || "");
+
+  useEffect(() => {
+    onChange({ ...config, condition, true_branch: trueBranch, false_branch: falseBranch });
+  }, [condition, trueBranch, falseBranch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-medium text-slate-500">条件分支配置</p>
+      <div className="space-y-1">
+        <Label className="text-xs">条件表达式</Label>
+        <Input
+          value={condition}
+          onChange={(e) => setCondition(e.target.value)}
+          placeholder="e.g. result.score > 80"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">True 分支 (节点ID)</Label>
+        <Input
+          value={trueBranch}
+          onChange={(e) => setTrueBranch(e.target.value)}
+          placeholder="目标节点 ID"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">False 分支 (节点ID)</Label>
+        <Input
+          value={falseBranch}
+          onChange={(e) => setFalseBranch(e.target.value)}
+          placeholder="目标节点 ID"
+        />
+      </div>
+    </div>
+  );
+}

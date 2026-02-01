@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type DragEvent } from "react";
 import {
   ReactFlow,
   Controls,
@@ -8,46 +8,33 @@ import {
   useNodesState,
   useEdgesState,
   BackgroundVariant,
+  addEdge,
+  useReactFlow,
+  ReactFlowProvider,
+  type Connection,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  WorkflowDetail,
-  WorkflowLog,
-  RunRecord,
+  type V2WorkflowResponse,
   listWorkflows,
   getWorkflow,
-  getWorkflowLogs,
-  getWorkflowRuns,
   runWorkflow,
-  saveWorkflow,
+  updateWorkflow,
+  saveWorkflowGraph,
 } from "@/lib/api";
-import { WorkflowConfirmDialog } from "@/components/workflow-confirm-dialog";
 import { AgentNode, type AgentNodeData, type AgentNodeStatus } from "@/components/agent-node";
 import { NodeDetailPanel } from "@/components/node-detail-panel";
 import { connectSSE, type SSEEvent } from "@/lib/sse";
+import { EditorToolbar, type EditorMode } from "@/components/workflow-editor/EditorToolbar";
+import { NodePalette } from "@/components/workflow-editor/NodePalette";
+import { NodeConfigPanel } from "@/components/workflow-editor/NodeConfigPanel";
+import { EdgeConfigPanel } from "@/components/workflow-editor/EdgeConfigPanel";
+import { toWorkflowDefinition, fromWorkflowDefinition } from "@/lib/workflow-converter";
 
 const nodeTypes = { agentNode: AgentNode };
 
@@ -64,64 +51,24 @@ type FlowEdge = {
   target: string;
   animated?: boolean;
   style?: Record<string, unknown>;
+  data?: { condition?: string };
 };
-
-interface GraphData {
-  nodes: Array<{
-    id: string;
-    type: string;
-    data: { label: string; status: AgentNodeStatus };
-    position: { x: number; y: number };
-  }>;
-  edges: Array<{ id: string; source: string; target: string }>;
-}
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: "草稿", color: "bg-slate-500" },
+  published: { label: "已发布", color: "bg-blue-500" },
+  archived: { label: "已归档", color: "bg-gray-500" },
   running: { label: "运行中", color: "bg-emerald-500" },
   success: { label: "成功", color: "bg-green-500" },
   failed: { label: "失败", color: "bg-red-500" },
-  paused: { label: "已暂停", color: "bg-amber-500" },
 };
 
-// Node ID to Chinese label mapping
-const NODE_LABELS: Record<string, string> = {
-  parse_requirements: "需求解析",
-  peer1_plan: "Peer1 规划",
-  peer2_review: "Peer2 审核",
-  foreman_summary: "Foreman 汇总",
-  dispatch_tasks: "任务分发",
-  final_output: "最终输出",
-};
-
-// Execution status for progress display
 interface ExecutionStatus {
   isRunning: boolean;
   currentNode: string | null;
   completedNodes: string[];
   error: string | null;
   sseEvents: Array<{ time: string; type: string; message: string }>;
-}
-
-const PRIORITY_OPTIONS = [
-  { value: "low", label: "低" },
-  { value: "normal", label: "普通" },
-  { value: "high", label: "高" },
-];
-
-const TRIGGER_OPTIONS = [
-  { value: "zhangsan", label: "张三" },
-  { value: "lisi", label: "李四" },
-  { value: "wangwu", label: "王五" },
-];
-
-function formatTime(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString("zh-CN", { hour12: false });
-  } catch {
-    return isoString;
-  }
 }
 
 function formatRelativeTime(isoString: string): string {
@@ -140,16 +87,22 @@ function formatRelativeTime(isoString: string): string {
   }
 }
 
-export default function Page() {
-  const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);
-  const [logs, setLogs] = useState<WorkflowLog[]>([]);
-  const [runs, setRuns] = useState<RunRecord[]>([]);
+// Counter for unique node IDs
+let nodeIdCounter = 0;
+
+function WorkflowPage() {
+  const [workflow, setWorkflow] = useState<V2WorkflowResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
 
-  // Execution status for progress display
+  // Editor mode
+  const [editorMode, setEditorMode] = useState<EditorMode>("view");
+  const [graphChanged, setGraphChanged] = useState(false);
+  const [savingGraph, setSavingGraph] = useState(false);
+
+  // Execution status
   const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
     isRunning: false,
     currentNode: null,
@@ -161,43 +114,52 @@ export default function Page() {
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
+  const reactFlowInstance = useReactFlow();
 
-  // Selected node for detail panel
+  // Selected node/edge for detail/config panel
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
+  const [selectedEdge, setSelectedEdge] = useState<FlowEdge | null>(null);
 
   // SSE connection cleanup
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
-  // Handle SSE events to update node status
+  // Propagate editorMode to all nodes
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) => ({
+        ...n,
+        data: { ...n.data, editorMode },
+      }))
+    );
+  }, [editorMode, setNodes]);
+
+  // Handle SSE events
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
       const timestamp = new Date().toLocaleTimeString("zh-CN", { hour12: false });
 
       if (event.type === "node_update") {
         const { node, status } = event.data;
-        const nodeLabel = NODE_LABELS[node] || node;
+        const nodeLabel = node;
 
-        // Update node visual state
         setNodes((nds) =>
           nds.map((n) =>
             n.id === node ? { ...n, data: { ...n.data, status } } : n
           )
         );
 
-        // Animate edge when node starts running
         if (status === "running") {
           setEdges((eds) =>
             eds.map((e) =>
               e.target === node ? { ...e, animated: true } : e
             )
           );
-          // Update execution status
           setExecutionStatus((prev) => ({
             ...prev,
             currentNode: node,
             sseEvents: [
               { time: timestamp, type: "running", message: `${nodeLabel} 开始执行...` },
-              ...prev.sseEvents.slice(0, 49), // Keep last 50 events
+              ...prev.sseEvents.slice(0, 49),
             ],
           }));
         } else if (status === "completed") {
@@ -206,7 +168,6 @@ export default function Page() {
               e.target === node ? { ...e, animated: false } : e
             )
           );
-          // Update execution status
           setExecutionStatus((prev) => ({
             ...prev,
             currentNode: null,
@@ -222,7 +183,6 @@ export default function Page() {
               e.target === node ? { ...e, animated: false } : e
             )
           );
-          // Update execution status with error
           setExecutionStatus((prev) => ({
             ...prev,
             currentNode: null,
@@ -236,7 +196,7 @@ export default function Page() {
         }
       } else if (event.type === "node_output") {
         const { node, output } = event.data;
-        const nodeLabel = NODE_LABELS[node] || node;
+        const nodeLabel = node;
 
         setNodes((nds) =>
           nds.map((n) =>
@@ -244,11 +204,10 @@ export default function Page() {
           )
         );
 
-        // Log output event
         setExecutionStatus((prev) => ({
           ...prev,
           sseEvents: [
-            { time: timestamp, type: "output", message: `${nodeLabel} 输出: ${typeof output === 'string' ? output.slice(0, 100) : '...'}`},
+            { time: timestamp, type: "output", message: `${nodeLabel} 输出: ${typeof output === 'string' ? output.slice(0, 100) : '...'}` },
             ...prev.sseEvents.slice(0, 49),
           ],
         }));
@@ -266,135 +225,36 @@ export default function Page() {
     };
   }, []);
 
-  // Confirm dialog state
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [confirmRunId, setConfirmRunId] = useState<string | null>(null);
-  const [confirmStage, setConfirmStage] = useState<"initial" | "final">("initial");
-
-  // Form state
-  const [trigger, setTrigger] = useState("zhangsan");
-  const [priority, setPriority] = useState<"low" | "normal" | "high">("normal");
-  const [schedule, setSchedule] = useState("");
-  const [notifyBot, setNotifyBot] = useState(true);
-  const [nodeConfig, setNodeConfig] = useState("");
-  const [requestText, setRequestText] = useState("");  // Feature description input
-
-  // Pagination state
-  const [logsPage, setLogsPage] = useState(1);
-  const [logsTotal, setLogsTotal] = useState(0);
-  const [runsPage, setRunsPage] = useState(1);
-  const [runsTotal, setRunsTotal] = useState(0);
-  const pageSize = 10;
+  // Form state for run input
+  const [requestText, setRequestText] = useState("");
 
   const loadWorkflow = useCallback(async (workflowId: string) => {
     try {
       const data = await getWorkflow(workflowId);
       setWorkflow(data);
-      // Initialize form with workflow data
-      setTrigger(data.parameters.trigger);
-      setPriority(data.parameters.priority);
-      setSchedule(data.parameters.schedule);
-      setNotifyBot(data.parameters.notifyBot);
-      setNodeConfig(data.nodeConfig);
+
+      // Load graph from embedded graph_definition
+      if (data.graph_definition) {
+        const { nodes: flowNodes, edges: flowEdges } = fromWorkflowDefinition(data.graph_definition);
+        setNodes(flowNodes.map((n) => ({ ...n, data: { ...n.data, editorMode } })));
+        setEdges(flowEdges);
+      } else {
+        setNodes([]);
+        setEdges([]);
+      }
+      setGraphChanged(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载工作流失败");
     }
-  }, []);
-
-  const loadLogs = useCallback(async (workflowId: string, page: number) => {
-    try {
-      const data = await getWorkflowLogs(workflowId, page, pageSize);
-      setLogs(data.items);
-      setLogsTotal(data.total);
-    } catch (err) {
-      console.error("加载日志失败:", err);
-    }
-  }, []);
-
-  const loadRuns = useCallback(async (workflowId: string, page: number) => {
-    try {
-      const data = await getWorkflowRuns(workflowId, page, pageSize);
-      setRuns(data.items);
-      setRunsTotal(data.total);
-    } catch (err) {
-      console.error("加载运行记录失败:", err);
-    }
-  }, []);
-
-  const loadGraph = useCallback(async (workflowId: string) => {
-    try {
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-      const res = await fetch(`${baseUrl}/api/workflows/${workflowId}/graph`);
-      const data: GraphData = await res.json();
-
-      // Use API data directly - backend returns React Flow compatible format
-      const flowNodes: FlowNode[] = data.nodes.map((n) => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: n.data,
-      }));
-
-      const flowEdges: FlowEdge[] = data.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        style: { stroke: "#94a3b8", strokeWidth: 2 },
-      }));
-
-      setNodes(flowNodes);
-      setEdges(flowEdges);
-    } catch (err) {
-      console.error("加载流程图失败:", err);
-      // Fallback mock data for development
-      setNodes([
-        {
-          id: "parse_requirements",
-          type: "agentNode",
-          position: { x: 100, y: 100 },
-          data: { label: "需求解析", status: "pending" },
-        },
-        {
-          id: "peer1_plan",
-          type: "agentNode",
-          position: { x: 350, y: 50 },
-          data: { label: "Peer1 规划", status: "pending" },
-        },
-        {
-          id: "peer2_review",
-          type: "agentNode",
-          position: { x: 600, y: 100 },
-          data: { label: "Peer2 审核", status: "pending" },
-        },
-        {
-          id: "final_output",
-          type: "agentNode",
-          position: { x: 850, y: 100 },
-          data: { label: "最终输出", status: "pending" },
-        },
-      ]);
-      setEdges([
-        { id: "e1", source: "parse_requirements", target: "peer1_plan", style: { stroke: "#94a3b8", strokeWidth: 2 } },
-        { id: "e2", source: "peer1_plan", target: "peer2_review", style: { stroke: "#94a3b8", strokeWidth: 2 } },
-        { id: "e3", source: "peer2_review", target: "final_output", style: { stroke: "#94a3b8", strokeWidth: 2 } },
-      ]);
-    }
-  }, [setNodes, setEdges]);
+  }, [setNodes, setEdges, editorMode]);
 
   useEffect(() => {
     async function init() {
       setLoading(true);
       try {
-        // Get first workflow from list
-        const workflows = await listWorkflows();
-        if (workflows.length > 0) {
-          const workflowId = workflows[0].id;
-          await Promise.all([
-            loadWorkflow(workflowId),
-            loadLogs(workflowId, 1),
-            loadRuns(workflowId, 1),
-            loadGraph(workflowId),
-          ]);
+        const result = await listWorkflows();
+        if (result.items.length > 0) {
+          await loadWorkflow(result.items[0].id);
         } else {
           setError("未找到工作流");
         }
@@ -405,13 +265,162 @@ export default function Page() {
       }
     }
     init();
-  }, [loadWorkflow, loadLogs, loadRuns, loadGraph]);
+  }, [loadWorkflow]);
+
+  // ============ Editor handlers ============
+
+  const onConnect = useCallback(
+    (params: Connection) => {
+      if (editorMode !== "edit") return;
+      setEdges((eds) =>
+        addEdge(
+          { ...params, style: { stroke: "#94a3b8", strokeWidth: 2 } },
+          eds
+        )
+      );
+      setGraphChanged(true);
+    },
+    [editorMode, setEdges]
+  );
+
+  const onDragOver = useCallback((event: DragEvent) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const onDrop = useCallback(
+    (event: DragEvent) => {
+      event.preventDefault();
+      if (editorMode !== "edit") return;
+
+      const raw = event.dataTransfer.getData("application/reactflow");
+      if (!raw) return;
+
+      const { type, label } = JSON.parse(raw);
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
+      });
+
+      nodeIdCounter += 1;
+      const newNode: FlowNode = {
+        id: `node-${Date.now()}-${nodeIdCounter}`,
+        type: "agentNode",
+        position,
+        data: {
+          label,
+          status: "pending" as AgentNodeStatus,
+          nodeType: type,
+          config: {},
+          editorMode,
+        },
+      };
+
+      setNodes((nds) => [...nds, newNode]);
+      setGraphChanged(true);
+    },
+    [editorMode, reactFlowInstance, setNodes]
+  );
+
+  const onNodesDelete = useCallback(
+    (deleted: FlowNode[]) => {
+      if (editorMode !== "edit") return;
+      const ids = new Set(deleted.map((n) => n.id));
+      setEdges((eds) => eds.filter((e) => !ids.has(e.source) && !ids.has(e.target)));
+      setGraphChanged(true);
+      if (selectedNode && ids.has(selectedNode.id)) {
+        setSelectedNode(null);
+      }
+    },
+    [editorMode, setEdges, selectedNode]
+  );
+
+  const handleNodeClick = useCallback(
+    (_: React.MouseEvent, node: FlowNode) => {
+      setSelectedNode(node);
+      setSelectedEdge(null);
+    },
+    []
+  );
+
+  const handleEdgeClick = useCallback(
+    (_: React.MouseEvent, edge: FlowEdge) => {
+      if (editorMode !== "edit") return;
+      setSelectedEdge(edge);
+      setSelectedNode(null);
+    },
+    [editorMode]
+  );
+
+  const handleEdgeUpdate = useCallback(
+    (edgeId: string, data: Partial<FlowEdge>) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId ? { ...e, ...data } : e
+        )
+      );
+      setGraphChanged(true);
+      setSelectedEdge(null);
+    },
+    [setEdges]
+  );
+
+  const handleEdgeDelete = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+      setGraphChanged(true);
+    },
+    [setEdges]
+  );
+
+  const handleNodeUpdate = useCallback(
+    (nodeId: string, data: Partial<AgentNodeData>) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n
+        )
+      );
+      setGraphChanged(true);
+      setSelectedNode(null);
+    },
+    [setNodes]
+  );
+
+  const handleNodeDelete = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      setGraphChanged(true);
+    },
+    [setNodes, setEdges]
+  );
+
+  const handleSaveGraph = useCallback(async () => {
+    if (!workflow) return;
+    setSavingGraph(true);
+    try {
+      const definition = toWorkflowDefinition(nodes, edges, workflow.name);
+      await saveWorkflowGraph(workflow.id, {
+        nodes: definition.nodes,
+        edges: definition.edges,
+        entry_point: definition.entry_point,
+      });
+      setGraphChanged(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "保存图失败");
+    } finally {
+      setSavingGraph(false);
+    }
+  }, [workflow, nodes, edges]);
+
+  // ============ Run/Save handlers ============
 
   const handleRun = async () => {
     if (!workflow) return;
+    // Switch to view mode when running
+    setEditorMode("view");
     setRunning(true);
 
-    // Reset execution status
     setExecutionStatus({
       isRunning: true,
       currentNode: null,
@@ -421,41 +430,32 @@ export default function Page() {
     });
 
     try {
-      // Cleanup previous SSE connection
       if (sseCleanupRef.current) {
         sseCleanupRef.current();
         sseCleanupRef.current = null;
       }
 
-      // Reset node states to pending
       setNodes((nds) =>
         nds.map((n) => ({ ...n, data: { ...n.data, status: "pending" as AgentNodeStatus, output: undefined } }))
       );
 
-      const result = await runWorkflow(workflow.id, {
-        request: requestText || undefined,
-        parameters: { trigger, priority, schedule, notifyBot },
-      });
+      const initialState: Record<string, unknown> = {};
+      if (requestText) initialState.request = requestText;
 
-      // Update status after successful start
+      const result = await runWorkflow(workflow.id, initialState);
+
       setExecutionStatus((prev) => ({
         ...prev,
         sseEvents: [
-          { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), type: "info", message: `工作流已启动 (runId: ${result.runId.slice(0, 8)}...)` },
+          { time: new Date().toLocaleTimeString("zh-CN", { hour12: false }), type: "info", message: `工作流已启动 (runId: ${result.run_id.slice(0, 8)}...)` },
           ...prev.sseEvents.slice(0, 49),
         ],
       }));
 
-      // Connect SSE to receive real-time updates
-      const cleanup = connectSSE(workflow.id, result.runId, handleSSEEvent);
+      const cleanup = connectSSE(workflow.id, result.run_id, handleSSEEvent);
       sseCleanupRef.current = cleanup;
 
-      // Reload workflow and logs
-      await Promise.all([
-        loadWorkflow(workflow.id),
-        loadLogs(workflow.id, 1),
-        loadRuns(workflow.id, 1),
-      ]);
+      await loadWorkflow(workflow.id);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "运行失败";
       setExecutionStatus((prev) => ({
@@ -476,11 +476,11 @@ export default function Page() {
     if (!workflow) return;
     setSaving(true);
     try {
-      const result = await saveWorkflow(workflow.id, {
-        parameters: { trigger, priority, schedule, notifyBot },
-        nodeConfig,
+      const result = await updateWorkflow(workflow.id, {
+        name: workflow.name,
+        description: workflow.description || undefined,
       });
-      setWorkflow(result.workflow);
+      setWorkflow(result);
       alert("保存成功");
     } catch (err) {
       alert(err instanceof Error ? err.message : "保存失败");
@@ -489,32 +489,6 @@ export default function Page() {
     }
   };
 
-  const handleLogsPageChange = async (newPage: number) => {
-    if (!workflow) return;
-    setLogsPage(newPage);
-    await loadLogs(workflow.id, newPage);
-  };
-
-  const handleRunsPageChange = async (newPage: number) => {
-    if (!workflow) return;
-    setRunsPage(newPage);
-    await loadRuns(workflow.id, newPage);
-  };
-
-  const handleOpenConfirmDialog = (runId: string, stage: "initial" | "final") => {
-    setConfirmRunId(runId);
-    setConfirmStage(stage);
-    setConfirmDialogOpen(true);
-  };
-
-  const handleConfirmed = async () => {
-    if (!workflow) return;
-    await Promise.all([
-      loadWorkflow(workflow.id),
-      loadRuns(workflow.id, runsPage),
-      loadLogs(workflow.id, logsPage),
-    ]);
-  };
 
   if (loading) {
     return (
@@ -540,22 +514,16 @@ export default function Page() {
     );
   }
 
-  const statusInfo = STATUS_MAP[workflow.status] || {
-    label: workflow.status,
-    color: "bg-slate-500",
-  };
-  const logsMaxPage = Math.ceil(logsTotal / pageSize);
-  const runsMaxPage = Math.ceil(runsTotal / pageSize);
+  const statusInfo = STATUS_MAP[workflow.status] || { label: workflow.status, color: "bg-slate-500" };
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1400px] flex-col gap-4 px-6 py-6">
+    <main className="mx-auto flex h-screen max-w-[1400px] flex-col gap-4 overflow-hidden px-6 py-6">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>{workflow.name}</CardTitle>
             <p className="text-xs text-slate-500">
-              版本 {workflow.version} · 最近更新{" "}
-              {formatRelativeTime(workflow.updated_at)}
+              版本 {workflow.version} · 最近更新 {formatRelativeTime(workflow.updated_at)}
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -564,7 +532,7 @@ export default function Page() {
               {statusInfo.label}
             </Badge>
             <div className="flex items-center gap-2">
-              <Button onClick={handleRun} disabled={running}>
+              <Button onClick={handleRun} disabled={running || editorMode === "edit"}>
                 {running ? "运行中..." : "运行"}
               </Button>
               <Button variant="secondary" onClick={handleSave} disabled={saving}>
@@ -595,7 +563,7 @@ export default function Page() {
                     {executionStatus.error
                       ? `执行失败: ${executionStatus.error}`
                       : executionStatus.currentNode
-                        ? `正在执行: ${NODE_LABELS[executionStatus.currentNode] || executionStatus.currentNode}`
+                        ? `正在执行: ${executionStatus.currentNode}`
                         : executionStatus.isRunning
                           ? "工作流运行中..."
                           : executionStatus.completedNodes.length > 0
@@ -605,18 +573,17 @@ export default function Page() {
                   </p>
                   {executionStatus.completedNodes.length > 0 && !executionStatus.error && (
                     <p className="text-xs text-slate-500">
-                      已完成: {executionStatus.completedNodes.map(n => NODE_LABELS[n] || n).join(" → ")}
+                      已完成: {executionStatus.completedNodes.join(" → ")}
                     </p>
                   )}
                 </div>
               </div>
               {executionStatus.sseEvents.length > 0 && (
-                <Badge variant="outline" className="text-xs">
+                <Badge className="text-xs border-slate-200 bg-slate-50 text-slate-700">
                   {executionStatus.sseEvents.length} 条事件
                 </Badge>
               )}
             </div>
-            {/* Recent SSE Events */}
             {executionStatus.sseEvents.length > 0 && (
               <div className="mt-2 max-h-24 overflow-y-auto rounded bg-white/50 p-2 text-xs font-mono">
                 {executionStatus.sseEvents.slice(0, 5).map((event, idx) => (
@@ -630,286 +597,142 @@ export default function Page() {
         </Card>
       )}
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
-        <Card className="flex h-[520px] flex-col">
+      <section className="flex min-h-0 flex-1 gap-4">
+        {/* Node Palette - visible in edit mode */}
+        {editorMode === "edit" && (
+          <div className="w-[200px] shrink-0">
+            <NodePalette />
+          </div>
+        )}
+
+        {/* Canvas */}
+        <Card className="flex min-h-0 flex-1 flex-col">
           <CardHeader className="flex flex-row items-center justify-between py-3">
             <CardTitle>流程画布</CardTitle>
+            <EditorToolbar
+              mode={editorMode}
+              onModeChange={setEditorMode}
+              onSaveGraph={handleSaveGraph}
+              saving={savingGraph}
+              hasChanges={graphChanged}
+            />
           </CardHeader>
           <CardContent className="flex-1 p-0">
             <ReactFlow
               nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onNodeClick={(_, node) => setSelectedNode(node as FlowNode)}
-              onPaneClick={() => setSelectedNode(null)}
+              onEdgesChange={(changes) => {
+                onEdgesChange(changes);
+                if (editorMode === "edit") setGraphChanged(true);
+              }}
+              onConnect={onConnect}
+              onNodeClick={(e, node) => handleNodeClick(e, node as FlowNode)}
+              onEdgeClick={(e, edge) => handleEdgeClick(e, edge as FlowEdge)}
+              onPaneClick={() => { setSelectedNode(null); setSelectedEdge(null); }}
+              onDrop={onDrop}
+              onDragOver={onDragOver}
+              onNodesDelete={(deleted) => onNodesDelete(deleted as FlowNode[])}
               nodeTypes={nodeTypes}
+              nodesDraggable={editorMode === "edit"}
+              nodesConnectable={editorMode === "edit"}
+              deleteKeyCode={editorMode === "edit" ? "Backspace" : null}
               fitView
-              className="bg-slate-50"
+              className={editorMode === "edit" ? "bg-blue-50/30" : "bg-slate-50"}
             >
               <Controls />
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={16}
+                size={1}
+                color={editorMode === "edit" ? "#93c5fd" : undefined}
+              />
             </ReactFlow>
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col">
-          <CardHeader>
-            <CardTitle>运行参数</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <div className="space-y-2">
-              <Label className="text-base font-medium">功能描述</Label>
-              <Textarea
-                placeholder="请输入你想实现的功能，例如：实现一个用户登录功能，支持邮箱和手机号登录"
-                value={requestText}
-                onChange={(e) => setRequestText(e.target.value)}
-                className="min-h-[80px] border-emerald-200 focus:border-emerald-500"
+        {/* Right Panel - context-aware */}
+        {editorMode === "edit" ? (
+          /* Edit mode: inline config panel */
+          <div className="w-[360px] shrink-0">
+            {selectedNode ? (
+              <NodeConfigPanel
+                node={selectedNode}
+                onClose={() => setSelectedNode(null)}
+                onUpdate={handleNodeUpdate}
+                onDelete={handleNodeDelete}
               />
-              <p className="text-xs text-slate-500">这是工作流的第一步输入，将被解析并分发给各个 Agent 处理</p>
-            </div>
-            <div className="space-y-2">
-              <Label>触发人</Label>
-              <Select value={trigger} onValueChange={setTrigger}>
-                <SelectTrigger>
-                  <SelectValue placeholder="请选择触发人" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TRIGGER_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>执行优先级</Label>
-              <Select
-                value={priority}
-                onValueChange={(v) => setPriority(v as "low" | "normal" | "high")}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRIORITY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>计划时间</Label>
-              <Input
-                placeholder="2026-01-24 10:00"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
+            ) : selectedEdge ? (
+              <EdgeConfigPanel
+                edge={selectedEdge}
+                onClose={() => setSelectedEdge(null)}
+                onUpdate={handleEdgeUpdate}
+                onDelete={handleEdgeDelete}
               />
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="text-xs text-slate-600">通知机器人</span>
-              <Switch checked={notifyBot} onCheckedChange={setNotifyBot} />
-            </div>
+            ) : (
+              <div className="flex h-full items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
+                <p className="text-sm text-slate-400">点击节点或连接进行配置</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* View mode: run input */
+          <Card className="flex w-[360px] shrink-0 flex-col">
+            <CardHeader>
+              <CardTitle>运行输入</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              <div className="space-y-2">
+                <Label className="text-base font-medium">初始输入</Label>
+                <Textarea
+                  placeholder="请输入工作流的初始输入，例如：实现一个用户登录功能，支持邮箱和手机号登录"
+                  value={requestText}
+                  onChange={(e) => setRequestText(e.target.value)}
+                  className="min-h-[120px] border-emerald-200 focus:border-emerald-500"
+                />
+                <p className="text-xs text-slate-500">
+                  作为 initial_state.request 传递给工作流入口节点
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </section>
 
-            <div className="space-y-2 pt-2">
-              <Label>节点配置</Label>
-              <Textarea
-                placeholder="描述该节点的输入、输出与重试策略"
-                value={nodeConfig}
-                onChange={(e) => setNodeConfig(e.target.value)}
-              />
+      {/* SSE Events Log */}
+      {executionStatus.sseEvents.length > 0 && (
+        <Card>
+          <CardHeader className="py-3">
+            <CardTitle className="text-sm">执行事件</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-48 overflow-y-auto rounded bg-slate-50 p-3 text-xs font-mono">
+              {executionStatus.sseEvents.map((event, idx) => (
+                <div key={idx} className={`${event.type === 'error' ? 'text-red-600' : event.type === 'completed' ? 'text-emerald-600' : 'text-slate-600'}`}>
+                  <span className="text-slate-400">[{event.time}]</span> {event.message}
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      </section>
+      )}
 
-      <Card>
-        <CardHeader>
-          <Tabs defaultValue="logs">
-            <TabsList>
-              <TabsTrigger value="logs">运行日志</TabsTrigger>
-              <TabsTrigger value="history">历史记录</TabsTrigger>
-              <TabsTrigger value="alerts">告警</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="logs">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>时间</TableHead>
-                    <TableHead>级别</TableHead>
-                    <TableHead>消息</TableHead>
-                    <TableHead>来源</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {logs.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-slate-400">
-                        暂无日志
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    logs.map((log) => (
-                      <TableRow key={log.id}>
-                        <TableCell>{formatTime(log.time)}</TableCell>
-                        <TableCell>
-                          <span
-                            className={
-                              log.level === "error"
-                                ? "text-red-600"
-                                : log.level === "warn"
-                                  ? "text-amber-600"
-                                  : "text-slate-600"
-                            }
-                          >
-                            {log.level}
-                          </span>
-                        </TableCell>
-                        <TableCell>{log.message}</TableCell>
-                        <TableCell className="text-slate-500">{log.source}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              {logsMaxPage > 1 && (
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={logsPage <= 1}
-                    onClick={() => handleLogsPageChange(logsPage - 1)}
-                  >
-                    上一页
-                  </Button>
-                  <span className="text-sm text-slate-500">
-                    {logsPage} / {logsMaxPage}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={logsPage >= logsMaxPage}
-                    onClick={() => handleLogsPageChange(logsPage + 1)}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="history">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>运行 ID</TableHead>
-                    <TableHead>状态</TableHead>
-                    <TableHead>开始时间</TableHead>
-                    <TableHead>结束时间</TableHead>
-                    <TableHead>触发人</TableHead>
-                    <TableHead>操作</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {runs.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-slate-400">
-                        暂无运行记录
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    runs.map((run) => {
-                      const runStatus = STATUS_MAP[run.status] || {
-                        label: run.status,
-                        color: "bg-slate-500",
-                      };
-                      return (
-                        <TableRow key={run.id}>
-                          <TableCell className="font-mono text-xs">
-                            {run.id.slice(0, 8)}...
-                          </TableCell>
-                          <TableCell>
-                            <Badge className="border-slate-200 bg-slate-50 text-slate-700">
-                              <span
-                                className={`mr-1 h-2 w-2 rounded-full ${runStatus.color}`}
-                              />
-                              {runStatus.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{formatTime(run.started_at)}</TableCell>
-                          <TableCell>
-                            {run.ended_at ? formatTime(run.ended_at) : "-"}
-                          </TableCell>
-                          <TableCell>{run.triggered_by}</TableCell>
-                          <TableCell>
-                            {run.status === "running" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => handleOpenConfirmDialog(run.id, "initial")}
-                                className="text-emerald-600 border border-emerald-200 hover:bg-emerald-50"
-                              >
-                                确认
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-              {runsMaxPage > 1 && (
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={runsPage <= 1}
-                    onClick={() => handleRunsPageChange(runsPage - 1)}
-                  >
-                    上一页
-                  </Button>
-                  <span className="text-sm text-slate-500">
-                    {runsPage} / {runsMaxPage}
-                  </span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={runsPage >= runsMaxPage}
-                    onClick={() => handleRunsPageChange(runsPage + 1)}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="alerts">
-              <div className="flex h-32 items-center justify-center text-slate-400">
-                告警功能暂未实现
-              </div>
-            </TabsContent>
-          </Tabs>
-        </CardHeader>
-      </Card>
-
-      <WorkflowConfirmDialog
-        open={confirmDialogOpen}
-        onOpenChange={setConfirmDialogOpen}
-        workflowId={workflow.id}
-        runId={confirmRunId || ""}
-        stage={confirmStage}
-        onConfirmed={handleConfirmed}
-      />
-
-      {/* Node Detail Panel */}
-      <NodeDetailPanel
-        node={selectedNode}
-        onClose={() => setSelectedNode(null)}
-      />
+      {/* Node Detail Panel (view mode only) */}
+      {editorMode === "view" && (
+        <NodeDetailPanel
+          node={selectedNode}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
     </main>
+  );
+}
+
+// Wrap with ReactFlowProvider for useReactFlow hook
+export default function Page() {
+  return (
+    <ReactFlowProvider>
+      <WorkflowPage />
+    </ReactFlowProvider>
   );
 }
