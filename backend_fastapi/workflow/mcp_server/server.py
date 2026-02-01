@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 try:
     from ...app.temporal_adapter import (
         init_temporal_client,
-        start_business_workflow,
+        start_dynamic_workflow,
     )
     TEMPORAL_AVAILABLE = True
 except ImportError:
@@ -40,11 +40,13 @@ class MCPError(Exception):
 # =============================================================================
 
 
-def workflow_run(request: str) -> Dict[str, Any]:
+def workflow_run(request: str, workflow_definition: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Start a workflow execution with the given request.
 
     Args:
         request: The workflow request/requirement text
+        workflow_definition: Optional workflow definition dict. If not provided,
+            a default single-node workflow is used.
 
     Returns:
         run_id and status
@@ -55,6 +57,12 @@ def workflow_run(request: str) -> Dict[str, Any]:
             message="Temporal client not available. Ensure backend is properly configured.",
         )
 
+    if workflow_definition is None:
+        workflow_definition = {
+            "nodes": [{"id": "main", "type": "llm_agent", "config": {"prompt": request}}],
+            "edges": [],
+        }
+
     # Run async function in sync context
     try:
         loop = asyncio.get_event_loop()
@@ -63,7 +71,9 @@ def workflow_run(request: str) -> Dict[str, Any]:
         asyncio.set_event_loop(loop)
 
     try:
-        run_id = loop.run_until_complete(start_business_workflow(request))
+        run_id = loop.run_until_complete(
+            start_dynamic_workflow(workflow_definition, {"request": request})
+        )
         return {
             "run_id": run_id,
             "status": "running",

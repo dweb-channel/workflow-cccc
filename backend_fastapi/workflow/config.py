@@ -1,4 +1,6 @@
 """Workflow configuration constants."""
 
-# Temporal task queue name
-TASK_QUEUE = "business-workflow-task-queue"
+import os
+
+# Temporal task queue name — single source of truth
+TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "business-workflow-task-queue")

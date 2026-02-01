@@ -11,8 +11,9 @@ from uuid import uuid4
 
 from temporalio.client import Client
 
+from workflow.config import TASK_QUEUE as TEMPORAL_TASK_QUEUE
+
 TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
-TEMPORAL_TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "business-workflow-task-queue")
 
 # Singleton client instance (initialized via lifespan)
 _client: Optional[Client] = None
