@@ -97,12 +97,14 @@ class WorkflowDefinition:
         nodes: List of node configurations
         edges: List of edge definitions
         entry_point: Optional entry point node ID (auto-detected if not provided)
+        max_iterations: Maximum loop iterations per node (default 10)
     """
 
     name: str
     nodes: List[NodeConfig]
     edges: List[EdgeDefinition]
     entry_point: Optional[str] = None
+    max_iterations: int = 10
 
     def __post_init__(self):
         """Validate workflow definition."""
@@ -244,10 +246,37 @@ def validate_workflow(workflow: WorkflowDefinition) -> ValidationResult:
                 )
             )
 
-    # 2. Detect circular dependencies using DFS
-    circular_result = detect_circular_dependency(workflow)
-    if circular_result:
-        errors.append(circular_result)
+    # 2. Detect loops — controlled loops (with condition exit) are allowed
+    loops = detect_loops(workflow)
+    for loop in loops:
+        if loop.has_condition_exit:
+            # Controlled loop — produce warning, not error
+            cycle_str = " → ".join(loop.cycle_path)
+            warnings.append(
+                ValidationError(
+                    code="CONTROLLED_LOOP",
+                    message=f"检测到受控循环：{cycle_str}（由 condition 节点 '{loop.condition_node_id}' 控制退出，最大迭代 {workflow.max_iterations} 次）",
+                    severity="warning",
+                    node_ids=loop.cycle_path[:-1],
+                    context={
+                        "cycle_path": loop.cycle_path,
+                        "condition_node_id": loop.condition_node_id,
+                        "max_iterations": workflow.max_iterations,
+                    },
+                )
+            )
+        else:
+            # Uncontrolled loop — error
+            cycle_str = " → ".join(loop.cycle_path)
+            errors.append(
+                ValidationError(
+                    code="CIRCULAR_DEPENDENCY",
+                    message=f"检测到无出口环路：{cycle_str}（循环路径中需要 condition 节点控制退出）",
+                    severity="error",
+                    node_ids=loop.cycle_path[:-1],
+                    context={"cycle_path": loop.cycle_path},
+                )
+            )
 
     # 3. Validate node configurations
     for node in workflow.nodes:
@@ -342,63 +371,127 @@ def validate_workflow(workflow: WorkflowDefinition) -> ValidationResult:
     return ValidationResult(valid=valid, errors=errors, warnings=warnings)
 
 
-def detect_circular_dependency(workflow: WorkflowDefinition) -> Optional[ValidationError]:
-    """Detect circular dependencies using DFS.
+@dataclass
+class LoopInfo:
+    """Information about a detected loop in the workflow.
+
+    Attributes:
+        cycle_path: List of node IDs forming the loop (last == first)
+        has_condition_exit: Whether a condition node controls the loop exit
+        condition_node_id: ID of the condition node that controls the exit (if any)
+    """
+    cycle_path: List[str]
+    has_condition_exit: bool = False
+    condition_node_id: Optional[str] = None
+
+
+def detect_loops(workflow: WorkflowDefinition) -> List[LoopInfo]:
+    """Detect all loops in the workflow using DFS.
+
+    Unlike the old detect_circular_dependency, this returns structured loop
+    information instead of a single error, enabling controlled loops.
 
     Args:
         workflow: Workflow definition
 
     Returns:
-        ValidationError if cycle detected, None otherwise
+        List of LoopInfo for each detected loop
     """
-    # Build adjacency list
+    # Build adjacency list and edge map
     graph = defaultdict(list)
+    edge_map: Dict[Tuple[str, str], EdgeDefinition] = {}
     for edge in workflow.edges:
         if edge.target != END:
             graph[edge.source].append(edge.target)
+            edge_map[(edge.source, edge.target)] = edge
 
-    # DFS with path tracking
-    visited = set()
-    path = []
-    path_set = set()
+    # Collect node types for condition detection
+    node_types = {node.id: node.type for node in workflow.nodes}
 
-    def dfs(node: str) -> Optional[List[str]]:
-        """DFS to detect cycle, returns cycle path if found."""
+    # DFS to find all cycles
+    loops: List[LoopInfo] = []
+    visited: Set[str] = set()
+    path: List[str] = []
+    path_set: Set[str] = set()
+    found_cycles: Set[tuple] = set()  # Deduplicate cycles
+
+    def dfs(node: str):
         if node in path_set:
-            # Found cycle - return path from cycle start to current node
             cycle_start_idx = path.index(node)
-            return path[cycle_start_idx:] + [node]
+            cycle_path = path[cycle_start_idx:] + [node]
+            # Normalize cycle for dedup (rotate to smallest element first)
+            cycle_nodes = tuple(sorted(cycle_path[:-1]))
+            if cycle_nodes not in found_cycles:
+                found_cycles.add(cycle_nodes)
+                # Check if any node in the cycle is a condition node with an exit edge
+                has_exit = False
+                exit_node = None
+                for i, nid in enumerate(cycle_path[:-1]):
+                    if node_types.get(nid) == "condition":
+                        # Check if this condition node has an edge going outside the loop
+                        cycle_node_set = set(cycle_path[:-1])
+                        for neighbor in graph[nid]:
+                            if neighbor not in cycle_node_set or neighbor == END:
+                                has_exit = True
+                                exit_node = nid
+                                break
+                        # Also check edges with condition expressions going to END
+                        for edge in workflow.edges:
+                            if edge.source == nid and (edge.target == END or edge.target not in cycle_node_set):
+                                has_exit = True
+                                exit_node = nid
+                                break
+                    if has_exit:
+                        break
+                loops.append(LoopInfo(
+                    cycle_path=cycle_path,
+                    has_condition_exit=has_exit,
+                    condition_node_id=exit_node,
+                ))
+            return
 
         if node in visited:
-            return None
+            return
 
         visited.add(node)
         path.append(node)
         path_set.add(node)
 
         for neighbor in graph[node]:
-            cycle = dfs(neighbor)
-            if cycle:
-                return cycle
+            dfs(neighbor)
 
         path.pop()
         path_set.remove(node)
-        return None
 
-    # Try DFS from each node
     for node in workflow.nodes:
         if node.id not in visited:
-            cycle_path = dfs(node.id)
-            if cycle_path:
-                cycle_str = " → ".join(cycle_path)
-                return ValidationError(
-                    code="CIRCULAR_DEPENDENCY",
-                    message=f"检测到环路依赖：{cycle_str}",
-                    severity="error",
-                    node_ids=cycle_path[:-1],  # Exclude duplicate last node
-                    context={"cycle_path": cycle_path},
-                )
+            dfs(node.id)
 
+    return loops
+
+
+def detect_circular_dependency(workflow: WorkflowDefinition) -> Optional[ValidationError]:
+    """Detect circular dependencies using DFS.
+
+    Legacy wrapper around detect_loops for backward compatibility.
+
+    Args:
+        workflow: Workflow definition
+
+    Returns:
+        ValidationError if uncontrolled cycle detected, None otherwise
+    """
+    loops = detect_loops(workflow)
+    for loop in loops:
+        if not loop.has_condition_exit:
+            cycle_str = " → ".join(loop.cycle_path)
+            return ValidationError(
+                code="CIRCULAR_DEPENDENCY",
+                message=f"检测到无出口环路：{cycle_str}（循环路径中需要 condition 节点控制退出）",
+                severity="error",
+                node_ids=loop.cycle_path[:-1],
+                context={"cycle_path": loop.cycle_path},
+            )
     return None
 
 
@@ -436,14 +529,18 @@ def _get_connection_suggestions(workflow: WorkflowDefinition, node_id: str) -> L
 def topological_sort(workflow: WorkflowDefinition) -> List[str]:
     """Perform topological sort on workflow nodes.
 
+    For DAGs, returns standard topological order.
+    For workflows with controlled loops (condition-gated cycles),
+    sorts non-loop nodes first, then appends loop nodes in discovery order.
+
     Args:
         workflow: Workflow definition
 
     Returns:
-        List of node IDs in topological order
+        List of node IDs in execution order
 
     Raises:
-        ValueError: If workflow contains cycles
+        ValueError: If workflow contains uncontrolled cycles (no condition exit)
     """
     # Build adjacency list and in-degree count
     graph = defaultdict(list)
@@ -467,9 +564,19 @@ def topological_sort(workflow: WorkflowDefinition) -> List[str]:
             if in_degree[neighbor] == 0:
                 queue.append(neighbor)
 
-    if len(result) != len(workflow.nodes):
-        raise ValueError("Workflow contains cycles - cannot perform topological sort")
+    if len(result) == len(workflow.nodes):
+        return result
 
+    # Some nodes not sorted — check if they form controlled loops
+    loops = detect_loops(workflow)
+    has_uncontrolled = any(not loop.has_condition_exit for loop in loops)
+    if has_uncontrolled:
+        raise ValueError("Workflow contains uncontrolled cycles - cannot perform topological sort")
+
+    # Controlled loops: append remaining nodes in discovery order
+    sorted_set = set(result)
+    remaining = [node.id for node in workflow.nodes if node.id not in sorted_set]
+    result.extend(remaining)
     return result
 
 
@@ -562,7 +669,18 @@ def build_graph_from_config(workflow: WorkflowDefinition):
                 else:
                     graph.add_edge(source_id, edge.target)
 
-    # Compile and return
+    # Compile with recursion_limit for loop support
+    # LangGraph recursion_limit controls max steps across the entire graph
+    # For loops: max_iterations * number_of_nodes_in_loop + non-loop steps
+    loops = detect_loops(workflow)
+    if loops:
+        recursion_limit = workflow.max_iterations * len(workflow.nodes) + len(workflow.nodes)
+        logger.info(
+            f"Workflow has {len(loops)} loop(s), setting recursion_limit={recursion_limit} "
+            f"(max_iterations={workflow.max_iterations})"
+        )
+        return graph.compile(recursion_limit=recursion_limit)
+
     return graph.compile()
 
 

@@ -52,6 +52,7 @@ async def execute_dynamic_graph_activity(params: dict) -> dict:
         name=wf_dict.get("name", "dynamic-workflow"),
         nodes=nodes,
         edges=edges,
+        max_iterations=wf_dict.get("max_iterations", 10),
     )
 
     return await execute_dynamic_workflow(

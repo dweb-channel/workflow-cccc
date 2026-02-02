@@ -12,9 +12,17 @@ export interface NodeOutputEvent {
   timestamp?: string;
 }
 
+export interface LoopIterationEvent {
+  node: string;
+  iteration: number;
+  max_iterations: number;
+  timestamp?: string;
+}
+
 export type SSEEvent =
   | { type: "node_update"; data: NodeUpdateEvent }
-  | { type: "node_output"; data: NodeOutputEvent };
+  | { type: "node_output"; data: NodeOutputEvent }
+  | { type: "loop_iteration"; data: LoopIterationEvent };
 
 export function connectSSE(
   workflowId: string,
@@ -42,6 +50,15 @@ export function connectSSE(
       onEvent({ type: "node_output", data });
     } catch (err) {
       console.error("Failed to parse node_output event:", err);
+    }
+  });
+
+  eventSource.addEventListener("loop_iteration", (e) => {
+    try {
+      const data = JSON.parse(e.data) as LoopIterationEvent;
+      onEvent({ type: "loop_iteration", data });
+    } catch (err) {
+      console.error("Failed to parse loop_iteration event:", err);
     }
   });
 

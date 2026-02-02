@@ -1,26 +1,42 @@
-# FastAPI Backend (Workflow Ops)
+# Backend - FastAPI Workflow Engine
 
-## Run
+## Quick Start
+
 ```bash
 cd backend_fastapi
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-export PYTHONPATH=../src
-export TEMPORAL_ADDRESS=localhost:7233
-export TEMPORAL_TASK_QUEUE=business-workflow-task-queue
-uvicorn app.main:app --reload --port 4000
+make dev          # Starts Temporal + Worker + FastAPI
 ```
 
-## Endpoints
-- GET /api/workflows
-- GET /api/workflows/{id}
-- GET /api/workflows/{id}/runs
-- GET /api/workflows/{id}/logs
-- POST /api/workflows/{id}/run
-- POST /api/workflows/{id}/save
+## Available Commands
 
-## Notes
-- Current implementation uses in-memory data.
-- /run 会通过 Temporal client 触发 `BusinessWorkflow`。
-- 若 Temporal 未启动，/run 会返回 503。
+```
+make dev      - Start all services (Temporal + Worker + FastAPI)
+make stop     - Stop all services
+make temporal - Start Temporal Server only
+make worker   - Start Worker only
+make api      - Start FastAPI only
+make logs     - View background service logs
+make clean    - Clean log files
+```
+
+## API Endpoints (v2)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v2/workflows` | List workflows |
+| GET | `/api/v2/workflows/{id}` | Get workflow detail |
+| POST | `/api/v2/workflows` | Create workflow |
+| PUT | `/api/v2/workflows/{id}` | Update workflow |
+| POST | `/api/v2/workflows/{id}/run` | Execute workflow |
+| GET | `/api/v2/workflows/{id}/runs` | List run history |
+| GET | `/api/v2/sse/stream/{run_id}` | SSE event stream |
+
+## Run Tests
+
+```bash
+source .venv/bin/activate
+pytest tests/ -v
+```

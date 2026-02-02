@@ -12,6 +12,8 @@ export interface AgentNodeData {
   nodeType?: string;
   config?: Record<string, unknown>;
   editorMode?: "view" | "edit";
+  iteration?: number;
+  maxIterations?: number;
   [key: string]: unknown;
 }
 
@@ -60,6 +62,11 @@ function AgentNodeComponent({ data }: NodeProps) {
         <span className={`h-2 w-2 rounded-full ${styles.dot}`} />
         {isEdit && <span className="text-xs">{icon}</span>}
         <span className="text-sm font-medium text-slate-800">{nodeData.label}</span>
+        {nodeData.iteration != null && nodeData.iteration > 0 && (
+          <span className="ml-auto rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-700">
+            {nodeData.iteration}/{nodeData.maxIterations || "?"}
+          </span>
+        )}
       </div>
 
       {isEdit && nodeData.nodeType && (

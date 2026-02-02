@@ -40,8 +40,13 @@ class DynamicWorkflow:
         }
 
         # Timeout scales with node count (5 min per node, min 10 min)
-        node_count = len(params.get("workflow_definition", {}).get("nodes", []))
-        timeout_minutes = max(10, node_count * 5)
+        # For loops: multiply by max_iterations since nodes may execute multiple times
+        wf_def = params.get("workflow_definition", {})
+        node_count = len(wf_def.get("nodes", []))
+        max_iterations = wf_def.get("max_iterations", 10)
+        base_timeout = max(10, node_count * 5)
+        # If max_iterations > 1 (loops may exist), scale timeout accordingly
+        timeout_minutes = base_timeout * max(1, max_iterations // 5 + 1) if max_iterations > 1 else base_timeout
 
         self._result = await workflow.execute_activity(
             execute_dynamic_graph_activity,

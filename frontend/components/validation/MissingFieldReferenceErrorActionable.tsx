@@ -74,7 +74,7 @@ export function MissingFieldReferenceErrorActionable({
             </code>
           </div>
           <div className="text-xs text-gray-600">
-            上游节点: {upstream_node_ids.join(', ')}
+            上游节点: {upstream_node_ids?.join(', ') ?? '无'}
           </div>
         </div>
       </div>

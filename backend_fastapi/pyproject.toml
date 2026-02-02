@@ -29,5 +29,8 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["app*", "workflow*"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.uvicorn]
 factory = false

@@ -36,7 +36,7 @@ import { EditorToolbar, type EditorMode } from "@/components/workflow-editor/Edi
 import { NodePalette } from "@/components/workflow-editor/NodePalette";
 import { NodeConfigPanel } from "@/components/workflow-editor/NodeConfigPanel";
 import { EdgeConfigPanel } from "@/components/workflow-editor/EdgeConfigPanel";
-import { toWorkflowDefinition, fromWorkflowDefinition } from "@/lib/workflow-converter";
+import { toWorkflowDefinition, fromWorkflowDefinition, applyLoopStyles } from "@/lib/workflow-converter";
 
 const nodeTypes = { agentNode: AgentNode };
 
@@ -53,7 +53,7 @@ type FlowEdge = {
   target: string;
   animated?: boolean;
   style?: Record<string, unknown>;
-  data?: { condition?: string };
+  data?: { condition?: string; isLoop?: boolean };
 };
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -107,6 +107,7 @@ function WorkflowPage() {
   const [editorMode, setEditorMode] = useState<EditorMode>("view");
   const [graphChanged, setGraphChanged] = useState(false);
   const [savingGraph, setSavingGraph] = useState(false);
+  const [maxIterations, setMaxIterations] = useState(10);
 
   // Execution status
   const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
@@ -214,6 +215,25 @@ function WorkflowPage() {
           ...prev,
           sseEvents: [
             { time: timestamp, type: "output", message: `${nodeLabel} 输出: ${typeof output === 'string' ? output.slice(0, 100) : '...'}` },
+            ...prev.sseEvents.slice(0, 49),
+          ],
+        }));
+      } else if (event.type === "loop_iteration") {
+        const { node, iteration, max_iterations } = event.data;
+        const nodeLabel = node;
+
+        setNodes((nds) =>
+          nds.map((n) =>
+            n.id === node
+              ? { ...n, data: { ...n.data, iteration, maxIterations: max_iterations } }
+              : n
+          )
+        );
+
+        setExecutionStatus((prev) => ({
+          ...prev,
+          sseEvents: [
+            { time: timestamp, type: "info", message: `🔄 ${nodeLabel} 循环迭代 ${iteration}/${max_iterations}` },
             ...prev.sseEvents.slice(0, 49),
           ],
         }));
@@ -340,15 +360,17 @@ function WorkflowPage() {
   const onConnect = useCallback(
     (params: Connection) => {
       if (editorMode !== "edit") return;
-      setEdges((eds) =>
-        addEdge(
+      setEdges((eds) => {
+        const newEdges = addEdge(
           { ...params, style: { stroke: "#94a3b8", strokeWidth: 2 } },
           eds
-        )
-      );
+        );
+        // Re-detect loop edges and apply styling
+        return applyLoopStyles(nodes as FlowNode[], newEdges as FlowEdge[]) as typeof newEdges;
+      });
       setGraphChanged(true);
     },
-    [editorMode, setEdges]
+    [editorMode, setEdges, nodes]
   );
 
   const onDragOver = useCallback((event: DragEvent) => {
@@ -422,23 +444,27 @@ function WorkflowPage() {
 
   const handleEdgeUpdate = useCallback(
     (edgeId: string, data: Partial<FlowEdge>) => {
-      setEdges((eds) =>
-        eds.map((e) =>
+      setEdges((eds) => {
+        const updated = eds.map((e) =>
           e.id === edgeId ? { ...e, ...data } : e
-        )
-      );
+        );
+        return applyLoopStyles(nodes as FlowNode[], updated as FlowEdge[]) as typeof updated;
+      });
       setGraphChanged(true);
       setSelectedEdge(null);
     },
-    [setEdges]
+    [setEdges, nodes]
   );
 
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
-      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+      setEdges((eds) => {
+        const filtered = eds.filter((e) => e.id !== edgeId);
+        return applyLoopStyles(nodes as FlowNode[], filtered as FlowEdge[]) as typeof filtered;
+      });
       setGraphChanged(true);
     },
-    [setEdges]
+    [setEdges, nodes]
   );
 
   const handleNodeUpdate = useCallback(
@@ -497,7 +523,7 @@ function WorkflowPage() {
 
     setSavingGraph(true);
     try {
-      const definition = toWorkflowDefinition(nodes, edges, workflow.name);
+      const definition = toWorkflowDefinition(nodes, edges, workflow.name, maxIterations);
       await saveWorkflowGraph(workflow.id, {
         nodes: definition.nodes,
         edges: definition.edges,
@@ -509,7 +535,7 @@ function WorkflowPage() {
     } finally {
       setSavingGraph(false);
     }
-  }, [workflow, nodes, edges]);
+  }, [workflow, nodes, edges, maxIterations]);
 
   // ============ Run/Save handlers ============
 
@@ -788,8 +814,33 @@ function WorkflowPage() {
                 onDelete={handleEdgeDelete}
               />
             ) : (
-              <div className="flex h-full items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm">
-                <p className="text-sm text-slate-400">点击节点或连接进行配置</p>
+              <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-200 px-4 py-3">
+                  <h3 className="font-semibold text-slate-800">工作流设置</h3>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-slate-600">最大循环迭代次数</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={maxIterations}
+                        onChange={(e) => {
+                          setMaxIterations(Math.max(1, Math.min(100, Number(e.target.value) || 10)));
+                          setGraphChanged(true);
+                        }}
+                        className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                      />
+                      <p className="text-[10px] text-slate-400">
+                        循环路径中节点的最大重复执行次数（防止无限循环），默认 10
+                      </p>
+                    </div>
+                    <hr className="border-slate-100" />
+                    <p className="text-xs text-slate-400">点击节点或连接进行配置</p>
+                  </div>
+                </div>
               </div>
             )}
           </div>

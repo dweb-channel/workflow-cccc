@@ -103,7 +103,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
       typeof detail === "string"
         ? detail
         : typeof detail === "object" && detail !== null
-          ? (detail as { message?: string }).message ?? JSON.stringify(detail)
+          ? (() => {
+              const d = detail as { message?: string; errors?: string[] };
+              const base = d.message ?? "";
+              if (d.errors?.length) {
+                return base ? `${base}\n\n${d.errors.join("\n")}` : d.errors.join("\n");
+              }
+              return base || JSON.stringify(detail);
+            })()
           : `HTTP ${response.status}: ${response.statusText}`;
     throw new Error(message);
   }
@@ -164,7 +171,14 @@ export async function deleteWorkflow(id: string): Promise<void> {
       typeof detail === "string"
         ? detail
         : typeof detail === "object" && detail !== null
-          ? (detail as { message?: string }).message ?? JSON.stringify(detail)
+          ? (() => {
+              const d = detail as { message?: string; errors?: string[] };
+              const base = d.message ?? "";
+              if (d.errors?.length) {
+                return base ? `${base}\n\n${d.errors.join("\n")}` : d.errors.join("\n");
+              }
+              return base || JSON.stringify(detail);
+            })()
           : `HTTP ${response.status}: ${response.statusText}`;
     throw new Error(message);
   }

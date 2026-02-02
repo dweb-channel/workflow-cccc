@@ -13,7 +13,7 @@ interface FlowEdge {
   animated?: boolean;
   style?: Record<string, unknown>;
   label?: string;
-  data?: { condition?: string; branches?: Record<string, string> };
+  data?: { condition?: string; branches?: Record<string, string>; isLoop?: boolean };
 }
 
 interface EdgeConfigPanelProps {
@@ -37,17 +37,22 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
   if (!edge) return null;
 
   const isConditional = condition.trim().length > 0;
+  const isLoop = edge.data?.isLoop === true;
 
   const handleSave = () => {
+    const style = isLoop
+      ? { stroke: "#f97316", strokeWidth: 2, strokeDasharray: "5 4" }
+      : isConditional
+        ? { stroke: "#9333ea", strokeWidth: 2, strokeDasharray: "6 3" }
+        : { stroke: "#94a3b8", strokeWidth: 2 };
+
     onUpdate(edge.id, {
       label: edgeLabel || undefined,
       data: {
         ...(edge.data || {}),
         condition: condition.trim() || undefined,
       },
-      style: isConditional
-        ? { stroke: "#9333ea", strokeWidth: 2, strokeDasharray: "6 3" }
-        : { stroke: "#94a3b8", strokeWidth: 2 },
+      style,
     });
   };
 
@@ -140,12 +145,32 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
             </div>
           </div>
 
+          {/* Loop indicator */}
+          {isLoop && (
+            <div className="rounded-md border border-orange-200 bg-orange-50 p-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm">🔄</span>
+                <span className="text-xs font-medium text-orange-700">循环回路边</span>
+              </div>
+              <p className="mt-1 text-[10px] text-orange-600">
+                此连接形成循环。需要循环路径中有 condition 节点控制退出。
+              </p>
+            </div>
+          )}
+
           {/* Preview */}
           <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-medium text-slate-500">预览样式</p>
             <div className="mt-2 flex items-center gap-2">
               <svg width="80" height="20">
-                {isConditional ? (
+                {isLoop ? (
+                  <line
+                    x1="0" y1="10" x2="80" y2="10"
+                    stroke="#f97316"
+                    strokeWidth="2"
+                    strokeDasharray="5 4"
+                  />
+                ) : isConditional ? (
                   <line
                     x1="0" y1="10" x2="80" y2="10"
                     stroke="#9333ea"
@@ -161,7 +186,7 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
                 )}
               </svg>
               <span className="text-xs text-slate-500">
-                {isConditional ? "条件边" : "普通连接"}
+                {isLoop ? "循环回路边" : isConditional ? "条件边" : "普通连接"}
               </span>
             </div>
           </div>

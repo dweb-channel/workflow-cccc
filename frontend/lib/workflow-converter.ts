@@ -24,6 +24,7 @@ export interface WorkflowDefinition {
   nodes: NodeConfig[];
   edges: EdgeDefinition[];
   entry_point?: string;
+  max_iterations?: number;
 }
 
 // ============ React Flow Types ============
@@ -42,7 +43,80 @@ export interface FlowEdge {
   animated?: boolean;
   style?: Record<string, unknown>;
   label?: string;
-  data?: { condition?: string; branches?: Record<string, string> };
+  data?: { condition?: string; branches?: Record<string, string>; isLoop?: boolean };
+}
+
+// ============ Loop Detection ============
+
+/**
+ * Detect back edges (edges that create cycles) using DFS.
+ * Returns a Set of edge IDs that are loop/back edges.
+ */
+export function detectLoopEdges(
+  nodes: FlowNode[],
+  edges: FlowEdge[]
+): Set<string> {
+  const adj = new Map<string, Array<{ target: string; edgeId: string }>>();
+  for (const edge of edges) {
+    if (!adj.has(edge.source)) adj.set(edge.source, []);
+    adj.get(edge.source)!.push({ target: edge.target, edgeId: edge.id });
+  }
+
+  const backEdgeIds = new Set<string>();
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+
+  function dfs(node: string) {
+    visited.add(node);
+    inStack.add(node);
+
+    for (const { target, edgeId } of adj.get(node) || []) {
+      if (inStack.has(target)) {
+        backEdgeIds.add(edgeId);
+      } else if (!visited.has(target)) {
+        dfs(target);
+      }
+    }
+
+    inStack.delete(node);
+  }
+
+  for (const node of nodes) {
+    if (!visited.has(node.id)) {
+      dfs(node.id);
+    }
+  }
+
+  return backEdgeIds;
+}
+
+// ============ Edge Styling ============
+
+const EDGE_STYLE_NORMAL = { stroke: "#94a3b8", strokeWidth: 2 };
+const EDGE_STYLE_CONDITION = { stroke: "#9333ea", strokeWidth: 2, strokeDasharray: "6 3" };
+const EDGE_STYLE_LOOP = { stroke: "#f97316", strokeWidth: 2, strokeDasharray: "5 4" };
+
+export function getEdgeStyle(edge: FlowEdge, isLoop: boolean) {
+  if (isLoop) return EDGE_STYLE_LOOP;
+  if (edge.data?.condition) return EDGE_STYLE_CONDITION;
+  return EDGE_STYLE_NORMAL;
+}
+
+/**
+ * Apply loop detection and styling to all edges.
+ * Returns new edges array with updated styles and data.isLoop flags.
+ */
+export function applyLoopStyles(nodes: FlowNode[], edges: FlowEdge[]): FlowEdge[] {
+  const loopEdgeIds = detectLoopEdges(nodes, edges);
+
+  return edges.map((e) => {
+    const isLoop = loopEdgeIds.has(e.id);
+    return {
+      ...e,
+      style: getEdgeStyle(e, isLoop),
+      data: { ...e.data, isLoop },
+    };
+  });
 }
 
 // ============ Converters ============
@@ -53,7 +127,8 @@ export interface FlowEdge {
 export function toWorkflowDefinition(
   nodes: FlowNode[],
   edges: FlowEdge[],
-  workflowName: string
+  workflowName: string,
+  maxIterations?: number
 ): WorkflowDefinition {
   const wfNodes: NodeConfig[] = nodes.map((n) => ({
     id: n.id,
@@ -73,15 +148,20 @@ export function toWorkflowDefinition(
     condition: e.data?.condition,
   }));
 
-  // Detect entry point: node with no incoming edges
-  const targets = new Set(edges.map((e) => e.target));
-  const entryNode = nodes.find((n) => !targets.has(n.id));
+  // Detect entry point: node with no incoming non-loop edges
+  // In cyclic graphs, exclude back edges when finding the entry point
+  const loopEdgeIds = detectLoopEdges(nodes, edges);
+  const nonLoopTargets = new Set(
+    edges.filter((e) => !loopEdgeIds.has(e.id)).map((e) => e.target)
+  );
+  const entryNode = nodes.find((n) => !nonLoopTargets.has(n.id));
 
   return {
     name: workflowName,
     nodes: wfNodes,
     edges: wfEdges,
     entry_point: entryNode?.id,
+    max_iterations: maxIterations,
   };
 }
 
@@ -115,10 +195,11 @@ export function fromWorkflowDefinition(
     source: e.source,
     target: e.target,
     style: e.condition
-      ? { stroke: "#9333ea", strokeWidth: 2, strokeDasharray: "6 3" }
-      : { stroke: "#94a3b8", strokeWidth: 2 },
+      ? EDGE_STYLE_CONDITION
+      : EDGE_STYLE_NORMAL,
     data: e.condition ? { condition: e.condition } : undefined,
   }));
 
-  return { nodes, edges };
+  // Apply loop detection and styling after initial conversion
+  return { nodes, edges: applyLoopStyles(nodes, edges) };
 }

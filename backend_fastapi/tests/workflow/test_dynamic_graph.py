@@ -12,11 +12,13 @@ import pytest
 
 from workflow.engine.graph_builder import (
     EdgeDefinition,
+    LoopInfo,
     NodeConfig,
     WorkflowDefinition,
     build_graph_from_config,
     detect_circular_dependency,
     detect_dangling_nodes,
+    detect_loops,
     get_execution_order,
     topological_sort,
     validate_workflow,
@@ -299,7 +301,7 @@ class TestTopologicalSort:
             ]
         )
 
-        with pytest.raises(ValueError, match="contains cycles"):
+        with pytest.raises(ValueError, match="uncontrolled cycles"):
             topological_sort(workflow)
 
 
@@ -458,6 +460,211 @@ class TestGraphBuilding:
         order = get_execution_order(workflow)
 
         assert order == ["node-1", "node-2", "node-3"]
+
+
+class TestLoopDetection:
+    """Test loop detection and controlled loop support."""
+
+    def test_detect_loops_no_loops(self):
+        """Test detect_loops on DAG workflow returns empty list."""
+        workflow = WorkflowDefinition(
+            name="dag",
+            nodes=[
+                NodeConfig(id="node-1", type="data_source", config={"name": "Source"}),
+                NodeConfig(id="node-2", type="data_processor", config={"name": "P", "input_field": "x"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="node-1", target="node-2"),
+            ]
+        )
+
+        loops = detect_loops(workflow)
+        assert len(loops) == 0
+
+    def test_detect_loops_uncontrolled(self):
+        """Test detect_loops finds uncontrolled cycle (no condition exit)."""
+        workflow = WorkflowDefinition(
+            name="uncontrolled_loop",
+            nodes=[
+                NodeConfig(id="node-1", type="data_processor", config={"name": "A", "input_field": "x"}),
+                NodeConfig(id="node-2", type="data_processor", config={"name": "B", "input_field": "y"}),
+                NodeConfig(id="node-3", type="data_processor", config={"name": "C", "input_field": "z"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="node-1", target="node-2"),
+                EdgeDefinition(id="edge-2", source="node-2", target="node-3"),
+                EdgeDefinition(id="edge-3", source="node-3", target="node-1"),
+            ]
+        )
+
+        loops = detect_loops(workflow)
+        assert len(loops) == 1
+        assert loops[0].has_condition_exit is False
+        assert loops[0].condition_node_id is None
+
+    def test_detect_loops_controlled_with_condition(self):
+        """Test detect_loops finds controlled loop with condition node exit."""
+        workflow = WorkflowDefinition(
+            name="controlled_loop",
+            nodes=[
+                NodeConfig(id="start", type="data_source", config={"name": "Start"}),
+                NodeConfig(id="process", type="data_processor", config={"name": "Process", "input_field": "x"}),
+                NodeConfig(id="check", type="condition", config={
+                    "name": "Check",
+                    "condition": "done == True",
+                }),
+                NodeConfig(id="output", type="output", config={"name": "Output", "format": "json"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="start", target="process"),
+                EdgeDefinition(id="edge-2", source="process", target="check"),
+                EdgeDefinition(id="edge-3", source="check", target="process", condition="done != True"),
+                EdgeDefinition(id="edge-4", source="check", target="output", condition="done == True"),
+            ]
+        )
+
+        loops = detect_loops(workflow)
+        assert len(loops) == 1
+        assert loops[0].has_condition_exit is True
+        assert loops[0].condition_node_id == "check"
+
+    def test_self_loop_still_rejected(self):
+        """Test that self-loops are still rejected at EdgeDefinition level."""
+        with pytest.raises(ValueError, match="self-loop detected"):
+            EdgeDefinition(id="edge-1", source="node-1", target="node-1")
+
+    def test_max_iterations_default(self):
+        """Test WorkflowDefinition max_iterations defaults to 10."""
+        workflow = WorkflowDefinition(
+            name="test",
+            nodes=[NodeConfig(id="n1", type="data_source", config={"name": "S"})],
+            edges=[],
+        )
+        assert workflow.max_iterations == 10
+
+    def test_max_iterations_custom(self):
+        """Test WorkflowDefinition accepts custom max_iterations."""
+        workflow = WorkflowDefinition(
+            name="test",
+            nodes=[NodeConfig(id="n1", type="data_source", config={"name": "S"})],
+            edges=[],
+            max_iterations=5,
+        )
+        assert workflow.max_iterations == 5
+
+    def test_validate_controlled_loop_passes(self):
+        """Test that validation passes for controlled loops (warning, not error)."""
+        workflow = WorkflowDefinition(
+            name="controlled_loop",
+            nodes=[
+                NodeConfig(id="start", type="data_source", config={"name": "Start"}),
+                NodeConfig(id="process", type="data_processor", config={"name": "Process", "input_field": "x"}),
+                NodeConfig(id="check", type="condition", config={
+                    "name": "Check",
+                    "condition": "done == True",
+                }),
+                NodeConfig(id="output", type="output", config={"name": "Output", "format": "json"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="start", target="process"),
+                EdgeDefinition(id="edge-2", source="process", target="check"),
+                EdgeDefinition(id="edge-3", source="check", target="process", condition="done != True"),
+                EdgeDefinition(id="edge-4", source="check", target="output", condition="done == True"),
+            ]
+        )
+
+        result = validate_workflow(workflow)
+        assert result.valid is True
+        # Should have a CONTROLLED_LOOP warning
+        loop_warnings = [w for w in result.warnings if w.code == "CONTROLLED_LOOP"]
+        assert len(loop_warnings) == 1
+        assert "check" in loop_warnings[0].context["condition_node_id"]
+
+    def test_validate_uncontrolled_loop_fails(self):
+        """Test that validation fails for uncontrolled loops."""
+        workflow = WorkflowDefinition(
+            name="uncontrolled_loop",
+            nodes=[
+                NodeConfig(id="node-1", type="data_processor", config={"name": "A", "input_field": "x"}),
+                NodeConfig(id="node-2", type="data_processor", config={"name": "B", "input_field": "y"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="node-1", target="node-2"),
+                EdgeDefinition(id="edge-2", source="node-2", target="node-1"),
+            ]
+        )
+
+        result = validate_workflow(workflow)
+        assert result.valid is False
+        circ_errors = [e for e in result.errors if e.code == "CIRCULAR_DEPENDENCY"]
+        assert len(circ_errors) == 1
+
+    def test_topological_sort_with_controlled_loop(self):
+        """Test topological sort handles controlled loops gracefully."""
+        workflow = WorkflowDefinition(
+            name="controlled_loop",
+            nodes=[
+                NodeConfig(id="start", type="data_source", config={"name": "Start"}),
+                NodeConfig(id="process", type="data_processor", config={"name": "Process", "input_field": "x"}),
+                NodeConfig(id="check", type="condition", config={
+                    "name": "Check",
+                    "condition": "done == True",
+                }),
+                NodeConfig(id="output", type="output", config={"name": "Output", "format": "json"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="start", target="process"),
+                EdgeDefinition(id="edge-2", source="process", target="check"),
+                EdgeDefinition(id="edge-3", source="check", target="process", condition="done != True"),
+                EdgeDefinition(id="edge-4", source="check", target="output", condition="done == True"),
+            ]
+        )
+
+        order = topological_sort(workflow)
+        # start should be first (only node with no incoming edges from non-loop edges)
+        assert order[0] == "start"
+        # All nodes should be present
+        assert set(order) == {"start", "process", "check", "output"}
+
+    def test_topological_sort_uncontrolled_loop_raises(self):
+        """Test topological sort raises error for uncontrolled loops."""
+        workflow = WorkflowDefinition(
+            name="uncontrolled",
+            nodes=[
+                NodeConfig(id="node-1", type="data_processor", config={"name": "A", "input_field": "x"}),
+                NodeConfig(id="node-2", type="data_processor", config={"name": "B", "input_field": "y"}),
+            ],
+            edges=[
+                EdgeDefinition(id="edge-1", source="node-1", target="node-2"),
+                EdgeDefinition(id="edge-2", source="node-2", target="node-1"),
+            ]
+        )
+
+        with pytest.raises(ValueError, match="uncontrolled cycles"):
+            topological_sort(workflow)
+
+    def test_detect_circular_dependency_backward_compat(self):
+        """Test legacy detect_circular_dependency allows controlled loops."""
+        # Controlled loop — should return None (no error)
+        workflow = WorkflowDefinition(
+            name="controlled",
+            nodes=[
+                NodeConfig(id="process", type="data_processor", config={"name": "P", "input_field": "x"}),
+                NodeConfig(id="check", type="condition", config={
+                    "name": "Check",
+                    "condition_expression": "True",
+                }),
+                NodeConfig(id="output", type="output", config={"name": "Out"}),
+            ],
+            edges=[
+                EdgeDefinition(id="e1", source="process", target="check"),
+                EdgeDefinition(id="e2", source="check", target="process", condition="not done"),
+                EdgeDefinition(id="e3", source="check", target="output", condition="done"),
+            ]
+        )
+
+        error = detect_circular_dependency(workflow)
+        assert error is None
 
 
 if __name__ == "__main__":
