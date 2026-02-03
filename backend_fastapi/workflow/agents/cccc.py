@@ -199,27 +199,31 @@ class CCCCClient:
     This client allows Temporal workflow activities to send messages to CCCC peers
     and wait for their responses.
 
-    Uses a dedicated inbox actor (workflow-inbox) for response polling. Since this
-    inbox is only read by the workflow (not by human users), the "unread" status
-    remains reliable and messages won't be accidentally marked as read.
+    Architecture: Workflow → Foreman → Peers → Foreman → Workflow
+    - Sends requests to foreman (master) who coordinates peer execution
+    - Foreman delegates to appropriate peers and consolidates results
+    - Uses a single workflow actor for both sending and receiving
 
     Args:
         group_id: The CCCC working group ID
-        send_as: The actor ID to use for sending messages (default: "workflow-activity")
-        inbox_as: The actor ID to use for reading inbox (default: "workflow-inbox")
+        actor_id: The actor ID for workflow communication (default: "workflow-activity")
+        foreman_id: The foreman actor ID to coordinate with (default: "master")
         mock: If True, return mock responses instead of calling the daemon
     """
 
     def __init__(
         self,
         group_id: str,
-        send_as: str = "workflow-activity",
-        inbox_as: str = "workflow-inbox",  # Dedicated inbox actor for workflow
+        actor_id: str = "workflow-activity",
+        foreman_id: str = "master",
         mock: bool = False,
     ):
         self.group_id = group_id
-        self.send_as = send_as
-        self.inbox_as = inbox_as
+        self.actor_id = actor_id
+        self.foreman_id = foreman_id
+        # Keep backward compatibility
+        self.send_as = actor_id
+        self.inbox_as = actor_id
         self.mock = mock
         self._paths = _default_paths()
 
@@ -438,35 +442,51 @@ class CCCCClient:
         prompt: str,
         command: Optional[str] = None,
         timeout: float = 120.0,
+        via_foreman: bool = True,
     ) -> Optional[str]:
         """Send a prompt to a peer and wait for response.
 
-        This is a convenience method that combines send_to_peer and wait_for_response.
+        When via_foreman=True (default), sends to foreman who coordinates the peer.
+        This integrates naturally with CCCC's collaboration model.
 
         Args:
             peer_id: The peer's actor ID
             prompt: The prompt text
             command: Optional command prefix (e.g., "/brainstorm")
             timeout: Maximum time to wait for response
+            via_foreman: If True, route through foreman; if False, send directly to peer
 
         Returns:
             The peer's response text, or None if timeout/error
         """
         # Build message
-        text = f"{command} {prompt}" if command else prompt
+        base_text = f"{command} {prompt}" if command else prompt
+
+        if via_foreman:
+            # Send to foreman with peer context
+            text = f"[Workflow 任务] 请让 {peer_id} 执行以下任务，完成后请回复结果：\n\n{base_text}"
+            target = self.foreman_id
+            wait_for = self.foreman_id
+            logger.info(f"Sending task to foreman ({self.foreman_id}) for peer {peer_id}")
+        else:
+            # Direct peer communication (legacy mode)
+            text = base_text
+            target = peer_id
+            wait_for = peer_id
+            logger.info(f"Sending task directly to peer {peer_id}")
 
         # Send message
-        send_resp = self.send_to_peer(peer_id=peer_id, text=text)
+        send_resp = self.send_to_peer(peer_id=target, text=text)
         if not send_resp.get("ok"):
-            logger.error(f"Failed to send to {peer_id}: {send_resp.get('error')}")
+            logger.error(f"Failed to send to {target}: {send_resp.get('error')}")
             return None
 
         # Extract send timestamp to filter responses
         send_ts = send_resp.get("result", {}).get("event", {}).get("ts", "")
 
-        # Wait for response (only messages after our send)
+        # Wait for response from foreman or peer
         return await self.wait_for_response(
-            from_peer=peer_id,
+            from_peer=wait_for,
             after_ts=send_ts,
             timeout=timeout,
         )

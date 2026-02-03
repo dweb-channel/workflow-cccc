@@ -46,9 +46,21 @@ def _workflow_to_response(wf) -> WorkflowResponse:
 
 
 def _parse_graph_definition(gd: GraphDefinitionRequest) -> dict:
-    """Convert GraphDefinitionRequest to storable dict."""
+    """Convert GraphDefinitionRequest to storable dict.
+
+    Normalizes frontend format (data.config) to backend format (config).
+    """
+    nodes = []
+    for n in gd.nodes:
+        # Extract config from either format
+        config = n.get_config()
+        nodes.append({
+            "id": n.id,
+            "type": n.type,
+            "config": config,
+        })
     return {
-        "nodes": [n.model_dump() for n in gd.nodes],
+        "nodes": nodes,
         "edges": [e.model_dump() for e in gd.edges],
         "entry_point": gd.entry_point,
     }

@@ -674,13 +674,12 @@ def build_graph_from_config(workflow: WorkflowDefinition):
     # For loops: max_iterations * number_of_nodes_in_loop + non-loop steps
     loops = detect_loops(workflow)
     if loops:
-        recursion_limit = workflow.max_iterations * len(workflow.nodes) + len(workflow.nodes)
         logger.info(
-            f"Workflow has {len(loops)} loop(s), setting recursion_limit={recursion_limit} "
-            f"(max_iterations={workflow.max_iterations})"
+            f"Workflow has {len(loops)} loop(s), max_iterations={workflow.max_iterations}"
         )
-        return graph.compile(recursion_limit=recursion_limit)
 
+    # Note: recursion_limit is now passed at runtime via astream/ainvoke config
+    # See executor.py for the config parameter
     return graph.compile()
 
 

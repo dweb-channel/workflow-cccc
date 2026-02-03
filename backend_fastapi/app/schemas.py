@@ -7,11 +7,38 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class NodeDataRequest(BaseModel):
+    """Node data in frontend format (React Flow)."""
+    label: Optional[str] = None
+    config: dict = Field(default_factory=dict)
+
+
 class NodeConfigRequest(BaseModel):
-    """Node configuration in API request."""
+    """Node configuration in API request.
+
+    Supports both formats:
+    - Frontend (React Flow): node.data.label, node.data.config
+    - Legacy: node.config directly
+    """
     id: str
     type: str
+    position: Optional[dict] = None
+    # Frontend format (React Flow)
+    data: Optional[NodeDataRequest] = None
+    # Legacy format
     config: dict = Field(default_factory=dict)
+
+    def get_config(self) -> dict:
+        """Get config from either format."""
+        if self.data and self.data.config:
+            return self.data.config
+        return self.config
+
+    def get_label(self) -> str:
+        """Get label from data or config.name."""
+        if self.data and self.data.label:
+            return self.data.label
+        return self.config.get("name", "")
 
 
 class EdgeRequest(BaseModel):

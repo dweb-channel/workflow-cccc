@@ -19,6 +19,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   type V2WorkflowResponse,
   listWorkflows,
@@ -35,6 +46,7 @@ import { connectSSE, type SSEEvent } from "@/lib/sse";
 import { EditorToolbar, type EditorMode } from "@/components/workflow-editor/EditorToolbar";
 import { NodePalette } from "@/components/workflow-editor/NodePalette";
 import { NodeConfigPanel } from "@/components/workflow-editor/NodeConfigPanel";
+import { TemplateSelector, type TemplateDetail } from "@/components/workflow-editor/TemplateSelector";
 import { EdgeConfigPanel } from "@/components/workflow-editor/EdgeConfigPanel";
 import { toWorkflowDefinition, fromWorkflowDefinition, applyLoopStyles } from "@/lib/workflow-converter";
 
@@ -93,6 +105,7 @@ function formatRelativeTime(isoString: string): string {
 let nodeIdCounter = 0;
 
 function WorkflowPage() {
+  const { toast } = useToast();
   const [workflow, setWorkflow] = useState<V2WorkflowResponse | null>(null);
   const [workflowList, setWorkflowList] = useState<V2WorkflowResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -102,6 +115,10 @@ function WorkflowPage() {
   const [creating, setCreating] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+
+  // Delete confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // Editor mode
   const [editorMode, setEditorMode] = useState<EditorMode>("view");
@@ -306,14 +323,28 @@ function WorkflowPage() {
       await refreshWorkflowList();
       await loadWorkflow(newWf.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "创建失败");
+      toast({
+        title: "创建失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
     } finally {
       setCreating(false);
     }
-  }, [refreshWorkflowList, loadWorkflow]);
+  }, [refreshWorkflowList, loadWorkflow, toast]);
 
-  const handleDeleteWorkflow = useCallback(async (id: string) => {
-    if (!confirm("确定删除此工作流？")) return;
+  // Open delete confirmation dialog
+  const handleDeleteWorkflow = useCallback((id: string) => {
+    setPendingDeleteId(id);
+    setDeleteDialogOpen(true);
+  }, []);
+
+  // Execute delete after confirmation
+  const handleConfirmDelete = useCallback(async () => {
+    if (!pendingDeleteId) return;
+    const id = pendingDeleteId;
+    setDeleteDialogOpen(false);
+    setPendingDeleteId(null);
     try {
       await deleteWorkflow(id);
       const items = await refreshWorkflowList();
@@ -327,9 +358,46 @@ function WorkflowPage() {
         }
       }
     } catch (err) {
-      alert(err instanceof Error ? err.message : "删除失败");
+      toast({
+        title: "删除失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
     }
-  }, [refreshWorkflowList, loadWorkflow, workflow, setNodes, setEdges]);
+  }, [pendingDeleteId, refreshWorkflowList, loadWorkflow, workflow, setNodes, setEdges, toast]);
+
+  // Handle template selection - apply template to current canvas
+  const handleApplyTemplate = useCallback((template: TemplateDetail) => {
+    // Convert template nodes to FlowNode format
+    // Templates use standard React Flow format: node.data.label, node.data.config
+    const templateNodes = template.nodes.map((node) => ({
+      id: node.id,
+      type: "agentNode",
+      position: node.position,
+      data: {
+        label: (node.data?.label as string) || node.id,
+        icon: (node.data?.icon as string) || "🔷",
+        status: "pending" as const,
+        nodeType: node.type,
+        config: (node.data?.config || {}) as Record<string, unknown>,
+        editorMode,
+      },
+    }));
+
+    // Convert template edges to FlowEdge format
+    const templateEdges = template.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      style: { stroke: "#94a3b8", strokeWidth: 2 },
+      data: edge.data,
+    }));
+
+    setNodes(templateNodes as FlowNode[]);
+    setEdges(applyLoopStyles(templateNodes as FlowNode[], templateEdges as FlowEdge[]) as FlowEdge[]);
+    setGraphChanged(true);
+    setEditorMode("edit");
+  }, [setNodes, setEdges, editorMode]);
 
   const handleSwitchWorkflow = useCallback(async (id: string) => {
     if (id === workflow?.id) return;
@@ -350,10 +418,14 @@ function WorkflowPage() {
       await refreshWorkflowList();
       if (workflow?.id === id) setWorkflow(updated);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "重命名失败");
+      toast({
+        title: "重命名失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
     }
     setRenamingId(null);
-  }, [renameValue, refreshWorkflowList, workflow]);
+  }, [renameValue, refreshWorkflowList, workflow, toast]);
 
   // ============ Editor handlers ============
 
@@ -517,7 +589,11 @@ function WorkflowPage() {
     }
 
     if (validationErrors.length > 0) {
-      alert("请补充必填字段：\n\n" + validationErrors.join("\n"));
+      toast({
+        title: "请补充必填字段",
+        description: validationErrors.join("；"),
+        variant: "destructive",
+      });
       return;
     }
 
@@ -531,11 +607,15 @@ function WorkflowPage() {
       });
       setGraphChanged(false);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "保存图失败");
+      toast({
+        title: "保存图失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
     } finally {
       setSavingGraph(false);
     }
-  }, [workflow, nodes, edges, maxIterations]);
+  }, [workflow, nodes, edges, maxIterations, toast]);
 
   // ============ Run/Save handlers ============
 
@@ -605,9 +685,16 @@ function WorkflowPage() {
         description: workflow.description || undefined,
       });
       setWorkflow(result);
-      alert("保存成功");
+      toast({
+        title: "保存成功",
+        description: "工作流草稿已保存",
+      });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "保存失败");
+      toast({
+        title: "保存失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
     } finally {
       setSaving(false);
     }
@@ -705,6 +792,13 @@ function WorkflowPage() {
               );
             })
           )}
+        </div>
+        {/* Template Selector */}
+        <div className="border-t border-slate-200 p-2">
+          <TemplateSelector
+            onSelectTemplate={handleApplyTemplate}
+            disabled={!workflow || running}
+          />
         </div>
       </aside>
 
@@ -902,6 +996,22 @@ function WorkflowPage() {
         </div>
       )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确定删除此工作流？</AlertDialogTitle>
+            <AlertDialogDescription>
+              此操作不可撤销，删除后工作流将永久丢失。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPendingDeleteId(null)}>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete}>确认删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

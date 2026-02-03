@@ -1,0 +1,107 @@
+{
+  "name": "pixcheese_preview_bug_fix",
+  "title": "Pixcheese Preview Bug 修复",
+  "description": "专用于 pixcheese-preview 项目的 Bug 修复工作流，调用 CCCC 组 g_46751ce92de1 中的 peers",
+  "icon": "🔧",
+  "max_iterations": 3,
+  "cccc_config": {
+    "group_id": "g_46751ce92de1",
+    "project_path": "/Users/xuhaihui/Documents/gitcode/pixcheese-preview"
+  },
+  "nodes": [
+    {
+      "id": "input_1",
+      "type": "data_source",
+      "position": { "x": 100, "y": 200 },
+      "data": {
+        "label": "Bug 输入",
+        "config": {
+          "name": "Bug 输入",
+          "source_type": "manual",
+          "data": ""
+        }
+      }
+    },
+    {
+      "id": "analyze_2",
+      "type": "cccc_peer",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "领域专家分析",
+        "config": {
+          "name": "领域专家分析",
+          "peer_id": "domain-expert",
+          "group_id": "g_46751ce92de1",
+          "prompt": "你是 pixcheese-preview 项目的领域专家。请分析以下 Bug 报告，定位问题原因并提出修复方案：\n\n项目路径：/Users/xuhaihui/Documents/gitcode/pixcheese-preview\n\nBug 报告：\n{input_1.data}\n\n请：\n1. 分析可能的原因\n2. 定位相关代码文件\n3. 提出具体修复方案",
+          "timeout": 180
+        }
+      }
+    },
+    {
+      "id": "fix_3",
+      "type": "cccc_peer",
+      "position": { "x": 700, "y": 200 },
+      "data": {
+        "label": "前端专家修复",
+        "config": {
+          "name": "前端专家修复",
+          "peer_id": "code-simplifier",
+          "group_id": "g_46751ce92de1",
+          "prompt": "你是 pixcheese-preview 项目的前端专家。根据以下分析结果，编写修复代码：\n\n项目路径：/Users/xuhaihui/Documents/gitcode/pixcheese-preview\n\n分析结果：\n{analyze_2.response}\n\n请：\n1. 找到需要修改的文件\n2. 编写修复代码\n3. 说明改动原因",
+          "timeout": 300
+        }
+      }
+    },
+    {
+      "id": "verify_4",
+      "type": "cccc_peer",
+      "position": { "x": 1000, "y": 200 },
+      "data": {
+        "label": "测试专家验证",
+        "config": {
+          "name": "测试专家验证",
+          "peer_id": "browser-tester",
+          "group_id": "g_46751ce92de1",
+          "prompt": "你是 pixcheese-preview 项目的测试专家。请验证以下修复是否正确：\n\n项目路径：/Users/xuhaihui/Documents/gitcode/pixcheese-preview\n\n修复代码：\n{fix_3.response}\n\n原始问题：\n{input_1.data}\n\n请：\n1. 检查代码逻辑是否正确\n2. 验证是否解决了问题\n3. 返回 success=True 表示通过，success=False 表示需要重新修复",
+          "timeout": 180
+        }
+      }
+    },
+    {
+      "id": "condition_5",
+      "type": "condition",
+      "position": { "x": 1000, "y": 400 },
+      "data": {
+        "label": "验证结果判断",
+        "config": {
+          "name": "验证结果判断",
+          "condition": "verify_4.success == True",
+          "true_branch": "output_6",
+          "false_branch": "fix_3"
+        }
+      }
+    },
+    {
+      "id": "output_6",
+      "type": "output",
+      "position": { "x": 1300, "y": 200 },
+      "data": {
+        "label": "修复完成",
+        "config": {
+          "name": "修复完成",
+          "format": "json",
+          "destination": "## Pixcheese Preview Bug 修复完成\n\n### 分析结果\n{analyze_2.response}\n\n### 修复代码\n{fix_3.response}\n\n### 验证结果\n{verify_4.response}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "input_1", "target": "analyze_2" },
+    { "id": "e2", "source": "analyze_2", "target": "fix_3" },
+    { "id": "e3", "source": "fix_3", "target": "verify_4" },
+    { "id": "e4", "source": "verify_4", "target": "condition_5" },
+    { "id": "e5", "source": "condition_5", "target": "output_6", "condition": "true" },
+    { "id": "e6", "source": "condition_5", "target": "fix_3", "condition": "false" }
+  ],
+  "entry_point": "input_1"
+}

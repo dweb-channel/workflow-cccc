@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
         "type": "object",
         "properties": {
             "name": {"type": "string"},
+            "source_type": {"type": "string", "enum": ["manual", "api", "database"]},
+            "data": {"type": "string", "description": "Static data or template"},
             "output_schema": {"type": "object"},
         },
         "required": ["name"],
@@ -31,31 +33,45 @@ logger = logging.getLogger(__name__)
     output_schema={
         "type": "object",
         "properties": {
-            "data": {"type": "object"},
+            "data": {"type": "string"},
         },
     },
     icon="database",
     color="#4CAF50",
 )
 class DataSourceNode(BaseNodeImpl):
-    """Node that provides data from external sources."""
+    """Node that provides data from external sources or user input.
+
+    For source_type='manual', reads user input from initial_state.request.
+    """
 
     async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Execute data source node.
 
         Args:
-            inputs: Not used for data source nodes (they are entry points)
+            inputs: Workflow state including initial_state values (e.g., request)
 
         Returns:
-            Dictionary containing the data based on output_schema
+            Dictionary containing the data
         """
-        logger.info(f"DataSourceNode {self.node_id}: Executing")
+        logger.info(f"DataSourceNode {self.node_id}: Executing with inputs keys: {list(inputs.keys())}")
 
-        # Generate output based on configured schema
+        source_type = self.config.get("source_type", "manual")
+
+        if source_type == "manual":
+            # For manual input, read from initial_state.request (passed via workflow run)
+            # The frontend sends user input as initial_state.request
+            user_input = inputs.get("request", "")
+            if not user_input:
+                # Fallback to config.data if no runtime input
+                user_input = self.config.get("data", "")
+            logger.info(f"DataSourceNode {self.node_id}: Manual input = {user_input[:100] if user_input else '(empty)'}...")
+            return {"data": user_input}
+
+        # For other source types, generate based on schema (placeholder implementation)
         output_schema = self.config.get("output_schema", {})
         output_data = {}
 
-        # For each field in schema, generate sample data
         for field_name, field_type in output_schema.items():
             if field_type == "string":
                 output_data[field_name] = f"sample_{field_name}"
@@ -66,7 +82,7 @@ class DataSourceNode(BaseNodeImpl):
             else:
                 output_data[field_name] = None
 
-        return output_data
+        return output_data if output_data else {"data": ""}
 
 
 @register_node_type(

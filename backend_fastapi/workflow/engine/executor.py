@@ -110,8 +110,12 @@ async def execute_dynamic_workflow(
             if run_id:
                 await notify_node_status(run_id, node_config.id, "pending")
 
+        # Calculate recursion_limit for loops
+        recursion_limit = workflow_def.max_iterations * len(workflow_def.nodes) + len(workflow_def.nodes)
+        config = {"recursion_limit": recursion_limit} if has_loops else {}
+
         # Stream execution — LangGraph emits {node_id: output} per step
-        async for event in compiled_graph.astream(state):
+        async for event in compiled_graph.astream(state, config=config):
             for node_id, node_output in event.items():
                 # Increment execution counter
                 node_exec_count[node_id] += 1

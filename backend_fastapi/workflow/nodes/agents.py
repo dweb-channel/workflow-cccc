@@ -135,7 +135,7 @@ class LLMAgentNode(BaseNodeImpl):
 @register_node_type(
     node_type="cccc_peer",
     display_name="CCCC Peer",
-    description="Sends a prompt to a CCCC peer agent and waits for response",
+    description="Sends a prompt to a CCCC peer agent via foreman coordination",
     category="agent",
     input_schema={
         "type": "object",
@@ -147,6 +147,14 @@ class LLMAgentNode(BaseNodeImpl):
             "group_id": {
                 "type": "string",
                 "description": "CCCC group ID (defaults to CCCC_GROUP_ID env var)",
+            },
+            "foreman_id": {
+                "type": "string",
+                "description": "Foreman actor ID for coordination (default: 'master')",
+            },
+            "via_foreman": {
+                "type": "boolean",
+                "description": "Route through foreman for coordination (default: true)",
             },
             "timeout": {"type": "number", "description": "Response wait timeout in seconds (default 120)"},
         },
@@ -164,10 +172,12 @@ class LLMAgentNode(BaseNodeImpl):
     color="#F59E0B",
 )
 class CCCCPeerNode(BaseNodeImpl):
-    """Node that communicates with a CCCC peer agent.
+    """Node that communicates with a CCCC peer agent via foreman.
 
-    Sends a prompt to a specified CCCC peer and waits for their response.
-    Uses the CCCCClient with a dedicated workflow-inbox for reliable polling.
+    Routes requests through the foreman (master) who coordinates peer execution.
+    This integrates naturally with CCCC's multi-agent collaboration model.
+
+    Architecture: Workflow → Foreman → Peer → Foreman → Workflow
     """
 
     async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
@@ -177,6 +187,8 @@ class CCCCPeerNode(BaseNodeImpl):
         prompt_template = self.config.get("prompt", "")
         command = self.config.get("command")
         group_id = self.config.get("group_id") or os.environ.get("CCCC_GROUP_ID", "")
+        foreman_id = self.config.get("foreman_id", "master")
+        via_foreman = self.config.get("via_foreman", True)
         timeout = float(self.config.get("timeout", 120))
 
         if not group_id:
@@ -190,24 +202,31 @@ class CCCCPeerNode(BaseNodeImpl):
         # Render the prompt template with upstream inputs
         rendered_prompt = _render_template(prompt_template, inputs)
 
+        coordinator = foreman_id if via_foreman else peer_id
         logger.info(
-            f"CCCCPeerNode {self.node_id}: Sending to peer={peer_id}, "
-            f"command={command}, timeout={timeout}"
+            f"CCCCPeerNode {self.node_id}: Sending to {coordinator} "
+            f"(peer={peer_id}, via_foreman={via_foreman}), timeout={timeout}"
         )
 
         try:
-            client = CCCCClient(group_id=group_id)
+            # Support CCCC_MOCK environment variable for testing
+            mock_mode = os.environ.get("CCCC_MOCK", "").lower() in ("true", "1", "yes")
+            client = CCCCClient(group_id=group_id, foreman_id=foreman_id, mock=mock_mode)
+            if mock_mode:
+                logger.info(f"CCCCPeerNode {self.node_id}: Running in MOCK mode")
             response = await client.ask_peer(
                 peer_id=peer_id,
                 prompt=rendered_prompt,
                 command=command,
                 timeout=timeout,
+                via_foreman=via_foreman,
             )
 
             if response is None:
-                logger.warning(f"CCCCPeerNode {self.node_id}: Timeout waiting for {peer_id}")
+                target = foreman_id if via_foreman else peer_id
+                logger.warning(f"CCCCPeerNode {self.node_id}: Timeout waiting for {target}")
                 return {
-                    "response": f"[Timeout] No response from {peer_id} within {timeout}s",
+                    "response": f"[Timeout] No response from {target} within {timeout}s",
                     "success": False,
                     "peer_id": peer_id,
                 }
