@@ -1,0 +1,106 @@
+{
+  "name": "bug_fix",
+  "title": "Bug 修复",
+  "description": "自动分析和修复 Bug，通过 Foreman 协调多 Agent 协作",
+  "icon": "🐛",
+  "max_iterations": 3,
+  "nodes": [
+    {
+      "id": "input_1",
+      "type": "data_source",
+      "position": { "x": 100, "y": 200 },
+      "data": {
+        "label": "Bug 输入",
+        "config": {
+          "name": "Bug 输入",
+          "source_type": "manual",
+          "data": ""
+        }
+      }
+    },
+    {
+      "id": "analyze_2",
+      "type": "cccc_peer",
+      "position": { "x": 400, "y": 200 },
+      "data": {
+        "label": "Bug 分析",
+        "config": {
+          "name": "Bug 分析",
+          "peer_id": "domain-expert",
+          "foreman_id": "master",
+          "via_foreman": true,
+          "prompt": "请分析以下 Bug 报告，定位问题原因并提出修复方案：\n\n{input_1.data}",
+          "timeout": 180
+        }
+      }
+    },
+    {
+      "id": "fix_3",
+      "type": "cccc_peer",
+      "position": { "x": 700, "y": 200 },
+      "data": {
+        "label": "代码修复",
+        "config": {
+          "name": "代码修复",
+          "peer_id": "code-simplifier",
+          "foreman_id": "master",
+          "via_foreman": true,
+          "prompt": "根据以下分析结果，编写修复代码：\n\n{analyze_2.response}",
+          "timeout": 300
+        }
+      }
+    },
+    {
+      "id": "verify_4",
+      "type": "cccc_peer",
+      "position": { "x": 1000, "y": 200 },
+      "data": {
+        "label": "验证测试",
+        "config": {
+          "name": "验证测试",
+          "peer_id": "browser-tester",
+          "foreman_id": "master",
+          "via_foreman": true,
+          "prompt": "请验证以下修复是否正确，并运行相关测试：\n\n修复代码：\n{fix_3.response}\n\n原始问题：\n{input_1.data}",
+          "timeout": 180
+        }
+      }
+    },
+    {
+      "id": "condition_5",
+      "type": "condition",
+      "position": { "x": 1000, "y": 400 },
+      "data": {
+        "label": "验证结果判断",
+        "config": {
+          "name": "验证结果判断",
+          "condition": "verify_4.success == True",
+          "true_branch": "output_6",
+          "false_branch": "fix_3"
+        }
+      }
+    },
+    {
+      "id": "output_6",
+      "type": "output",
+      "position": { "x": 1300, "y": 200 },
+      "data": {
+        "label": "修复完成",
+        "config": {
+          "name": "修复完成",
+          "format": "json",
+          "destination": "## Bug 修复完成\n\n### 分析结果\n{analyze_2.response}\n\n### 修复代码\n{fix_3.response}\n\n### 验证结果\n{verify_4.response}"
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "input_1", "target": "analyze_2" },
+    { "id": "e2", "source": "analyze_2", "target": "fix_3" },
+    { "id": "e3", "source": "fix_3", "target": "verify_4" },
+    { "id": "e4", "source": "verify_4", "target": "condition_5" },
+    { "id": "e5", "source": "condition_5", "target": "output_6", "condition": "true" },
+    { "id": "e6", "source": "condition_5", "target": "fix_3", "condition": "false" }
+  ],
+  "entry_point": "input_1"
+}
