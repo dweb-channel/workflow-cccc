@@ -373,12 +373,28 @@ class CCCCClient:
             },
         })
 
+    def list_actors(self) -> Dict[str, Any]:
+        """List all actors in the current group.
+
+        Returns:
+            Response with actors list containing id, role, title, enabled, running
+        """
+        if self.mock:
+            return {"ok": True, "result": {"actors": []}}
+
+        return self._call_daemon({
+            "op": "actor_list",
+            "args": {
+                "group_id": self.group_id,
+            },
+        })
+
     async def wait_for_response(
         self,
         from_peer: str,
         after_ts: Optional[str] = None,
-        timeout: float = 120.0,
-        poll_interval: float = 1.0,
+        timeout: Optional[float] = None,
+        poll_interval: float = 2.0,
     ) -> Optional[str]:
         """Wait for a response from a specific peer using dedicated inbox.
 
@@ -389,7 +405,7 @@ class CCCCClient:
         Args:
             from_peer: The peer ID to wait for
             after_ts: Only consider messages with timestamp > this value (ISO format)
-            timeout: Maximum time to wait in seconds
+            timeout: Maximum time to wait in seconds (None = wait indefinitely)
             poll_interval: How often to check for new messages
 
         Returns:
@@ -400,9 +416,10 @@ class CCCCClient:
             return f"[MOCK] Response from {from_peer}"
 
         start_time = time.time()
-        logger.info(f"Waiting for response from {from_peer}, after_ts={after_ts} (using inbox_list with {self.inbox_as})")
+        timeout_str = f"{timeout}s" if timeout else "indefinitely"
+        logger.info(f"Waiting for response from {from_peer}, after_ts={after_ts}, timeout={timeout_str}")
 
-        while (time.time() - start_time) < timeout:
+        while timeout is None or (time.time() - start_time) < timeout:
             resp = self.get_inbox(limit=50)
 
             if resp.get("ok"):
@@ -441,7 +458,7 @@ class CCCCClient:
         peer_id: str,
         prompt: str,
         command: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: Optional[float] = None,
         via_foreman: bool = True,
     ) -> Optional[str]:
         """Send a prompt to a peer and wait for response.
@@ -453,7 +470,7 @@ class CCCCClient:
             peer_id: The peer's actor ID
             prompt: The prompt text
             command: Optional command prefix (e.g., "/brainstorm")
-            timeout: Maximum time to wait for response
+            timeout: Maximum time to wait for response (None = wait indefinitely)
             via_foreman: If True, route through foreman; if False, send directly to peer
 
         Returns:
@@ -523,4 +540,133 @@ async def ask_cccc_peer(
         prompt=prompt,
         command=command,
         timeout=timeout,
+    )
+
+
+def list_all_groups(paths: Optional[DaemonPaths] = None) -> Dict[str, Any]:
+    """List all CCCC working groups by reading from filesystem.
+
+    This is a standalone function that doesn't require a group_id.
+    Reads group.yaml files directly from ~/.cccc/groups/.
+
+    Args:
+        paths: Optional custom daemon paths
+
+    Returns:
+        Response with groups list containing group_id, title, state, running, etc.
+    """
+    try:
+        import yaml
+
+        p = paths or _default_paths()
+        groups_dir = p.home / "groups"
+
+        if not groups_dir.exists():
+            return {"ok": True, "result": {"groups": []}}
+
+        groups = []
+        for group_path in groups_dir.iterdir():
+            if not group_path.is_dir() or not group_path.name.startswith("g_"):
+                continue
+
+            group_yaml = group_path / "group.yaml"
+            if not group_yaml.exists():
+                continue
+
+            try:
+                with open(group_yaml, "r", encoding="utf-8") as f:
+                    group_data = yaml.safe_load(f)
+                    if group_data:
+                        groups.append({
+                            "group_id": group_data.get("group_id", group_path.name),
+                            "title": group_data.get("title", ""),
+                            "state": group_data.get("state", "unknown"),
+                            "running": group_data.get("running", False),
+                            "scopes": group_data.get("scopes", []),
+                            "actors": group_data.get("actors", []),
+                        })
+            except Exception as e:
+                logger.warning(f"Failed to read group {group_path.name}: {e}")
+                continue
+
+        return {"ok": True, "result": {"groups": groups}}
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "error": {"code": "filesystem_error", "message": str(e)},
+        }
+
+
+def get_group_info(group_id: str, paths: Optional[DaemonPaths] = None) -> Dict[str, Any]:
+    """Get detailed information about a specific group.
+
+    Args:
+        group_id: The group ID to get info for
+        paths: Optional custom daemon paths
+
+    Returns:
+        Response with group info including scopes, state, etc.
+    """
+    return call_daemon(
+        {"op": "group_info", "args": {"group_id": group_id}},
+        paths=paths,
+    )
+
+
+def list_group_actors(group_id: str, paths: Optional[DaemonPaths] = None) -> Dict[str, Any]:
+    """List all actors in a specific group.
+
+    Args:
+        group_id: The group ID to list actors for
+        paths: Optional custom daemon paths
+
+    Returns:
+        Response with actors list
+    """
+    return call_daemon(
+        {"op": "actor_list", "args": {"group_id": group_id}},
+        paths=paths,
+    )
+
+
+def send_cross_group_message(
+    source_group_id: str,
+    target_group_id: str,
+    text: str,
+    sender_id: str = "workflow-api",
+    to: Optional[List[str]] = None,
+    priority: str = "normal",
+    paths: Optional[DaemonPaths] = None,
+) -> Dict[str, Any]:
+    """Send a message to a different CCCC group.
+
+    Uses the dst_group_id parameter for cross-group communication.
+
+    Args:
+        source_group_id: The source group ID (sender's group)
+        target_group_id: The target group ID to send message to
+        text: Message text
+        sender_id: Sender actor ID (default: workflow-api)
+        to: Recipients in target group (default: @all)
+        priority: Message priority (normal or attention)
+        paths: Optional custom daemon paths
+
+    Returns:
+        Response from daemon with event info
+    """
+    return call_daemon(
+        {
+            "op": "send",
+            "args": {
+                "group_id": source_group_id,
+                "dst_group_id": target_group_id,
+                "text": text,
+                "by": sender_id,
+                "to": to or ["@all"],
+                "path": "",
+                "priority": priority,
+            },
+        },
+        paths=paths,
     )

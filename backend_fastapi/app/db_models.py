@@ -252,3 +252,85 @@ class ExecutionLogModel(Base):
         Index("ix_logs_timestamp", "timestamp"),
         Index("ix_logs_node_id", "node_id"),
     )
+
+
+# ─── Batch Bug Fix Job ───────────────────────────────────────────────
+
+
+class BatchJobModel(Base):
+    """Batch bug fix job record.
+
+    Stores batch job metadata and configuration.
+    Individual bug results are stored in BugResultModel.
+    """
+
+    __tablename__ = "batch_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # e.g., job_xxx
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="started",
+        comment="started | running | completed | failed",
+    )
+    target_group_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    fixer_peer_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    verifier_peer_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    # Config as JSON
+    config: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Job config: validation_level, failure_policy, max_retries",
+    )
+
+    # Error message if failed
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+
+    # Relationships
+    bugs: Mapped[List["BugResultModel"]] = relationship(
+        back_populates="job", cascade="all, delete-orphan",
+        order_by="BugResultModel.bug_index",
+    )
+
+    __table_args__ = (
+        Index("ix_batch_jobs_status", "status"),
+        Index("ix_batch_jobs_target_group", "target_group_id"),
+        Index("ix_batch_jobs_created_at", "created_at"),
+    )
+
+
+class BugResultModel(Base):
+    """Individual bug result within a batch job."""
+
+    __tablename__ = "bug_results"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    job_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("batch_jobs.id", ondelete="CASCADE"), nullable=False,
+    )
+    bug_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending",
+        comment="pending | in_progress | completed | failed | skipped",
+    )
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # Relationship
+    job: Mapped["BatchJobModel"] = relationship(back_populates="bugs")
+
+    __table_args__ = (
+        Index("ix_bug_results_job_id", "job_id"),
+        Index("ix_bug_results_status", "status"),
+    )

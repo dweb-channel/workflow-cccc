@@ -48,9 +48,11 @@ from .routes.workflows import router as workflows_router  # noqa: E402
 from .routes.execution import router as execution_router  # noqa: E402
 from .routes.validation import router as validation_router  # noqa: E402
 from .routes.templates import router as templates_router  # noqa: E402
+from .routes.cccc import router as cccc_router  # noqa: E402
 
 app.include_router(sse_router)
 app.include_router(workflows_router)
 app.include_router(execution_router)
 app.include_router(validation_router)
 app.include_router(templates_router)
+app.include_router(cccc_router)

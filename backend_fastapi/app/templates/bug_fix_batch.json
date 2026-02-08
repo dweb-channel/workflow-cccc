@@ -1,0 +1,280 @@
+{
+  "name": "batch_bug_fix_workflow",
+  "description": "批量 Bug 修复工作流：串行处理多个 Bug，支持重试机制",
+  "version": "1.3.0",
+  "max_iterations": 100,
+  "nodes": [
+    {
+      "id": "input_node",
+      "type": "data_source",
+      "config": {
+        "name": "Bug 列表输入",
+        "description": "接收 Bug URL 列表和配置参数",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "bugs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Jira Bug URL 列表"
+            },
+            "bugs_count": {
+              "type": "integer",
+              "description": "Bug 总数 (由调用方设置)"
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "validation_level": { "type": "string", "enum": ["minimal", "standard", "thorough"] },
+                "failure_policy": { "type": "string", "enum": ["stop", "skip", "retry"] },
+                "max_retries": { "type": "integer", "minimum": 1, "maximum": 10 }
+              }
+            },
+            "target_group_id": { "type": "string" },
+            "fixer_peer_id": { "type": "string", "description": "Peer ID to execute bug fixes" },
+            "verifier_peer_id": { "type": "string", "description": "Peer ID to verify fixes" },
+            "job_id": { "type": "string" }
+          },
+          "required": ["bugs", "bugs_count", "job_id"]
+        },
+        "defaults": {
+          "current_index": 0,
+          "retry_count": 0,
+          "results": [],
+          "config": {
+            "validation_level": "standard",
+            "failure_policy": "skip",
+            "max_retries": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "get_current_bug",
+      "type": "get_current_item",
+      "config": {
+        "name": "获取当前 Bug",
+        "array_field": "bugs",
+        "index_field": "current_index",
+        "output_key": "current_bug"
+      }
+    },
+    {
+      "id": "fix_bug_peer",
+      "type": "cccc_peer",
+      "config": {
+        "name": "修复 Bug",
+        "description": "调用 CCCC Peer 执行 Bug 修复",
+        "peer_id": "{fixer_peer_id}",
+        "prompt": "请修复以下 Bug：\n\nURL: {current_bug}\n验证级别: {config.validation_level}\n\n请分析 Bug 详情并实施修复。完成后请报告修复结果。",
+        "via_foreman": false
+      }
+    },
+    {
+      "id": "verify_fix",
+      "type": "verify",
+      "config": {
+        "name": "验证修复结果",
+        "verify_type": "cccc_peer",
+        "peer_id": "{verifier_peer_id}",
+        "prompt_template": "请验证以下 Bug 修复是否正确:\n\nBug URL: {current_bug}\n修复结果: {fix_bug_peer.response}\n\n请检查:\n1. 修复是否完整解决了问题\n2. 是否引入新的问题\n3. 测试是否通过\n\n回复 'VERIFIED' 表示验证通过，'FAILED' 表示验证失败并说明原因。"
+      }
+    },
+    {
+      "id": "check_verify_result",
+      "type": "condition",
+      "config": {
+        "name": "检查验证结果",
+        "condition": "verify_fix.verified == True",
+        "true_branch": "update_success",
+        "false_branch": "check_retry"
+      }
+    },
+    {
+      "id": "check_retry",
+      "type": "condition",
+      "config": {
+        "name": "检查重试",
+        "description": "检查是否可以重试（retry_count < max_retries）",
+        "condition": "retry_count < 3",
+        "true_branch": "increment_retry",
+        "false_branch": "update_failure"
+      }
+    },
+    {
+      "id": "increment_retry",
+      "type": "update_state",
+      "config": {
+        "name": "增加重试计数",
+        "updates": [
+          {"field": "retry_count", "expression": "retry_count + 1"}
+        ]
+      }
+    },
+    {
+      "id": "update_failure",
+      "type": "update_state",
+      "config": {
+        "name": "记录失败",
+        "updates": [
+          {
+            "field": "results",
+            "append": {
+              "url": "{current_bug}",
+              "status": "failed",
+              "error": "{fix_bug_peer.response}",
+              "retries": "{retry_count}"
+            }
+          },
+          {"field": "current_index", "expression": "current_index + 1"},
+          {"field": "retry_count", "value": 0}
+        ]
+      }
+    },
+    {
+      "id": "update_success",
+      "type": "update_state",
+      "config": {
+        "name": "记录成功",
+        "updates": [
+          {
+            "field": "results",
+            "append": {
+              "url": "{current_bug}",
+              "status": "completed",
+              "response": "{fix_bug_peer.response}"
+            }
+          },
+          {"field": "current_index", "expression": "current_index + 1"},
+          {"field": "retry_count", "value": 0}
+        ]
+      }
+    },
+    {
+      "id": "check_more_bugs",
+      "type": "condition",
+      "config": {
+        "name": "检查剩余 Bug",
+        "description": "检查是否还有更多 Bug 需要处理",
+        "condition": "current_index < bugs_count",
+        "true_branch": "get_current_bug",
+        "false_branch": "output_node"
+      }
+    },
+    {
+      "id": "output_node",
+      "type": "output",
+      "config": {
+        "name": "输出结果",
+        "description": "输出批量修复的最终结果",
+        "format": "json",
+        "include_fields": ["job_id", "results", "bugs_count"]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "input_node",
+      "target": "get_current_bug"
+    },
+    {
+      "id": "e2",
+      "source": "get_current_bug",
+      "target": "fix_bug_peer"
+    },
+    {
+      "id": "e3",
+      "source": "fix_bug_peer",
+      "target": "verify_fix"
+    },
+    {
+      "id": "e3b",
+      "source": "verify_fix",
+      "target": "check_verify_result"
+    },
+    {
+      "id": "e4_success",
+      "source": "check_verify_result",
+      "target": "update_success",
+      "condition": "condition_result == True"
+    },
+    {
+      "id": "e4_fail",
+      "source": "check_verify_result",
+      "target": "check_retry",
+      "condition": "condition_result == False"
+    },
+    {
+      "id": "e5_retry",
+      "source": "check_retry",
+      "target": "increment_retry",
+      "condition": "condition_result == True"
+    },
+    {
+      "id": "e5_give_up",
+      "source": "check_retry",
+      "target": "update_failure",
+      "condition": "condition_result == False"
+    },
+    {
+      "id": "e5b_back_to_fix",
+      "source": "increment_retry",
+      "target": "fix_bug_peer"
+    },
+    {
+      "id": "e6",
+      "source": "update_failure",
+      "target": "check_more_bugs"
+    },
+    {
+      "id": "e6b",
+      "source": "update_success",
+      "target": "check_more_bugs"
+    },
+    {
+      "id": "e7_continue",
+      "source": "check_more_bugs",
+      "target": "get_current_bug",
+      "condition": "condition_result == True"
+    },
+    {
+      "id": "e7_done",
+      "source": "check_more_bugs",
+      "target": "output_node",
+      "condition": "condition_result == False"
+    }
+  ],
+  "entry_point": "input_node",
+  "metadata": {
+    "author": "domain-expert",
+    "created_at": "2026-02-05",
+    "updated_at": "2026-02-05",
+    "version_history": [
+      {"version": "1.0.0", "date": "2026-02-05", "changes": "Initial template design"},
+      {"version": "1.1.0", "date": "2026-02-05", "changes": "Replaced placeholder nodes with get_current_item and update_state"},
+      {"version": "1.2.0", "date": "2026-02-05", "changes": "Added VerifyNode with cccc_peer mode for independent verification"},
+      {"version": "1.3.0", "date": "2026-02-08", "changes": "Added dynamic peer selection via fixer_peer_id and verifier_peer_id variables"}
+    ],
+    "tags": ["bug-fix", "batch", "cccc-integration"],
+    "implementation_notes": {
+      "completed": "S1-S2b 已完成，模板可正常使用",
+      "optional_script_mode": "verify_fix 节点当前使用 cccc_peer 模式，可切换为 script 模式运行本地测试",
+      "peer_selection": "fixer_peer_id 和 verifier_peer_id 由 API 传入，可通过 UI 选择"
+    },
+    "workflow_loops": [
+      {
+        "name": "main_loop",
+        "description": "主循环：遍历 bugs 数组",
+        "path": "get_current_bug -> fix_bug_peer -> verify_fix -> update_success/update_failure -> check_more_bugs -> get_current_bug",
+        "exit_condition": "current_index >= bugs_count"
+      },
+      {
+        "name": "retry_loop",
+        "description": "重试循环：修复失败时重试",
+        "path": "fix_bug_peer -> verify_fix -> check_retry -> increment_retry -> fix_bug_peer",
+        "exit_condition": "fix_bug_peer.success == True 或 retry_count >= 3"
+      }
+    ]
+  }
+}
