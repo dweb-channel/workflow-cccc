@@ -49,6 +49,7 @@ import { NodeConfigPanel } from "@/components/workflow-editor/NodeConfigPanel";
 import { TemplateSelector, type TemplateDetail } from "@/components/workflow-editor/TemplateSelector";
 import { EdgeConfigPanel } from "@/components/workflow-editor/EdgeConfigPanel";
 import { toWorkflowDefinition, fromWorkflowDefinition, applyLoopStyles } from "@/lib/workflow-converter";
+import { Sidebar } from "@/components/sidebar/Sidebar";
 
 const nodeTypes = { agentNode: AgentNode };
 
@@ -723,84 +724,87 @@ function WorkflowPage() {
 
   return (
     <main className="flex h-screen overflow-hidden">
-      {/* Workflow List Sidebar */}
-      <aside className="flex w-[220px] shrink-0 flex-col border-r border-slate-200 bg-slate-50">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-700">工作流</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0 text-lg"
-            onClick={handleCreateWorkflow}
-            disabled={creating}
-          >
-            {creating ? "…" : "+"}
-          </Button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-2">
-          {workflowList.length === 0 ? (
-            <p className="px-2 py-4 text-center text-xs text-slate-400">暂无工作流，点击 + 创建</p>
-          ) : (
-            workflowList.map((wf) => {
-              const active = wf.id === workflow?.id;
-              const wfStatus = STATUS_MAP[wf.status] || { label: wf.status, color: "bg-slate-500" };
-              return (
-                <div
-                  key={wf.id}
-                  className={`group mb-1 cursor-pointer rounded-lg px-3 py-2 transition-colors ${
-                    active ? "bg-white shadow-sm ring-1 ring-slate-200" : "hover:bg-white/60"
-                  }`}
-                  onClick={() => handleSwitchWorkflow(wf.id)}
-                  onDoubleClick={(e) => handleStartRename(wf, e)}
-                >
-                  <div className="flex items-center justify-between">
-                    {renamingId === wf.id ? (
-                      <input
-                        className="w-full rounded border border-blue-300 bg-white px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-blue-400"
-                        value={renameValue}
-                        onChange={(e) => setRenameValue(e.target.value)}
-                        onBlur={() => handleConfirmRename(wf.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleConfirmRename(wf.id);
-                          if (e.key === "Escape") setRenamingId(null);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                        autoFocus
-                      />
-                    ) : (
-                      <span className={`truncate text-sm ${active ? "font-medium text-slate-900" : "text-slate-600"}`}>
-                        {wf.name}
-                      </span>
-                    )}
-                    {renamingId !== wf.id && (
-                      <button
-                        className="ml-1 hidden shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500 group-hover:block"
-                        onClick={(e) => { e.stopPropagation(); handleDeleteWorkflow(wf.id); }}
-                        title="删除"
-                      >
-                        ✕
-                      </button>
-                    )}
+      {/* Sidebar with Navigation */}
+      <Sidebar>
+        {/* Workflow List */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-medium text-slate-500">工作流列表</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 w-6 p-0 text-base"
+              onClick={handleCreateWorkflow}
+              disabled={creating}
+            >
+              {creating ? "…" : "+"}
+            </Button>
+          </div>
+          <div className="space-y-1">
+            {workflowList.length === 0 ? (
+              <p className="py-4 text-center text-xs text-slate-400">暂无工作流，点击 + 创建</p>
+            ) : (
+              workflowList.map((wf) => {
+                const active = wf.id === workflow?.id;
+                const wfStatus = STATUS_MAP[wf.status] || { label: wf.status, color: "bg-slate-500" };
+                return (
+                  <div
+                    key={wf.id}
+                    className={`group cursor-pointer rounded-lg px-3 py-2 transition-colors ${
+                      active ? "bg-slate-100 ring-1 ring-slate-200" : "hover:bg-slate-50"
+                    }`}
+                    onClick={() => handleSwitchWorkflow(wf.id)}
+                    onDoubleClick={(e) => handleStartRename(wf, e)}
+                  >
+                    <div className="flex items-center justify-between">
+                      {renamingId === wf.id ? (
+                        <input
+                          className="w-full rounded border border-blue-300 bg-white px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-blue-400"
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onBlur={() => handleConfirmRename(wf.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleConfirmRename(wf.id);
+                            if (e.key === "Escape") setRenamingId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          autoFocus
+                        />
+                      ) : (
+                        <span className={`truncate text-sm ${active ? "font-medium text-slate-900" : "text-slate-600"}`}>
+                          {wf.name}
+                        </span>
+                      )}
+                      {renamingId !== wf.id && (
+                        <button
+                          className="ml-1 hidden shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500 group-hover:block"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteWorkflow(wf.id); }}
+                          title="删除"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <span className={`inline-block h-1.5 w-1.5 rounded-full ${wfStatus.color}`} />
+                      <span className="text-[10px] text-slate-400">{wfStatus.label}</span>
+                      <span className="text-[10px] text-slate-300">·</span>
+                      <span className="text-[10px] text-slate-400">{formatRelativeTime(wf.updated_at)}</span>
+                    </div>
                   </div>
-                  <div className="mt-0.5 flex items-center gap-1.5">
-                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${wfStatus.color}`} />
-                    <span className="text-[10px] text-slate-400">{wfStatus.label}</span>
-                    <span className="text-[10px] text-slate-300">·</span>
-                    <span className="text-[10px] text-slate-400">{formatRelativeTime(wf.updated_at)}</span>
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
         {/* Template Selector */}
-        <div className="border-t border-slate-200 p-2">
+        <div className="mt-4 border-t border-slate-200 pt-4">
           <TemplateSelector
             onSelectTemplate={handleApplyTemplate}
             disabled={!workflow || running}
           />
         </div>
-      </aside>
+      </Sidebar>
 
       {/* Main Content */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden px-6 py-6">

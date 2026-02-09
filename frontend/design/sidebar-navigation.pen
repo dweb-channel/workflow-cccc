@@ -1,0 +1,984 @@
+{
+  "version": "2.6",
+  "children": [
+    {
+      "type": "frame",
+      "id": "Nav01",
+      "x": 0,
+      "y": 0,
+      "name": "侧边栏导航整合设计",
+      "width": 1440,
+      "height": 900,
+      "fill": "#f8fafc",
+      "layout": "horizontal",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Sidebar",
+          "name": "侧边栏",
+          "width": 240,
+          "height": "fill_container",
+          "fill": "#ffffff",
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#e2e8f0"
+          },
+          "layout": "vertical",
+          "padding": 16,
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "Logo",
+              "fill": "#1e293b",
+              "content": "工作流平台",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "NavSpacer1",
+              "height": 16
+            },
+            {
+              "type": "frame",
+              "id": "NavSection",
+              "name": "导航切换",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NavWorkflow",
+                  "name": "工作流导航项-选中",
+                  "width": "fill_container",
+                  "fill": "#3b82f6",
+                  "cornerRadius": 8,
+                  "padding": [12, 16],
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NavWorkflowIcon",
+                      "fill": "#ffffff",
+                      "content": "📋",
+                      "fontFamily": "Inter",
+                      "fontSize": 16
+                    },
+                    {
+                      "type": "text",
+                      "id": "NavWorkflowText",
+                      "fill": "#ffffff",
+                      "content": "工作流",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "NavBatchBugs",
+                  "name": "批量修复导航项-未选中",
+                  "width": "fill_container",
+                  "fill": "#f8fafc",
+                  "cornerRadius": 8,
+                  "padding": [12, 16],
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NavBatchIcon",
+                      "fill": "#64748b",
+                      "content": "🐛",
+                      "fontFamily": "Inter",
+                      "fontSize": 16
+                    },
+                    {
+                      "type": "text",
+                      "id": "NavBatchText",
+                      "fill": "#64748b",
+                      "content": "批量修复",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Divider1",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#e2e8f0"
+            },
+            {
+              "type": "frame",
+              "id": "WorkflowListSection",
+              "name": "工作流列表区",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "CreateBtn",
+                  "name": "新建按钮",
+                  "width": "fill_container",
+                  "fill": "#f1f5f9",
+                  "cornerRadius": 8,
+                  "padding": [10, 16],
+                  "gap": 8,
+                  "alignItems": "center",
+                  "justifyContent": "center",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "#e2e8f0",
+                    "dashPattern": [4, 4]
+                  },
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "CreateIcon",
+                      "fill": "#64748b",
+                      "content": "+",
+                      "fontFamily": "Inter",
+                      "fontSize": 16,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "CreateText",
+                      "fill": "#64748b",
+                      "content": "新建工作流",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "EmptyHint",
+                  "fill": "#94a3b8",
+                  "content": "暂无工作流",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "MainContent",
+          "name": "主内容区-工作流模式",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "#f8fafc",
+          "layout": "vertical",
+          "alignItems": "center",
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "EmptyStateText",
+              "fill": "#94a3b8",
+              "content": "请从左侧选择工作流，或点击 + 创建新工作流",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "Nav02",
+      "x": 0,
+      "y": 950,
+      "name": "批量修复模式",
+      "width": 1440,
+      "height": 900,
+      "fill": "#f8fafc",
+      "layout": "horizontal",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Sidebar2",
+          "name": "侧边栏-批量修复选中",
+          "width": 240,
+          "height": "fill_container",
+          "fill": "#ffffff",
+          "stroke": {
+            "align": "inside",
+            "thickness": 1,
+            "fill": "#e2e8f0"
+          },
+          "layout": "vertical",
+          "padding": 16,
+          "gap": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "Logo2",
+              "fill": "#1e293b",
+              "content": "工作流平台",
+              "fontFamily": "Inter",
+              "fontSize": 18,
+              "fontWeight": "700"
+            },
+            {
+              "type": "frame",
+              "id": "NavSpacer2",
+              "height": 16
+            },
+            {
+              "type": "frame",
+              "id": "NavSection2",
+              "name": "导航切换",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NavWorkflow2",
+                  "name": "工作流导航项-未选中",
+                  "width": "fill_container",
+                  "fill": "#f8fafc",
+                  "cornerRadius": 8,
+                  "padding": [12, 16],
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NavWorkflowIcon2",
+                      "fill": "#64748b",
+                      "content": "📋",
+                      "fontFamily": "Inter",
+                      "fontSize": 16
+                    },
+                    {
+                      "type": "text",
+                      "id": "NavWorkflowText2",
+                      "fill": "#64748b",
+                      "content": "工作流",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "NavBatchBugs2",
+                  "name": "批量修复导航项-选中",
+                  "width": "fill_container",
+                  "fill": "#3b82f6",
+                  "cornerRadius": 8,
+                  "padding": [12, 16],
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NavBatchIcon2",
+                      "fill": "#ffffff",
+                      "content": "🐛",
+                      "fontFamily": "Inter",
+                      "fontSize": 16
+                    },
+                    {
+                      "type": "text",
+                      "id": "NavBatchText2",
+                      "fill": "#ffffff",
+                      "content": "批量修复",
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Divider2",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#e2e8f0"
+            },
+            {
+              "type": "frame",
+              "id": "BatchInfoSection",
+              "name": "批量修复信息区",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": [8, 0],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "BatchInfoTitle",
+                  "fill": "#64748b",
+                  "content": "当前任务",
+                  "fontFamily": "Inter",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "frame",
+                  "id": "TaskStatus",
+                  "name": "任务状态",
+                  "width": "fill_container",
+                  "fill": "#f0fdf4",
+                  "cornerRadius": 8,
+                  "padding": 12,
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "StatusRow",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "StatusDot",
+                          "fill": "#22c55e",
+                          "width": 8,
+                          "height": 8
+                        },
+                        {
+                          "type": "text",
+                          "id": "StatusText",
+                          "fill": "#166534",
+                          "content": "修复中",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "ProgressText",
+                      "fill": "#64748b",
+                      "content": "2/5 完成",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "BatchContent",
+          "name": "主内容区-批量修复",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "#f8fafc",
+          "layout": "vertical",
+          "padding": 24,
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "BatchHeader",
+              "name": "标题区",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "BatchTitle",
+                  "fill": "#1e293b",
+                  "content": "批量 Bug 修复",
+                  "fontFamily": "Inter",
+                  "fontSize": 24,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "BatchSubtitle",
+                  "fill": "#64748b",
+                  "content": "粘贴 Jira Bug 链接，一键启动自动修复流程",
+                  "fontFamily": "Inter",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BatchBody",
+              "name": "主体区",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LeftPanel",
+                  "name": "左侧输入区",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "GroupCard",
+                      "name": "Group选择卡片",
+                      "width": "fill_container",
+                      "fill": "#ffffff",
+                      "cornerRadius": 12,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "#e2e8f0"
+                      },
+                      "padding": 16,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "GroupLabel",
+                          "fill": "#374151",
+                          "content": "目标 Group",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "GroupSelect",
+                          "name": "Group下拉框",
+                          "width": "fill_container",
+                          "fill": "#ffffff",
+                          "cornerRadius": 8,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "#e2e8f0"
+                          },
+                          "padding": [10, 12],
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "GroupValue",
+                              "fill": "#1e293b",
+                              "content": "work-flow · 4 peers",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "GroupArrow",
+                              "fill": "#94a3b8",
+                              "content": "▼",
+                              "fontFamily": "Inter",
+                              "fontSize": 12
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "GroupStatus",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "ellipse",
+                              "id": "GroupDot",
+                              "fill": "#22c55e",
+                              "width": 8,
+                              "height": 8
+                            },
+                            {
+                              "type": "text",
+                              "id": "GroupStatusText",
+                              "fill": "#64748b",
+                              "content": "运行中 · 4 个 peer 可用",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UrlsCard",
+                      "name": "URL输入卡片",
+                      "width": "fill_container",
+                      "fill": "#ffffff",
+                      "cornerRadius": 12,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "#e2e8f0"
+                      },
+                      "padding": 16,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "UrlsLabel",
+                          "fill": "#374151",
+                          "content": "Jira Bug 链接",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Textarea",
+                          "name": "文本框",
+                          "width": "fill_container",
+                          "height": 120,
+                          "fill": "#ffffff",
+                          "cornerRadius": 8,
+                          "stroke": {
+                            "align": "inside",
+                            "thickness": 1,
+                            "fill": "#e2e8f0"
+                          },
+                          "padding": 12,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "UrlsPlaceholder",
+                              "fill": "#94a3b8",
+                              "content": "每行一个 Jira Bug 链接...",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "UrlsCount",
+                          "fill": "#94a3b8",
+                          "content": "已输入 0 个链接",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ActionButtons",
+                      "name": "操作按钮",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "PreviewBtn",
+                          "fill": "#f1f5f9",
+                          "cornerRadius": 8,
+                          "padding": [10, 20],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "PreviewText",
+                              "fill": "#64748b",
+                              "content": "预览 Bug 列表",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "StartBtn",
+                          "fill": "#3b82f6",
+                          "cornerRadius": 8,
+                          "padding": [10, 20],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "StartText",
+                              "fill": "#ffffff",
+                              "content": "开始修复",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RightPanel",
+                  "name": "右侧进度区",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ProgressCard",
+                      "name": "进度卡片",
+                      "width": "fill_container",
+                      "fill": "#ffffff",
+                      "cornerRadius": 12,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "#e2e8f0"
+                      },
+                      "padding": 16,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ProgressHeader",
+                          "width": "fill_container",
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ProgressLabel",
+                              "fill": "#374151",
+                              "content": "修复进度",
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "600"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "ProgressBadge",
+                              "fill": "#f1f5f9",
+                              "cornerRadius": 6,
+                              "padding": [4, 8],
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ProgressCount",
+                                  "fill": "#64748b",
+                                  "content": "2/5 完成",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "500"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "BugList",
+                          "name": "Bug列表",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 8,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "Bug1",
+                              "width": "fill_container",
+                              "fill": "#f0fdf4",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "gap": 12,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Bug1Icon",
+                                  "content": "✅",
+                                  "fontSize": 16
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "Bug1Info",
+                                  "layout": "vertical",
+                                  "gap": 2,
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Bug1Id",
+                                      "fill": "#1e293b",
+                                      "content": "BUG-1234",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 13,
+                                      "fontWeight": "500"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "Bug1Status",
+                                      "fill": "#166534",
+                                      "content": "已完成",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 12,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Bug2",
+                              "width": "fill_container",
+                              "fill": "#eff6ff",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "gap": 12,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Bug2Icon",
+                                  "content": "🔄",
+                                  "fontSize": 16
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "Bug2Info",
+                                  "layout": "vertical",
+                                  "gap": 2,
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Bug2Id",
+                                      "fill": "#1e293b",
+                                      "content": "BUG-1235",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 13,
+                                      "fontWeight": "500"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "Bug2Status",
+                                      "fill": "#1e40af",
+                                      "content": "修复中...",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 12,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Bug3",
+                              "width": "fill_container",
+                              "fill": "#f8fafc",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "gap": 12,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Bug3Icon",
+                                  "content": "⏳",
+                                  "fontSize": 16
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "Bug3Info",
+                                  "layout": "vertical",
+                                  "gap": 2,
+                                  "children": [
+                                    {
+                                      "type": "text",
+                                      "id": "Bug3Id",
+                                      "fill": "#1e293b",
+                                      "content": "BUG-1236",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 13,
+                                      "fontWeight": "500"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "Bug3Status",
+                                      "fill": "#64748b",
+                                      "content": "等待中",
+                                      "fontFamily": "Inter",
+                                      "fontSize": 12,
+                                      "fontWeight": "normal"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "StatsCard",
+                      "name": "统计卡片",
+                      "width": "fill_container",
+                      "fill": "#ffffff",
+                      "cornerRadius": 12,
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "#e2e8f0"
+                      },
+                      "padding": 16,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "StatsLabel",
+                          "fill": "#374151",
+                          "content": "统计信息",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "StatsGrid",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "Stat1",
+                              "width": "fill_container",
+                              "fill": "#f0fdf4",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "layout": "vertical",
+                              "alignItems": "center",
+                              "gap": 4,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Stat1Value",
+                                  "fill": "#22c55e",
+                                  "content": "2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 24,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Stat1Label",
+                                  "fill": "#166534",
+                                  "content": "完成",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Stat2",
+                              "width": "fill_container",
+                              "fill": "#eff6ff",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "layout": "vertical",
+                              "alignItems": "center",
+                              "gap": 4,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Stat2Value",
+                                  "fill": "#3b82f6",
+                                  "content": "1",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 24,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Stat2Label",
+                                  "fill": "#1e40af",
+                                  "content": "进行",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Stat3",
+                              "width": "fill_container",
+                              "fill": "#f8fafc",
+                              "cornerRadius": 8,
+                              "padding": 12,
+                              "layout": "vertical",
+                              "alignItems": "center",
+                              "gap": 4,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "Stat3Value",
+                                  "fill": "#64748b",
+                                  "content": "2",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 24,
+                                  "fontWeight": "600"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Stat3Label",
+                                  "fill": "#64748b",
+                                  "content": "等待",
+                                  "fontFamily": "Inter",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

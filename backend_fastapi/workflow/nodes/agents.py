@@ -132,6 +132,22 @@ class LLMAgentNode(BaseNodeImpl):
         return errors
 
 
+# Jira MCP tool hint to prepend to prompts when enabled
+JIRA_MCP_HINT = """
+## 可用工具提示
+如果需要获取 Jira Bug 详细信息，请使用 Jira MCP 工具：
+- `mcp__jira__get_issue` - 获取 issue 详情（描述、状态、评论等）
+- `mcp__jira__search` - JQL 搜索 issues
+- `mcp__jira__get_comments` - 获取 issue 评论
+- `mcp__jira__add_comment` - 添加评论到 issue
+- `mcp__jira__update_issue` - 更新 issue 状态/字段
+
+请在开始修复前先用 `mcp__jira__get_issue` 获取 Bug 完整信息。
+---
+
+"""
+
+
 @register_node_type(
     node_type="cccc_peer",
     display_name="CCCC Peer",
@@ -155,6 +171,10 @@ class LLMAgentNode(BaseNodeImpl):
             "via_foreman": {
                 "type": "boolean",
                 "description": "Route through foreman for coordination (default: true)",
+            },
+            "include_jira_hint": {
+                "type": "boolean",
+                "description": "Prepend Jira MCP tool usage hint to prompt (default: false)",
             },
             "timeout": {"type": "number", "description": "Response wait timeout in seconds (default 120)"},
         },
@@ -210,6 +230,12 @@ class CCCCPeerNode(BaseNodeImpl):
 
         # Render the prompt template with upstream inputs
         rendered_prompt = _render_template(prompt_template, inputs)
+
+        # Prepend Jira MCP hint if enabled
+        include_jira_hint = self.config.get("include_jira_hint", False)
+        if include_jira_hint:
+            rendered_prompt = JIRA_MCP_HINT + rendered_prompt
+            logger.info(f"CCCCPeerNode {self.node_id}: Added Jira MCP hint to prompt")
 
         coordinator = foreman_id if via_foreman else peer_id
         timeout_str = f"{timeout}s" if timeout else "indefinite"

@@ -359,6 +359,40 @@ export async function cancelBatchJob(jobId: string): Promise<{ success: boolean;
   return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
 }
 
+// --- Jira JQL Query API ---
+
+export interface JiraBug {
+  key: string;
+  summary: string;
+  status: string;
+  url: string;
+  priority?: string;
+  assignee?: string;
+}
+
+export interface JiraQueryRequest {
+  jql: string;
+  jira_url?: string;
+  email?: string;
+  api_token?: string;
+  max_results?: number;
+}
+
+export interface JiraQueryResponse {
+  bugs: JiraBug[];
+  total: number;
+  jql: string;
+}
+
+export async function queryJiraBugs(payload: JiraQueryRequest): Promise<JiraQueryResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/cccc/jira/query`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<JiraQueryResponse>(response);
+}
+
 export async function getBatchJobHistory(
   page = 1,
   pageSize = 20,

@@ -29,6 +29,7 @@
           "peer_id": "domain-expert",
           "foreman_id": "master",
           "via_foreman": true,
+          "include_jira_hint": true,
           "prompt": "请分析以下 Bug 报告，定位问题原因并提出修复方案：\n\n{input_1.data}",
           "timeout": 180
         }
@@ -45,6 +46,7 @@
           "peer_id": "code-simplifier",
           "foreman_id": "master",
           "via_foreman": true,
+          "include_jira_hint": true,
           "prompt": "根据以下分析结果，编写修复代码：\n\n{analyze_2.response}",
           "timeout": 300
         }
@@ -61,6 +63,7 @@
           "peer_id": "browser-tester",
           "foreman_id": "master",
           "via_foreman": true,
+          "include_jira_hint": true,
           "prompt": "请验证以下修复是否正确，并运行相关测试：\n\n修复代码：\n{fix_3.response}\n\n原始问题：\n{input_1.data}",
           "timeout": 180
         }

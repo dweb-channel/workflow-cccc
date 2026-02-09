@@ -40,7 +40,8 @@ async def close_temporal_client() -> None:
     """Close Temporal client connection."""
     global _client
     if _client is not None:
-        await _client.service_client.close()
+        # Newer Temporal SDK versions don't require explicit close
+        # Just release the reference
         _client = None
 
 

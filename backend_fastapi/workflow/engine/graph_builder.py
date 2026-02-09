@@ -634,8 +634,21 @@ def build_graph_from_config(workflow: WorkflowDefinition):
             async def node_func(state: Dict[str, Any]) -> Dict[str, Any]:
                 # Execute node with current state as inputs
                 result = await node_instance.execute(state)
-                # Return result to merge into state
-                return {node_instance.node_id: result}
+                # Return full state with node result merged in
+                # This ensures initial state fields (bugs, current_index, etc.) are preserved
+                new_state = {**state, node_instance.node_id: result}
+
+                # If the node output contains state updates (e.g., from update_state node),
+                # merge those into the top-level state as well
+                if isinstance(result, dict):
+                    for key, value in result.items():
+                        # Skip metadata keys
+                        if key not in ("updated_fields", "error", "has_more"):
+                            # Merge state-updating fields at top level
+                            if key in state or key in ("results", "current_index", "retry_count", "current_bug"):
+                                new_state[key] = value
+
+                return new_state
 
             return node_func
 
