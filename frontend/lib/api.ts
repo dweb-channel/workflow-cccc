@@ -276,8 +276,11 @@ export interface CCCCGroupsResponse {
 export interface BatchBugFixRequest {
   target_group_id: string;
   jira_urls: string[];
-  verification_level?: "quick" | "standard" | "full";
-  on_failure?: "continue" | "stop";
+  config?: {
+    validation_level?: "minimal" | "standard" | "thorough";
+    failure_policy?: "stop" | "skip" | "retry";
+    max_retries?: number;
+  };
   fixer_peer_id?: string;
   verifier_peer_id?: string;
 }

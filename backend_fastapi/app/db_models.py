@@ -327,6 +327,13 @@ class BugResultModel(Base):
         DateTime(timezone=True), nullable=True,
     )
 
+    # Execution steps as JSON array
+    # Each step: {step, label, status, started_at, completed_at, duration_ms, output_preview, error, attempt}
+    steps: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(
+        JSON, nullable=True,
+        comment="Execution steps: [{step, label, status, started_at, completed_at, duration_ms, output_preview, error}]",
+    )
+
     # Relationship
     job: Mapped["BatchJobModel"] = relationship(back_populates="bugs")
 

@@ -213,6 +213,43 @@ class BatchJobRepository:
         await self.session.flush()
         return True
 
+    async def update_bug_steps(
+        self,
+        job_id: str,
+        bug_index: int,
+        steps: List[Dict[str, Any]],
+    ) -> Optional[BugResultModel]:
+        """Update the execution steps for a specific bug.
+
+        Args:
+            job_id: Job identifier
+            bug_index: Index of the bug in the job
+            steps: List of step dicts [{step, label, status, started_at, ...}]
+
+        Returns:
+            Updated BugResultModel or None if not found
+        """
+        result = await self.session.execute(
+            select(BugResultModel).where(
+                BugResultModel.job_id == job_id,
+                BugResultModel.bug_index == bug_index,
+            )
+        )
+        bug = result.scalar_one_or_none()
+        if not bug:
+            return None
+
+        bug.steps = steps
+
+        await self.session.execute(
+            update(BatchJobModel)
+            .where(BatchJobModel.id == job_id)
+            .values(updated_at=_utcnow())
+        )
+
+        await self.session.flush()
+        return bug
+
     async def get_stats(self, job_id: str) -> Dict[str, int]:
         """Get bug status counts for a job.
 
