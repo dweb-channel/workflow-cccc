@@ -13,3 +13,9 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 
 # Claude CLI — resolved once at import time
 CLAUDE_CLI_PATH = os.getenv("CLAUDE_CLI_PATH") or shutil.which("claude") or "claude"
+
+# Claude CLI permission mode — skip interactive permission prompts for batch execution
+CLAUDE_SKIP_PERMISSIONS = os.getenv("CLAUDE_SKIP_PERMISSIONS", "true").lower() in ("true", "1", "yes")
+
+# Claude CLI MCP config — path to MCP server config JSON file (e.g., for Jira access)
+CLAUDE_MCP_CONFIG = os.getenv("CLAUDE_MCP_CONFIG", "")

@@ -5,11 +5,26 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable, Dict, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
-from ..config import CLAUDE_CLI_PATH
+from ..config import CLAUDE_CLI_PATH, CLAUDE_SKIP_PERMISSIONS, CLAUDE_MCP_CONFIG
 
 logger = logging.getLogger(__name__)
+
+
+def _build_cli_args(prompt: str, output_format: str = "text", verbose: bool = False) -> List[str]:
+    """Build Claude CLI argument list with common flags.
+
+    Centralizes CLI flag construction so all invocation sites use consistent flags.
+    """
+    args = [CLAUDE_CLI_PATH, "-p", prompt, "--output-format", output_format]
+    if verbose:
+        args.append("--verbose")
+    if CLAUDE_SKIP_PERMISSIONS:
+        args.append("--dangerously-skip-permissions")
+    if CLAUDE_MCP_CONFIG:
+        args.extend(["--mcp-config", CLAUDE_MCP_CONFIG])
+    return args
 
 
 async def run_claude_agent(
@@ -27,11 +42,10 @@ async def run_claude_agent(
     Returns:
         The complete output from Claude CLI
     """
+    cli_args = _build_cli_args(prompt, output_format="text")
     try:
         proc = await asyncio.create_subprocess_exec(
-            CLAUDE_CLI_PATH,
-            "-p", prompt,
-            "--output-format", "text",
+            *cli_args,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -74,11 +88,10 @@ async def stream_claude_agent(
     Yields:
         Output lines from Claude CLI as they become available
     """
+    cli_args = _build_cli_args(prompt, output_format="text")
     try:
         proc = await asyncio.create_subprocess_exec(
-            CLAUDE_CLI_PATH,
-            "-p", prompt,
-            "--output-format", "text",
+            *cli_args,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -136,11 +149,10 @@ async def run_claude_agent_json(
     Returns:
         Parsed JSON output or None if parsing fails
     """
+    cli_args = _build_cli_args(prompt, output_format="json")
     try:
         proc = await asyncio.create_subprocess_exec(
-            CLAUDE_CLI_PATH,
-            "-p", prompt,
-            "--output-format", "json",
+            *cli_args,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -284,12 +296,10 @@ async def stream_claude_events(
     Returns:
         The complete output from Claude CLI (result text)
     """
+    cli_args = _build_cli_args(prompt, output_format="stream-json", verbose=True)
     try:
         proc = await asyncio.create_subprocess_exec(
-            CLAUDE_CLI_PATH,
-            "-p", prompt,
-            "--output-format", "stream-json",
-            "--verbose",
+            *cli_args,
             cwd=cwd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -17,45 +17,97 @@ from .registry import BaseNodeImpl, register_node_type
 logger = logging.getLogger(__name__)
 
 
-def _transform_tool_use_event(event_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Transform a tool_use event into a frontend-specific event type.
+def _humanize_tool_event(event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Transform a tool_use event into a human-readable, Chinese-friendly format.
 
-    Backend emits: {type: "tool_use", tool_name: "Read", content: "...", tool_input: {...}}
-    Frontend expects: {type: "read", file: "...", lines: "..."} etc.
+    Produces conversational descriptions like Claude terminal output style.
     """
     tool_name = event_dict.get("tool_name", "").lower()
     tool_input = event_dict.get("tool_input", {}) or {}
 
     if tool_name in ("read", "view"):
+        file_path = tool_input.get("file_path") or tool_input.get("path", "")
+        # Extract short filename for display
+        short_name = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+        lines_info = ""
+        if tool_input.get("offset") or tool_input.get("limit"):
+            lines_info = f"（第 {tool_input.get('offset', 1)} 行起）"
         return {
             "type": "read",
-            "file": tool_input.get("file_path") or tool_input.get("path", ""),
-            "lines": tool_input.get("lines") or tool_input.get("limit", ""),
-            "description": tool_input.get("description", ""),
+            "file": file_path,
+            "lines": lines_info,
+            "description": f"正在读取 {short_name} 的内容，了解代码结构...",
         }
     elif tool_name in ("edit", "write"):
-        # Build diff preview from old_string/new_string if available
+        file_path = tool_input.get("file_path") or tool_input.get("path", "")
+        short_name = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
         diff_parts = []
         if tool_input.get("old_string"):
             diff_parts.append(f"- {tool_input['old_string'][:200]}")
         if tool_input.get("new_string"):
             diff_parts.append(f"+ {tool_input['new_string'][:200]}")
+        diff_text = "\n".join(diff_parts) if diff_parts else ""
+        description = f"正在修改 {short_name}"
+        if tool_name == "write":
+            description = f"正在创建文件 {short_name}"
         return {
             "type": "edit",
-            "file": tool_input.get("file_path") or tool_input.get("path", ""),
-            "diff": "\n".join(diff_parts) if diff_parts else event_dict.get("content", ""),
+            "file": file_path,
+            "diff": diff_text or event_dict.get("content", ""),
+            "description": description,
         }
     elif tool_name in ("bash", "execute", "shell"):
+        command = tool_input.get("command", "")
+        # Generate human-friendly description based on command
+        desc = tool_input.get("description", "")
+        if not desc:
+            if "test" in command or "pytest" in command:
+                desc = "正在运行测试，验证修改是否正确..."
+            elif "git" in command:
+                desc = "正在执行 Git 操作..."
+            elif "npm" in command or "yarn" in command:
+                desc = "正在执行前端构建/安装..."
+            elif "grep" in command or "find" in command:
+                desc = "正在搜索相关代码..."
+            elif "ls" in command:
+                desc = "正在查看目录结构..."
+            elif "cat" in command or "head" in command:
+                desc = "正在查看文件内容..."
+            else:
+                desc = "正在执行命令..."
         return {
             "type": "bash",
-            "command": tool_input.get("command", ""),
-            "output": "",  # Output comes later via tool_result
+            "command": command,
+            "output": "",
+            "description": desc,
         }
-    else:
-        # Unknown tool — fall back to thinking-style display
+    elif tool_name in ("glob", "grep", "search"):
+        pattern = tool_input.get("pattern", "")
         return {
             "type": "thinking",
-            "content": f"[{event_dict.get('tool_name', 'Tool')}] {event_dict.get('content', '')}",
+            "content": f"🔍 正在搜索代码：{pattern}",
+        }
+    elif tool_name in ("webfetch", "web_fetch"):
+        url = tool_input.get("url", "")
+        return {
+            "type": "thinking",
+            "content": f"🌐 正在访问网页获取信息：{url[:80]}...",
+        }
+    elif tool_name in ("task",):
+        desc = tool_input.get("description", "")
+        return {
+            "type": "thinking",
+            "content": f"📋 正在执行子任务：{desc}" if desc else "📋 正在执行子任务...",
+        }
+    else:
+        # Unknown tool — show with Chinese description
+        original_name = event_dict.get("tool_name", "Tool")
+        content = event_dict.get("content", "")
+        if len(content) > 200:
+            content = content[:200] + "..."
+        return {
+            "type": "thinking",
+            "content": f"🔧 正在使用工具 {original_name}：{content}" if content else f"🔧 正在使用工具 {original_name}",
         }
 
 
@@ -79,13 +131,31 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
             event_dict["node_id"] = node_id
             event_dict["bug_index"] = bug_index
 
-            # Transform tool_use into specific frontend types
+            # Transform tool_use into specific frontend types with Chinese descriptions
             if event.type == ClaudeEvent.TOOL_USE:
-                transformed = _transform_tool_use_event(event_dict)
+                transformed = _humanize_tool_event(event_dict)
                 transformed["timestamp"] = event_dict["timestamp"]
                 transformed["node_id"] = node_id
                 transformed["bug_index"] = bug_index
                 push_job_event(job_id, "ai_thinking", transformed)
+            elif event.type == ClaudeEvent.TEXT:
+                # Tool results — humanize the "[Tool Result]" prefix
+                content = event.content
+                if content.startswith("[Tool Result]"):
+                    raw = content[len("[Tool Result]"):].strip()
+                    # Truncate long tool results
+                    if len(raw) > 300:
+                        raw = raw[:300] + "..."
+                    event_dict["content"] = f"📎 工具返回结果：{raw}"
+                push_job_event(job_id, "ai_thinking", event_dict)
+            elif event.type == ClaudeEvent.RESULT:
+                # Final result — add Chinese wrapper
+                content = event.content
+                if event.is_error:
+                    event_dict["content"] = f"❌ 执行出错：{content}"
+                else:
+                    event_dict["content"] = f"✅ 分析完成：{content}"
+                push_job_event(job_id, "ai_thinking", event_dict)
             else:
                 push_job_event(job_id, "ai_thinking", event_dict)
 

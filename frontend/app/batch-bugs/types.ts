@@ -75,12 +75,14 @@ export interface AIThinkingEditEvent extends AIThinkingEventBase {
   type: "edit";
   file: string;
   diff?: string;
+  description?: string;
 }
 
 export interface AIThinkingBashEvent extends AIThinkingEventBase {
   type: "bash";
   command: string;
   output?: string;
+  description?: string;
 }
 
 export interface AIThinkingTextEvent extends AIThinkingEventBase {
