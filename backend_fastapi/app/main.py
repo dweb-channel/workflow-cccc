@@ -53,6 +53,7 @@ from .routes.validation import router as validation_router  # noqa: E402
 from .routes.templates import router as templates_router  # noqa: E402
 from .routes.batch import router as batch_router  # noqa: E402
 from .routes.batch import jira_router  # noqa: E402
+from .routes.filesystem import router as filesystem_router  # noqa: E402
 
 app.include_router(sse_router)
 app.include_router(workflows_router)
@@ -61,6 +62,7 @@ app.include_router(validation_router)
 app.include_router(templates_router)
 app.include_router(batch_router)
 app.include_router(jira_router)
+app.include_router(filesystem_router)
 
 
 @app.get("/health")
