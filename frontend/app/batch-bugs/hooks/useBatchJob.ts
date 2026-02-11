@@ -152,6 +152,7 @@ export function useBatchJob() {
       if (!data || typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => {
         const steps = [...(bug.steps ?? [])];
+        let found = false;
         for (let i = steps.length - 1; i >= 0; i--) {
           if (
             steps[i].step === data.step &&
@@ -164,8 +165,21 @@ export function useBatchJob() {
               duration_ms: data.duration_ms as number | undefined,
               output_preview: data.output_preview as string | undefined,
             };
+            found = true;
             break;
           }
+        }
+        // If no in_progress step found (started event missed), create completed entry
+        if (!found) {
+          steps.push({
+            step: data.step as string,
+            label: (data.label as string) || (data.step as string),
+            status: "completed",
+            completed_at: data.timestamp as string,
+            duration_ms: data.duration_ms as number | undefined,
+            output_preview: data.output_preview as string | undefined,
+            attempt: data.attempt as number | undefined,
+          });
         }
         return { ...bug, steps };
       });
@@ -176,6 +190,7 @@ export function useBatchJob() {
       if (!data || typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => {
         const steps = [...(bug.steps ?? [])];
+        let found = false;
         for (let i = steps.length - 1; i >= 0; i--) {
           if (
             steps[i].step === data.step &&
@@ -187,8 +202,20 @@ export function useBatchJob() {
               completed_at: data.timestamp as string,
               error: data.error as string | undefined,
             };
+            found = true;
             break;
           }
+        }
+        // If no in_progress step found (started event missed), create failed entry
+        if (!found) {
+          steps.push({
+            step: data.step as string,
+            label: (data.label as string) || (data.step as string),
+            status: "failed",
+            completed_at: data.timestamp as string,
+            error: data.error as string | undefined,
+            attempt: data.attempt as number | undefined,
+          });
         }
         return { ...bug, steps };
       });

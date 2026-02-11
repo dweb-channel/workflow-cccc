@@ -56,6 +56,13 @@ function getStepState(
         };
       }
     }
+    // No step data found — infer from bug-level status
+    if (bugStatus === "completed") return { status: "completed" };
+    if (bugStatus === "failed") {
+      return stepKey === "update_success"
+        ? { status: "failed" }
+        : { status: "completed" };
+    }
     return { status: "pending" };
   }
 
