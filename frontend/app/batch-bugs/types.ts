@@ -1,12 +1,10 @@
 import type {
-  CCCCGroup,
-  CCCCPeer,
   BatchJobHistoryItem,
   JiraBug,
 } from "@/lib/api";
 
 // Re-export API types used by components
-export type { CCCCGroup, CCCCPeer, BatchJobHistoryItem, JiraBug };
+export type { BatchJobHistoryItem, JiraBug };
 
 // ============ Local Types ============
 
@@ -49,4 +47,57 @@ export interface BatchJobStats {
   pending: number;
   failed: number;
   skipped: number;
+}
+
+// ============ AI Thinking Events ============
+
+export type AIThinkingEventType = "thinking" | "read" | "edit" | "bash" | "result";
+
+export interface AIThinkingEventBase {
+  type: AIThinkingEventType;
+  timestamp: string;
+  bug_index: number;
+}
+
+export interface AIThinkingThinkingEvent extends AIThinkingEventBase {
+  type: "thinking";
+  content: string;
+}
+
+export interface AIThinkingReadEvent extends AIThinkingEventBase {
+  type: "read";
+  file: string;
+  lines?: string;
+  description?: string;
+}
+
+export interface AIThinkingEditEvent extends AIThinkingEventBase {
+  type: "edit";
+  file: string;
+  diff?: string;
+}
+
+export interface AIThinkingBashEvent extends AIThinkingEventBase {
+  type: "bash";
+  command: string;
+  output?: string;
+}
+
+export interface AIThinkingResultEvent extends AIThinkingEventBase {
+  type: "result";
+  content: string;
+}
+
+export type AIThinkingEvent =
+  | AIThinkingThinkingEvent
+  | AIThinkingReadEvent
+  | AIThinkingEditEvent
+  | AIThinkingBashEvent
+  | AIThinkingResultEvent;
+
+export interface AIThinkingStats {
+  streaming: boolean;
+  tokens_in: number;
+  tokens_out: number;
+  cost: number;
 }

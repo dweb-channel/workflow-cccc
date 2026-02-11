@@ -195,7 +195,7 @@ export function validateRequiredOutputFields(
 ): Array<{ node_id: string; node_type: string }> {
   const missing: Array<{ node_id: string; node_type: string }> = [];
 
-  const requiresOutput = new Set(['llm_agent', 'cccc_peer', 'script']);
+  const requiresOutput = new Set(['llm_agent', 'script']);
 
   for (const node of workflow.nodes) {
     if (requiresOutput.has(node.type)) {

@@ -74,11 +74,6 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
     if (nodeType === "llm_agent" && !((config.prompt as string) || "").trim()) {
       errs.prompt = "LLM Agent 的 Prompt 不能为空";
     }
-    if (nodeType === "cccc_peer") {
-      if (!((config.peer_id as string) || "").trim()) errs.peer_id = "Peer ID 不能为空";
-      if (!((config.prompt as string) || "").trim()) errs.prompt = "Prompt 不能为空";
-      if (!((config.group_id as string) || "").trim()) errs.group_id = "Group ID 不能为空";
-    }
     if (nodeType === "http_request" && !((config.url as string) || "").trim()) {
       errs.url = "URL 不能为空";
     }
@@ -143,7 +138,6 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="llm_agent">🤖 LLM Agent</SelectItem>
-                <SelectItem value="cccc_peer">👥 CCCC Peer</SelectItem>
                 <SelectItem value="data_source">💾 数据源</SelectItem>
                 <SelectItem value="data_processor">⚙️ 数据处理</SelectItem>
                 <SelectItem value="http_request">🌐 HTTP 请求</SelectItem>
@@ -155,7 +149,7 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
           </div>
 
           {/* Validation summary for type-specific fields */}
-          {(errors.prompt || errors.peer_id || errors.group_id || errors.url || errors.condition) && (
+          {(errors.prompt || errors.url || errors.condition) && (
             <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
               <p className="text-xs font-medium text-red-600">请补充必填字段：</p>
               {Object.entries(errors).filter(([k]) => !["label", "nodeType"].includes(k)).map(([key, msg]) => (
@@ -167,13 +161,6 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
           {/* Type-specific config fields */}
           {nodeType === "llm_agent" && (
             <LLMAgentConfig
-              config={(node.data.config as Record<string, unknown>) || {}}
-              onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
-            />
-          )}
-
-          {nodeType === "cccc_peer" && (
-            <CCCCPeerConfig
               config={(node.data.config as Record<string, unknown>) || {}}
               onChange={(cfg) => setConfigJson(JSON.stringify(cfg, null, 2))}
             />
@@ -333,118 +320,6 @@ function LLMAgentConfig({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function CCCCPeerConfig({
-  config,
-  onChange,
-}: {
-  config: Record<string, unknown>;
-  onChange: (cfg: Record<string, unknown>) => void;
-}) {
-  const [peerId, setPeerId] = useState((config.peer_id as string) || "");
-  const [prompt, setPrompt] = useState(
-    (config.prompt as string) || ""
-  );
-  const [command, setCommand] = useState(
-    (config.command as string) || ""
-  );
-  const [groupId, setGroupId] = useState(
-    (config.group_id as string) || ""
-  );
-  const [timeout, setTimeout_] = useState(
-    (config.timeout as number) || 120
-  );
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    onChange({
-      ...config,
-      peer_id: peerId,
-      prompt,
-      command: command || undefined,
-      group_id: groupId || undefined,
-      timeout,
-    });
-  }, [peerId, prompt, command, groupId, timeout]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const peerIdError = touched.peer_id && !peerId.trim() ? "Peer ID 不能为空" : undefined;
-  const promptError = touched.prompt && !prompt.trim() ? "Prompt 不能为空" : undefined;
-  const groupIdError = touched.group_id && !groupId.trim() ? "Group ID 不能为空" : undefined;
-
-  return (
-    <div className="space-y-4 rounded-md border border-amber-200 bg-amber-50/50 p-3">
-      <p className="text-xs font-medium text-amber-600">CCCC Peer 配置</p>
-
-      {/* Peer ID */}
-      <div className="space-y-1">
-        <RequiredLabel className="text-xs">Peer ID</RequiredLabel>
-        <Input
-          value={peerId}
-          onChange={(e) => { setPeerId(e.target.value); setTouched((t) => ({ ...t, peer_id: true })); }}
-          onBlur={() => setTouched((t) => ({ ...t, peer_id: true }))}
-          placeholder="domain-expert"
-          className={`text-xs ${peerIdError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
-        />
-        <FieldError message={peerIdError} />
-        <p className="text-[10px] text-slate-400">
-          CCCC 组中的 peer actor ID
-        </p>
-      </div>
-
-      {/* Prompt */}
-      <div className="space-y-1">
-        <RequiredLabel className="text-xs">Prompt 模板</RequiredLabel>
-        <Textarea
-          value={prompt}
-          onChange={(e) => { setPrompt(e.target.value); setTouched((t) => ({ ...t, prompt: true })); }}
-          onBlur={() => setTouched((t) => ({ ...t, prompt: true }))}
-          placeholder="请根据规划文档实现以下功能：&#10;&#10;{plan}"
-          className={`min-h-[100px] font-mono text-xs ${promptError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
-        />
-        <FieldError message={promptError} />
-        <p className="text-[10px] text-slate-400">
-          使用 {"{字段名}"} 引用上游节点输出
-        </p>
-      </div>
-
-      {/* Command & Group ID row */}
-      <div className="flex gap-2">
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs">命令前缀</Label>
-          <Input
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            placeholder="/brainstorm"
-            className="text-xs"
-          />
-          <p className="text-[10px] text-slate-400">可选，如 /brainstorm</p>
-        </div>
-        <div className="flex-1 space-y-1">
-          <RequiredLabel className="text-xs">Group ID</RequiredLabel>
-          <Input
-            value={groupId}
-            onChange={(e) => { setGroupId(e.target.value); setTouched((t) => ({ ...t, group_id: true })); }}
-            onBlur={() => setTouched((t) => ({ ...t, group_id: true }))}
-            placeholder="g_xxxxxx"
-            className={`text-xs ${groupIdError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
-          />
-          <FieldError message={groupIdError} />
-        </div>
-      </div>
-
-      {/* Timeout */}
-      <div className="space-y-1">
-        <Label className="text-xs">超时 (秒)</Label>
-        <Input
-          type="number"
-          value={timeout}
-          onChange={(e) => setTimeout_(Number(e.target.value))}
-          className="text-xs"
-        />
-      </div>
     </div>
   );
 }

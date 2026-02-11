@@ -117,8 +117,7 @@ async def run_tests():
     errors = []
     passed = 0
 
-    os.environ["CCCC_MOCK"] = "true"
-    os.environ["CCCC_GROUP_ID"] = "test-group"
+    # CCCC_MOCK/CCCC_GROUP_ID no longer needed (CCCC integration removed in M11)
 
     await setup_db()
 
@@ -152,7 +151,7 @@ async def run_tests():
         # T67.1: GET /batch-bug-fix/{job_id} returns steps
         # -----------------------------------------------------------------
         print("\nTest T67.1: GET job status returns steps field ... ", end="")
-        resp = await client.get(f"/api/v2/cccc/batch-bug-fix/{test_job_id}")
+        resp = await client.get(f"/api/v2/batch/bug-fix/{test_job_id}")
         if resp.status_code == 200:
             data = resp.json()
             bugs = data.get("bugs", [])
@@ -259,7 +258,7 @@ async def run_tests():
         )
         JOB_BUG_STEPS[retry_job_id] = {0: retry_steps}
 
-        resp_retry = await client.get(f"/api/v2/cccc/batch-bug-fix/{retry_job_id}")
+        resp_retry = await client.get(f"/api/v2/batch/bug-fix/{retry_job_id}")
         if resp_retry.status_code == 200:
             retry_data = resp_retry.json()
             retry_bugs = retry_data.get("bugs", [])
@@ -325,7 +324,7 @@ async def run_tests():
             BATCH_JOBS_CACHE.pop(persist_job_id, None)
             JOB_BUG_STEPS.pop(persist_job_id, None)
 
-            resp_persist = await client.get(f"/api/v2/cccc/batch-bug-fix/{persist_job_id}")
+            resp_persist = await client.get(f"/api/v2/batch/bug-fix/{persist_job_id}")
             if resp_persist.status_code == 200:
                 persist_data = resp_persist.json()
                 persist_bugs = persist_data.get("bugs", [])

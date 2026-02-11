@@ -1,2 +1,2 @@
 # Workflow MCP Server
-# Exposes workflow control tools for CCCC agents
+# Exposes workflow control tools for external agents

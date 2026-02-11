@@ -576,16 +576,6 @@ function WorkflowPage() {
         if (!((cfg.prompt as string) || "").trim()) {
           validationErrors.push(`「${nodeLabel}」: Prompt 不能为空`);
         }
-      } else if (nodeType === "cccc_peer") {
-        if (!((cfg.peer_id as string) || "").trim()) {
-          validationErrors.push(`「${nodeLabel}」: Peer ID 不能为空`);
-        }
-        if (!((cfg.prompt as string) || "").trim()) {
-          validationErrors.push(`「${nodeLabel}」: Prompt 不能为空`);
-        }
-        if (!((cfg.group_id as string) || "").trim()) {
-          validationErrors.push(`「${nodeLabel}」: Group ID 不能为空`);
-        }
       }
     }
 

@@ -11,7 +11,7 @@
 
 export interface NodeDefinition {
   id: string;
-  type: string;  // 后端类型: llm_agent, cccc_peer, conditional, script
+  type: string;  // 后端类型: llm_agent, conditional, script
   label: string;
   config: Record<string, any>;
 }

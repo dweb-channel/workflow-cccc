@@ -1,7 +1,7 @@
 {
   "name": "bug_fix",
   "title": "Bug 修复",
-  "description": "自动分析和修复 Bug，通过 Foreman 协调多 Agent 协作",
+  "description": "自动分析和修复 Bug，通过 Claude CLI 调用多步骤 Agent 协作",
   "icon": "🐛",
   "max_iterations": 3,
   "nodes": [
@@ -20,16 +20,12 @@
     },
     {
       "id": "analyze_2",
-      "type": "cccc_peer",
+      "type": "llm_agent",
       "position": { "x": 400, "y": 200 },
       "data": {
         "label": "Bug 分析",
         "config": {
           "name": "Bug 分析",
-          "peer_id": "domain-expert",
-          "foreman_id": "master",
-          "via_foreman": true,
-          "include_jira_hint": true,
           "prompt": "请分析以下 Bug 报告，定位问题原因并提出修复方案：\n\n{input_1.data}",
           "timeout": 180
         }
@@ -37,34 +33,26 @@
     },
     {
       "id": "fix_3",
-      "type": "cccc_peer",
+      "type": "llm_agent",
       "position": { "x": 700, "y": 200 },
       "data": {
         "label": "代码修复",
         "config": {
           "name": "代码修复",
-          "peer_id": "code-simplifier",
-          "foreman_id": "master",
-          "via_foreman": true,
-          "include_jira_hint": true,
-          "prompt": "根据以下分析结果，编写修复代码：\n\n{analyze_2.response}",
+          "prompt": "根据以下分析结果，编写修复代码：\n\n{analyze_2.result}",
           "timeout": 300
         }
       }
     },
     {
       "id": "verify_4",
-      "type": "cccc_peer",
+      "type": "llm_agent",
       "position": { "x": 1000, "y": 200 },
       "data": {
         "label": "验证测试",
         "config": {
           "name": "验证测试",
-          "peer_id": "browser-tester",
-          "foreman_id": "master",
-          "via_foreman": true,
-          "include_jira_hint": true,
-          "prompt": "请验证以下修复是否正确，并运行相关测试：\n\n修复代码：\n{fix_3.response}\n\n原始问题：\n{input_1.data}",
+          "prompt": "请验证以下修复是否正确，并运行相关测试：\n\n修复代码：\n{fix_3.result}\n\n原始问题：\n{input_1.data}",
           "timeout": 180
         }
       }
@@ -92,7 +80,7 @@
         "config": {
           "name": "修复完成",
           "format": "json",
-          "destination": "## Bug 修复完成\n\n### 分析结果\n{analyze_2.response}\n\n### 修复代码\n{fix_3.response}\n\n### 验证结果\n{verify_4.response}"
+          "destination": "## Bug 修复完成\n\n### 分析结果\n{analyze_2.result}\n\n### 修复代码\n{fix_3.result}\n\n### 验证结果\n{verify_4.result}"
         }
       }
     }

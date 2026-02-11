@@ -1,1 +1,1 @@
-"""External Agent Clients: Claude CLI and CCCC daemon."""
+"""External Agent Clients: Claude CLI."""

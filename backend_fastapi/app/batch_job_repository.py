@@ -38,10 +38,10 @@ class BatchJobRepository:
 
         Args:
             job_id: Unique job identifier (e.g., job_xxx)
-            target_group_id: Target CCCC group ID
+            target_group_id: (Legacy, nullable) Target group ID
             jira_urls: List of Jira bug URLs
-            fixer_peer_id: Peer ID for bug fixing
-            verifier_peer_id: Peer ID for verification
+            fixer_peer_id: (Legacy, nullable) Peer ID for bug fixing
+            verifier_peer_id: (Legacy, nullable) Peer ID for verification
             config: Job configuration dict
 
         Returns:

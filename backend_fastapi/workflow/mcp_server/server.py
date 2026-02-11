@@ -1,7 +1,7 @@
 """
 Workflow MCP Server - Tool definitions and handlers
 
-Exposes workflow control tools for CCCC agents:
+Exposes workflow control tools for external agents:
 - workflow_run: Start a workflow execution
 - workflow_status: Get workflow run status
 - workflow_result: Get workflow execution result

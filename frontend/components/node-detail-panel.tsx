@@ -125,7 +125,7 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
             ) : status === "waiting_peer" ? (
               <div className="flex items-center gap-2 text-xs text-purple-500">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-purple-500" />
-                等待 CCCC Peer 响应...
+                等待 Agent 响应...
               </div>
             ) : (
               <p className="text-xs text-slate-400">等待执行...</p>

@@ -22,8 +22,7 @@ from typing import Any, Dict, List, Optional
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-os.environ["CCCC_MOCK"] = "true"
-os.environ["CCCC_GROUP_ID"] = "test-group"
+# CCCC_MOCK/CCCC_GROUP_ID no longer needed (CCCC integration removed in M11)
 
 
 async def run_tests():
@@ -428,7 +427,7 @@ async def run_tests():
             }
         JOB_BUG_STEPS[reg_job_id] = {0: reg_steps}
 
-        resp_reg = await client.get(f"/api/v2/cccc/batch-bug-fix/{reg_job_id}")
+        resp_reg = await client.get(f"/api/v2/batch/bug-fix/{reg_job_id}")
         if resp_reg.status_code == 200:
             reg_data = resp_reg.json()
             bugs = reg_data.get("bugs", [])

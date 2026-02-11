@@ -1,41 +1,39 @@
-"""CCCC Integration API endpoints.
+"""Batch Bug Fix and Jira Integration API endpoints.
 
-Provides endpoints for listing CCCC groups and dispatching batch bug fix tasks.
+Provides endpoints for dispatching batch bug fix tasks and querying Jira.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from workflow.agents.cccc import list_all_groups, send_cross_group_message
 from workflow.engine.graph_builder import (
     EdgeDefinition,
     NodeConfig,
     WorkflowDefinition,
 )
-from workflow.engine.executor import execute_dynamic_workflow
 
 # Import template utilities
 from app.templates import load_template, template_to_workflow_definition
 
 # Database imports
-from app.database import get_session, get_session_ctx
+from app.database import get_session_ctx
 from app.batch_job_repository import BatchJobRepository
 from app.db_models import BatchJobModel, BugResultModel
 
-logger = logging.getLogger("workflow.routes.cccc")
+logger = logging.getLogger("workflow.routes.batch")
 
-router = APIRouter(prefix="/api/v2/cccc", tags=["cccc"])
+router = APIRouter(prefix="/api/v2/batch", tags=["batch"])
 
 # In-memory cache for active jobs (used during workflow execution for SSE sync)
 # Jobs are persisted to DB, this is just for real-time tracking
@@ -79,137 +77,6 @@ JOB_BUG_STEPS: Dict[str, Dict[int, List[Dict[str, Any]]]] = {}
 # --- Schemas ---
 
 
-class EnabledPeer(BaseModel):
-    """Enabled peer summary."""
-    id: str
-    title: str
-    role: str
-    enabled: bool = True
-    running: bool = False
-
-
-class CCCCGroupResponse(BaseModel):
-    """CCCC Group information for the API response."""
-    group_id: str
-    title: str
-    state: str
-    running: bool
-    ready: bool
-    enabled_peers: int
-    peers: List[EnabledPeer]
-    scope: Optional[str] = None
-
-
-class CCCCGroupsListResponse(BaseModel):
-    """Response for GET /api/v2/cccc/groups."""
-    groups: List[CCCCGroupResponse]
-    total: int
-
-
-# --- Helper functions ---
-
-
-def _determine_actor_role(actors: List[dict], actor_id: str) -> str:
-    """Determine actor role based on position (first enabled = foreman, rest = peer)."""
-    enabled_actors = [a for a in actors if a.get("enabled")]
-    if not enabled_actors:
-        return "peer"
-    if enabled_actors[0].get("id") == actor_id:
-        return "foreman"
-    return "peer"
-
-
-# --- Endpoints ---
-
-
-@router.get("/groups", response_model=CCCCGroupsListResponse)
-async def list_cccc_groups(
-    filter: Optional[str] = Query(
-        None,
-        description="Filter groups: 'running' (only running), 'ready' (only ready for tasks)",
-    ),
-):
-    """List all local CCCC working groups.
-
-    Returns groups with their status and peer availability.
-    Use filter=running to get only running groups.
-    Use filter=ready to get only groups that are ready to accept tasks.
-    """
-    # Read groups from filesystem
-    groups_resp = list_all_groups()
-
-    if not groups_resp.get("ok"):
-        error = groups_resp.get("error", {})
-        error_msg = error.get("message", "Failed to list CCCC groups")
-        error_code = error.get("code", "daemon_error")
-
-        if error_code == "connection_refused":
-            raise HTTPException(status_code=503, detail="CCCC daemon is not running")
-        raise HTTPException(status_code=500, detail=error_msg)
-
-    raw_groups = groups_resp.get("result", {}).get("groups", [])
-
-    # Process each group to add ready status and peer info
-    result_groups: List[CCCCGroupResponse] = []
-
-    for g in raw_groups:
-        group_id = g.get("group_id", "")
-        running = g.get("running", False)
-        state = g.get("state", "unknown")
-        title = g.get("title", group_id)
-
-        # Get scope from first scope if available
-        scopes = g.get("scopes", [])
-        scope = scopes[0].get("label") if scopes else None
-
-        # Get actors from group data (already loaded from yaml)
-        actors = g.get("actors", [])
-        enabled_peers: List[EnabledPeer] = []
-
-        for actor in actors:
-            if not actor.get("enabled"):
-                continue
-            # Determine role based on position
-            role = _determine_actor_role(actors, actor.get("id", ""))
-            # Actor is running if group is running and actor has a running session
-            actor_running = running and actor.get("running", True)
-            if role == "peer":
-                enabled_peers.append(EnabledPeer(
-                    id=actor.get("id", ""),
-                    title=actor.get("title", ""),
-                    role=role,
-                    enabled=True,
-                    running=actor_running,
-                ))
-
-        # Group is ready if it's running and has at least one enabled peer
-        ready = running and len(enabled_peers) > 0
-
-        group_response = CCCCGroupResponse(
-            group_id=group_id,
-            title=title,
-            state=state,
-            running=running,
-            ready=ready,
-            enabled_peers=len(enabled_peers),
-            peers=enabled_peers,
-            scope=scope,
-        )
-
-        # Apply filter
-        if filter == "running" and not running:
-            continue
-        if filter == "ready" and not ready:
-            continue
-
-        result_groups.append(group_response)
-
-    return CCCCGroupsListResponse(
-        groups=result_groups,
-        total=len(result_groups),
-    )
-
-
 # --- Batch Bug Fix Schemas ---
 
 
@@ -221,16 +88,11 @@ class BatchBugFixConfig(BaseModel):
 
 
 class BatchBugFixRequest(BaseModel):
-    """Request for POST /api/v2/batch-bug-fix."""
-    target_group_id: str = Field(..., description="Target CCCC Group ID")
+    """Request for POST /api/v2/batch/bug-fix."""
     jira_urls: List[str] = Field(..., min_length=1, description="List of Jira bug URLs")
-    fixer_peer_id: Optional[str] = Field(
+    cwd: Optional[str] = Field(
         None,
-        description="Peer ID to execute bug fixes. If not specified, uses first available peer."
-    )
-    verifier_peer_id: Optional[str] = Field(
-        None,
-        description="Peer ID to verify bug fixes. If not specified, uses same peer as fixer."
+        description="Working directory for Claude CLI (defaults to current directory)",
     )
     config: Optional[BatchBugFixConfig] = None
 
@@ -260,16 +122,15 @@ class BugStatus(BaseModel):
 
 
 class BatchBugFixResponse(BaseModel):
-    """Response for POST /api/v2/batch-bug-fix."""
+    """Response for POST /api/v2/batch/bug-fix."""
     job_id: str
     status: Literal["started", "running", "completed", "failed", "cancelled"]
     total_bugs: int
-    target_group_id: str
     created_at: str
 
 
 class BatchJobStatusResponse(BaseModel):
-    """Response for GET /api/v2/batch-bug-fix/{job_id}."""
+    """Response for GET /api/v2/batch/bug-fix/{job_id}."""
     job_id: str
     status: Literal["started", "running", "completed", "failed", "cancelled"]
     total_bugs: int
@@ -278,7 +139,6 @@ class BatchJobStatusResponse(BaseModel):
     skipped: int
     in_progress: int
     pending: int
-    target_group_id: str
     bugs: List[BugStatus]
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -288,7 +148,6 @@ class BatchJobSummary(BaseModel):
     """Summary of a batch job for list view."""
     job_id: str
     status: Literal["started", "running", "completed", "failed", "cancelled"]
-    target_group_id: str
     total_bugs: int
     completed: int
     failed: int
@@ -297,7 +156,7 @@ class BatchJobSummary(BaseModel):
 
 
 class BatchJobListResponse(BaseModel):
-    """Response for GET /api/v2/batch-bug-fix (list)."""
+    """Response for GET /api/v2/batch/bug-fix (list)."""
     jobs: List[BatchJobSummary]
     total: int
     page: int
@@ -310,9 +169,7 @@ class BatchJobListResponse(BaseModel):
 async def execute_batch_bug_fix_workflow(
     job_id: str,
     jira_urls: List[str],
-    target_group_id: str,
-    fixer_peer_id: str,
-    verifier_peer_id: str,
+    cwd: str,
     config: Dict[str, Any],
 ) -> None:
     """Execute the batch bug fix workflow asynchronously.
@@ -326,9 +183,7 @@ async def execute_batch_bug_fix_workflow(
     Args:
         job_id: Unique job identifier
         jira_urls: List of Jira bug URLs to fix
-        target_group_id: Target CCCC group ID
-        fixer_peer_id: Peer ID to execute bug fixes
-        verifier_peer_id: Peer ID to verify bug fixes
+        cwd: Working directory for Claude CLI
         config: Job configuration (validation_level, failure_policy, max_retries)
     """
     logger.info(f"Starting workflow execution for job {job_id}")
@@ -380,9 +235,7 @@ async def execute_batch_bug_fix_workflow(
             "bugs": jira_urls,
             "bugs_count": len(jira_urls),
             "job_id": job_id,
-            "target_group_id": target_group_id,
-            "fixer_peer_id": fixer_peer_id,
-            "verifier_peer_id": verifier_peer_id,
+            "cwd": cwd,
             "current_index": 0,
             "retry_count": 0,
             "results": [],
@@ -505,9 +358,9 @@ async def _execute_with_realtime_sync(
                 # Extract output preview from node output
                 output_preview = None
                 if isinstance(node_output, dict):
-                    # CCCCPeerNode returns {response, success, peer_id}
-                    if "response" in node_output:
-                        resp = node_output["response"]
+                    # LLMAgentNode returns {result, success}
+                    if "result" in node_output:
+                        resp = node_output["result"]
                         if isinstance(resp, str) and len(resp) > 0:
                             output_preview = resp[:200] + ("..." if len(resp) > 200 else "")
                     # VerifyNode returns {verified, message, details}
@@ -887,9 +740,7 @@ async def _sync_workflow_results_to_job(job_id: str, final_state: Dict[str, Any]
 async def _run_workflow_with_timeout(
     job_id: str,
     jira_urls: List[str],
-    target_group_id: str,
-    fixer_peer_id: str,
-    verifier_peer_id: str,
+    cwd: str,
     config: Dict[str, Any],
 ) -> None:
     """Run execute_batch_bug_fix_workflow with a global timeout.
@@ -908,9 +759,7 @@ async def _run_workflow_with_timeout(
         await execute_batch_bug_fix_workflow(
             job_id=job_id,
             jira_urls=jira_urls,
-            target_group_id=target_group_id,
-            fixer_peer_id=fixer_peer_id,
-            verifier_peer_id=verifier_peer_id,
+            cwd=cwd,
             config=config,
         )
     except asyncio.CancelledError:
@@ -941,98 +790,30 @@ async def _run_workflow_with_timeout(
 # --- Batch Bug Fix Endpoints ---
 
 
-@router.post("/batch-bug-fix", response_model=BatchBugFixResponse, status_code=201)
+@router.post("/bug-fix", response_model=BatchBugFixResponse, status_code=201)
 async def create_batch_bug_fix(payload: BatchBugFixRequest):
     """Start a batch bug fix job.
 
-    Dispatches bug fix tasks to the specified CCCC group.
+    Dispatches bug fix tasks using Claude CLI direct invocation.
     Returns a job_id for tracking progress.
     """
-    # Validate target group exists and is ready
-    groups_resp = list_all_groups()
-    if not groups_resp.get("ok"):
-        raise HTTPException(status_code=500, detail="Failed to list CCCC groups")
-
-    raw_groups = groups_resp.get("result", {}).get("groups", [])
-    target_group = None
-    for g in raw_groups:
-        if g.get("group_id") == payload.target_group_id:
-            target_group = g
-            break
-
-    if not target_group:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Target group '{payload.target_group_id}' not found"
-        )
-
-    if not target_group.get("running"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Target group '{payload.target_group_id}' is not running"
-        )
-
-    # Check if group has enabled peers (exclude foreman - first enabled actor)
-    actors = target_group.get("actors", [])
-    first_enabled_id = None
-    for a in actors:
-        if a.get("enabled"):
-            first_enabled_id = a.get("id")
-            break
-    enabled_peers = [
-        a for a in actors
-        if a.get("enabled") and a.get("id") != first_enabled_id
-    ]
-    if not enabled_peers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Target group '{payload.target_group_id}' has no available peers"
-        )
-
-    # Determine fixer_peer_id and verifier_peer_id
-    peer_ids = [p.get("id") for p in enabled_peers]
-    default_peer_id = enabled_peers[0].get("id")
-
-    fixer_peer_id = payload.fixer_peer_id
-    if fixer_peer_id:
-        # Validate specified fixer peer exists
-        if fixer_peer_id not in peer_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Fixer peer '{fixer_peer_id}' not found in group. Available peers: {peer_ids}"
-            )
-    else:
-        # Default to first enabled peer
-        fixer_peer_id = default_peer_id
-
-    verifier_peer_id = payload.verifier_peer_id
-    if verifier_peer_id:
-        # Validate specified verifier peer exists
-        if verifier_peer_id not in peer_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Verifier peer '{verifier_peer_id}' not found in group. Available peers: {peer_ids}"
-            )
-    else:
-        # Default to same as fixer peer
-        verifier_peer_id = fixer_peer_id
-
     # Generate job ID
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
+    cwd = payload.cwd or "."
 
     # Create job record
     config = payload.config or BatchBugFixConfig()
 
-    # Save to database
+    # Save to database (target_group_id kept nullable for backward compat)
     async with get_session_ctx() as session:
         repo = BatchJobRepository(session)
         db_job = await repo.create(
             job_id=job_id,
-            target_group_id=payload.target_group_id,
+            target_group_id="",
             jira_urls=payload.jira_urls,
-            fixer_peer_id=fixer_peer_id,
-            verifier_peer_id=verifier_peer_id,
+            fixer_peer_id="",
+            verifier_peer_id="",
             config=config.model_dump(),
         )
         logger.info(f"Job {job_id}: Saved to database")
@@ -1041,7 +822,6 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
     job = {
         "job_id": job_id,
         "status": "started",
-        "target_group_id": payload.target_group_id,
         "config": config.model_dump(),
         "bugs": [
             {
@@ -1066,9 +846,7 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
         _run_workflow_with_timeout(
             job_id=job_id,
             jira_urls=payload.jira_urls,
-            target_group_id=payload.target_group_id,
-            fixer_peer_id=fixer_peer_id,
-            verifier_peer_id=verifier_peer_id,
+            cwd=cwd,
             config=config.model_dump(),
         )
     )
@@ -1077,35 +855,10 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
 
     logger.info(f"Job {job_id}: Workflow execution task started")
 
-    # Optionally send notification message to target group
-    source_group_id = os.environ.get("CCCC_GROUP_ID", "g_workflow_api")
-    task_message = f"""[批量 Bug 修复任务已启动]
-
-Job ID: {job_id}
-Bug 数量: {len(payload.jira_urls)}
-验证级别: {config.validation_level}
-失败策略: {config.failure_policy}
-
-工作流已自动启动，进度可通过 API 查询。"""
-
-    # Send notification (best-effort, don't block on failure)
-    try:
-        send_cross_group_message(
-            source_group_id=source_group_id,
-            target_group_id=payload.target_group_id,
-            text=task_message,
-            sender_id="workflow-api",
-            to=["@all"],
-            priority="normal",
-        )
-    except Exception as e:
-        logger.warning(f"Job {job_id}: Failed to send notification: {e}")
-
     return BatchBugFixResponse(
         job_id=job_id,
         status="started",
         total_bugs=len(payload.jira_urls),
-        target_group_id=payload.target_group_id,
         created_at=now,
     )
 
@@ -1115,7 +868,6 @@ def _db_job_to_dict(db_job: BatchJobModel) -> Dict[str, Any]:
     return {
         "job_id": db_job.id,
         "status": db_job.status,
-        "target_group_id": db_job.target_group_id,
         "config": db_job.config or {},
         "error": db_job.error,
         "bugs": [
@@ -1147,7 +899,7 @@ def _count_retries(steps: Optional[List[Dict[str, Any]]]) -> int:
     return max(0, max_attempt - 1)  # attempt 1 = first try, not a retry
 
 
-@router.get("/batch-bug-fix/{job_id}", response_model=BatchJobStatusResponse)
+@router.get("/bug-fix/{job_id}", response_model=BatchJobStatusResponse)
 async def get_batch_bug_fix_status(job_id: str):
     """Get the status of a batch bug fix job."""
     job = None
@@ -1203,17 +955,15 @@ async def get_batch_bug_fix_status(job_id: str):
         skipped=skipped,
         in_progress=in_progress,
         pending=pending,
-        target_group_id=job.get("target_group_id", ""),
         bugs=[BugStatus(**b) for b in bugs],
         created_at=job.get("created_at", ""),
         updated_at=job.get("updated_at", ""),
     )
 
 
-@router.get("/batch-bug-fix", response_model=BatchJobListResponse)
+@router.get("/bug-fix", response_model=BatchJobListResponse)
 async def list_batch_bug_fix_jobs(
     status: Optional[str] = Query(None, description="Filter by job status"),
-    target_group_id: Optional[str] = Query(None, description="Filter by target group"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ):
@@ -1226,7 +976,6 @@ async def list_batch_bug_fix_jobs(
         repo = BatchJobRepository(session)
         jobs, total = await repo.list(
             status=status,
-            target_group_id=target_group_id,
             page=page,
             page_size=page_size,
         )
@@ -1242,7 +991,6 @@ async def list_batch_bug_fix_jobs(
             job_summaries.append(BatchJobSummary(
                 job_id=db_job.id,
                 status=db_job.status,
-                target_group_id=db_job.target_group_id,
                 total_bugs=len(db_job.bugs),
                 completed=stats["completed"],
                 failed=stats["failed"] + stats["skipped"],
@@ -1258,161 +1006,7 @@ async def list_batch_bug_fix_jobs(
         )
 
 
-# --- Task Polling API for Target Groups ---
-
-
-class TaskForGroup(BaseModel):
-    """Task information for target group polling."""
-    job_id: str
-    bug_index: int
-    url: str
-    status: str
-    config: BatchBugFixConfig
-
-
-class TasksForGroupResponse(BaseModel):
-    """Response for GET /api/v2/cccc/tasks."""
-    tasks: List[TaskForGroup]
-    total: int
-
-
-class BugStatusUpdateRequest(BaseModel):
-    """Request for updating bug status."""
-    status: Literal["in_progress", "completed", "failed", "skipped"]
-    error: Optional[str] = None
-
-
-class BugStatusUpdateResponse(BaseModel):
-    """Response for bug status update."""
-    success: bool
-    job_id: str
-    bug_index: int
-    new_status: str
-    job_status: str
-
-
-@router.get("/tasks", response_model=TasksForGroupResponse)
-async def get_tasks_for_group(
-    group_id: str = Query(..., description="Target group ID to get tasks for"),
-    status: Optional[str] = Query(
-        None,
-        description="Filter by bug status: 'pending', 'in_progress', 'all' (default: pending)",
-    ),
-):
-    """Get tasks assigned to a specific group.
-
-    Target groups should poll this endpoint to get tasks assigned to them.
-    Returns pending tasks by default.
-    """
-    filter_status = status or "pending"
-    tasks: List[TaskForGroup] = []
-
-    # Snapshot cache keys under lock to avoid RuntimeError during iteration
-    async with _cache_lock:
-        cache_snapshot = list(BATCH_JOBS_CACHE.items())
-
-    for job_id, job in cache_snapshot:
-        # Only return tasks for the specified group
-        if job.get("target_group_id") != group_id:
-            continue
-
-        config = BatchBugFixConfig(**job.get("config", {}))
-
-        for idx, bug in enumerate(job.get("bugs", [])):
-            bug_status = bug.get("status", "pending")
-
-            # Apply status filter
-            if filter_status == "pending" and bug_status != "pending":
-                continue
-            if filter_status == "in_progress" and bug_status != "in_progress":
-                continue
-            if filter_status != "all" and filter_status not in ["pending", "in_progress"]:
-                if bug_status != filter_status:
-                    continue
-
-            tasks.append(TaskForGroup(
-                job_id=job_id,
-                bug_index=idx,
-                url=bug.get("url", ""),
-                status=bug_status,
-                config=config,
-            ))
-
-    return TasksForGroupResponse(tasks=tasks, total=len(tasks))
-
-
-@router.post(
-    "/tasks/{job_id}/bugs/{bug_index}/status",
-    response_model=BugStatusUpdateResponse,
-)
-async def update_bug_status(
-    job_id: str,
-    bug_index: int,
-    payload: BugStatusUpdateRequest,
-):
-    """Update the status of a specific bug in a job.
-
-    Target groups should call this to report progress on bug fixes.
-    """
-    async with _cache_lock:
-        if job_id not in BATCH_JOBS_CACHE:
-            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
-
-        job = BATCH_JOBS_CACHE[job_id]
-        bugs = job.get("bugs", [])
-
-        if bug_index < 0 or bug_index >= len(bugs):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Bug index {bug_index} out of range (0-{len(bugs)-1})",
-            )
-
-        now = datetime.now(timezone.utc).isoformat()
-        bug = bugs[bug_index]
-
-        # Update bug status
-        bug["status"] = payload.status
-        if payload.error:
-            bug["error"] = payload.error
-
-        # Update timestamps
-        if payload.status == "in_progress" and not bug.get("started_at"):
-            bug["started_at"] = now
-        if payload.status in ["completed", "failed", "skipped"]:
-            bug["completed_at"] = now
-
-        job["updated_at"] = now
-
-        # Calculate overall job status
-        completed = sum(1 for b in bugs if b["status"] == "completed")
-        failed = sum(1 for b in bugs if b["status"] == "failed")
-        in_progress = sum(1 for b in bugs if b["status"] == "in_progress")
-        pending = sum(1 for b in bugs if b["status"] == "pending")
-
-        if in_progress > 0:
-            job_status = "running"
-        elif pending > 0 and (completed > 0 or failed > 0):
-            job_status = "running"
-        elif pending == 0 and in_progress == 0:
-            job_status = "completed" if failed == 0 else "failed"
-        else:
-            job_status = job.get("status", "started")
-
-        job["status"] = job_status
-
-    return BugStatusUpdateResponse(
-        success=True,
-        job_id=job_id,
-        bug_index=bug_index,
-        new_status=payload.status,
-        job_status=job_status,
-    )
-
-
 # --- SSE Progress Streaming ---
-
-
-import json
 
 
 def push_job_event(job_id: str, event_type: str, data: Dict[str, Any]) -> None:
@@ -1475,7 +1069,7 @@ async def sse_job_generator(job_id: str):
         logger.info(f"Job {job_id}: SSE client disconnected")
 
 
-@router.get("/batch-bug-fix/{job_id}/stream")
+@router.get("/bug-fix/{job_id}/stream")
 async def stream_batch_job_progress(job_id: str):
     """Stream real-time progress updates for a batch bug fix job via SSE.
 
@@ -1487,10 +1081,11 @@ async def stream_batch_job_progress(job_id: str):
     - bug_step_failed: When a step fails (data: {bug_index, step, label, error, attempt?})
     - bug_completed: When a bug fix completes (data: {bug_index, url})
     - bug_failed: When a bug fix fails (data: {bug_index, url, error})
+    - ai_thinking: Real-time AI execution events (data: {node_id, bug_index, type, content, tool_name?, timestamp})
     - job_done: When the entire job completes (data: {status, completed, failed})
 
     Usage:
-        const sse = new EventSource('/api/v2/cccc/batch-bug-fix/job_xxx/stream');
+        const sse = new EventSource('/api/v2/batch/bug-fix/job_xxx/stream');
         sse.addEventListener('bug_step_started', (e) => console.log(JSON.parse(e.data)));
     """
     async with _cache_lock:
@@ -1519,7 +1114,7 @@ class JobControlResponse(BaseModel):
     message: str
 
 
-@router.post("/batch-bug-fix/{job_id}/cancel", response_model=JobControlResponse)
+@router.post("/bug-fix/{job_id}/cancel", response_model=JobControlResponse)
 async def cancel_batch_job(job_id: str):
     """Cancel a running batch bug fix job.
 
@@ -1620,9 +1215,11 @@ async def cancel_batch_job(job_id: str):
 
 # --- Jira Integration Endpoints ---
 
+jira_router = APIRouter(prefix="/api/v2/jira", tags=["jira"])
+
 
 class JiraQueryRequest(BaseModel):
-    """Request for POST /api/v2/cccc/jira/query."""
+    """Request for POST /api/v2/jira/query."""
     jql: str = Field(..., description="JQL query string")
     jira_url: Optional[str] = Field(
         None,
@@ -1656,7 +1253,7 @@ class JiraBugInfo(BaseModel):
 
 
 class JiraQueryResponse(BaseModel):
-    """Response for POST /api/v2/cccc/jira/query."""
+    """Response for POST /api/v2/jira/query."""
     bugs: List[JiraBugInfo]
     total: int
     jql: str
@@ -1669,8 +1266,8 @@ class JiraErrorResponse(BaseModel):
     details: Optional[str] = None
 
 
-@router.post(
-    "/jira/query",
+@jira_router.post(
+    "/query",
     response_model=JiraQueryResponse,
     responses={
         400: {"model": JiraErrorResponse, "description": "JQL syntax error"},

@@ -17,7 +17,6 @@ export interface NodeTypeInfo {
  */
 export const NODE_TYPE_PALETTE: NodeTypeInfo[] = [
   { type: "llm_agent", label: "LLM Agent", icon: "🤖", color: "#6366F1", category: "agent" },
-  { type: "cccc_peer", label: "CCCC Peer", icon: "👥", color: "#F59E0B", category: "agent" },
   { type: "data_source", label: "数据源", icon: "💾", color: "#4CAF50", category: "data" },
   { type: "data_processor", label: "数据处理", icon: "⚙️", color: "#2196F3", category: "processing" },
   { type: "http_request", label: "HTTP 请求", icon: "🌐", color: "#FF9800", category: "integration" },

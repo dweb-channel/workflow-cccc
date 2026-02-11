@@ -30,9 +30,7 @@
                 "max_retries": { "type": "integer", "minimum": 1, "maximum": 10 }
               }
             },
-            "target_group_id": { "type": "string" },
-            "fixer_peer_id": { "type": "string", "description": "Peer ID to execute bug fixes" },
-            "verifier_peer_id": { "type": "string", "description": "Peer ID to verify fixes" },
+            "cwd": { "type": "string", "description": "Working directory for Claude CLI" },
             "job_id": { "type": "string" }
           },
           "required": ["bugs", "bugs_count", "job_id"]
@@ -61,13 +59,12 @@
     },
     {
       "id": "fix_bug_peer",
-      "type": "cccc_peer",
+      "type": "llm_agent",
       "config": {
         "name": "修复 Bug",
-        "description": "调用 CCCC Peer 执行 Bug 修复",
-        "peer_id": "{fixer_peer_id}",
-        "prompt": "请修复以下 Bug：\n\nURL: {current_bug}\n验证级别: {config.validation_level}\n\n请使用 mcp-atlassian Jira MCP 工具（如 jira_get_issue）获取 Bug 详情，分析问题并实施修复。完成后请将结果直接回复给 workflow-activity（不要回复给 @all 或 @foreman）。",
-        "via_foreman": false
+        "prompt": "请修复以下 Bug：\n\nURL: {current_bug}\n验证级别: {config.validation_level}\n\n请获取 Bug 详情，分析问题并实施修复。",
+        "cwd": "{cwd}",
+        "timeout": 300
       }
     },
     {
@@ -75,9 +72,10 @@
       "type": "verify",
       "config": {
         "name": "验证修复结果",
-        "verify_type": "cccc_peer",
-        "peer_id": "{verifier_peer_id}",
-        "prompt_template": "请验证以下 Bug 修复是否正确:\n\nBug URL: {current_bug}\n修复结果: {fix_bug_peer.response}\n\n请使用 mcp-atlassian Jira MCP 工具（如 jira_get_issue）查看原始 Bug 描述，然后检查:\n1. 修复是否完整解决了问题\n2. 是否引入新的问题\n3. 测试是否通过\n\n回复 'VERIFIED' 表示验证通过，'FAILED' 表示验证失败并说明原因。请将结果直接回复给 workflow-activity。"
+        "verify_type": "llm_agent",
+        "prompt_template": "请验证以下 Bug 修复是否正确:\n\nBug URL: {current_bug}\n修复结果: {fix_bug_peer.result}\n\n请检查:\n1. 修复是否完整解决了问题\n2. 是否引入新的问题\n3. 测试是否通过\n\n回复 'VERIFIED' 表示验证通过，'FAILED' 表示验证失败并说明原因。",
+        "cwd": "{cwd}",
+        "timeout": 300
       }
     },
     {
@@ -122,7 +120,7 @@
             "append": {
               "url": "{current_bug}",
               "status": "failed",
-              "error": "{fix_bug_peer.response}",
+              "error": "{fix_bug_peer.result}",
               "retries": "{retry_count}"
             }
           },
@@ -142,7 +140,7 @@
             "append": {
               "url": "{current_bug}",
               "status": "completed",
-              "response": "{fix_bug_peer.response}"
+              "result": "{fix_bug_peer.result}"
             }
           },
           {"field": "current_index", "expression": "current_index + 1"},
@@ -254,13 +252,13 @@
       {"version": "1.0.0", "date": "2026-02-05", "changes": "Initial template design"},
       {"version": "1.1.0", "date": "2026-02-05", "changes": "Replaced placeholder nodes with get_current_item and update_state"},
       {"version": "1.2.0", "date": "2026-02-05", "changes": "Added VerifyNode with cccc_peer mode for independent verification"},
-      {"version": "1.3.0", "date": "2026-02-08", "changes": "Added dynamic peer selection via fixer_peer_id and verifier_peer_id variables"}
+      {"version": "1.3.0", "date": "2026-02-08", "changes": "Added dynamic peer selection via fixer_peer_id and verifier_peer_id variables"},
+      {"version": "2.0.0", "date": "2026-02-11", "changes": "Removed CCCC integration; replaced cccc_peer with llm_agent (Claude CLI direct calls)"}
     ],
-    "tags": ["bug-fix", "batch", "cccc-integration"],
+    "tags": ["bug-fix", "batch", "claude-cli"],
     "implementation_notes": {
-      "completed": "S1-S2b 已完成，模板可正常使用",
-      "optional_script_mode": "verify_fix 节点当前使用 cccc_peer 模式，可切换为 script 模式运行本地测试",
-      "peer_selection": "fixer_peer_id 和 verifier_peer_id 由 API 传入，可通过 UI 选择"
+      "completed": "v2.0 migration: cccc_peer → llm_agent, verify cccc_peer → verify llm_agent",
+      "optional_script_mode": "verify_fix 节点当前使用 llm_agent 模式，可切换为 script 模式运行本地测试"
     },
     "workflow_loops": [
       {

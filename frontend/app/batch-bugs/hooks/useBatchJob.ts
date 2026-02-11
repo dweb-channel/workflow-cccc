@@ -7,7 +7,7 @@ import {
   type BatchBugFixRequest,
 } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
-import type { BatchJob, BugStatus, BugStep, BatchJobStats } from "../types";
+import type { BatchJob, BugStatus, BugStep, BatchJobStats, AIThinkingEvent, AIThinkingStats } from "../types";
 
 /** Safe JSON.parse — returns null on failure instead of throwing */
 function safeParse(raw: string): unknown | null {
@@ -31,6 +31,15 @@ export function useBatchJob() {
   const [submitting, setSubmitting] = useState(false);
   const sseRetryCount = useRef(0);
   const sseErrorToastShown = useRef(false);
+
+  // AI Thinking state
+  const [aiThinkingEvents, setAiThinkingEvents] = useState<AIThinkingEvent[]>([]);
+  const [aiThinkingStats, setAiThinkingStats] = useState<AIThinkingStats>({
+    streaming: false,
+    tokens_in: 0,
+    tokens_out: 0,
+    cost: 0,
+  });
 
   // SSE stream for real-time job status updates
   useEffect(() => {
@@ -185,12 +194,33 @@ export function useBatchJob() {
       });
     });
 
+    // AI Thinking events
+    eventSource.addEventListener("ai_thinking", (e) => {
+      const data = safeParse(e.data) as Record<string, unknown> | null;
+      if (!data || !data.type) return;
+      const event = data as unknown as AIThinkingEvent;
+      setAiThinkingEvents((prev) => [...prev, event]);
+      setAiThinkingStats((prev) => ({ ...prev, streaming: true }));
+    });
+
+    eventSource.addEventListener("ai_thinking_stats", (e) => {
+      const data = safeParse(e.data) as Record<string, unknown> | null;
+      if (!data) return;
+      setAiThinkingStats((prev) => ({
+        ...prev,
+        tokens_in: (data.tokens_in as number) ?? prev.tokens_in,
+        tokens_out: (data.tokens_out as number) ?? prev.tokens_out,
+        cost: (data.cost as number) ?? prev.cost,
+      }));
+    });
+
     eventSource.addEventListener("job_done", (e) => {
       const data = safeParse(e.data) as Record<string, unknown> | null;
       if (!data) return;
       setCurrentJob((prev) =>
         prev ? { ...prev, job_status: (data.status as string) ?? prev.job_status } : prev
       );
+      setAiThinkingStats((prev) => ({ ...prev, streaming: false }));
       eventSource.close();
     });
 
@@ -259,10 +289,12 @@ export function useBatchJob() {
     };
   }, [currentJob?.job_id, currentJob?.job_status, toast]);
 
-  // Submit a new batch job
+  // Submit a new batch job — also resets AI thinking state
   const submit = useCallback(
     async (request: BatchBugFixRequest) => {
       setSubmitting(true);
+      setAiThinkingEvents([]);
+      setAiThinkingStats({ streaming: false, tokens_in: 0, tokens_out: 0, cost: 0 });
       try {
         const data = await submitBatchBugFix(request);
 
@@ -339,5 +371,7 @@ export function useBatchJob() {
     stats,
     submit,
     cancel,
+    aiThinkingEvents,
+    aiThinkingStats,
   };
 }

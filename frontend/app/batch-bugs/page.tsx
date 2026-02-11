@@ -6,23 +6,19 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 
-import type { ValidationLevel, FailurePolicy, CCCCGroup } from "./types";
+import type { ValidationLevel, FailurePolicy } from "./types";
 import { useBatchJob } from "./hooks/useBatchJob";
 import { useJobHistory } from "./hooks/useJobHistory";
-import { GroupSelector } from "./components/GroupSelector";
+import { useAIThinking } from "./hooks/useAIThinking";
 import { BugInput } from "./components/BugInput";
 import { ConfigOptions } from "./components/ConfigOptions";
 import { OverviewTab } from "./components/OverviewTab";
 import { BugDetailTab } from "./components/BugDetailTab";
 import { HistoryCard } from "./components/HistoryCard";
 import { WorkflowTab } from "./components/WorkflowTab";
+import { AIThinkingPanel } from "./components/AIThinkingPanel";
 
 export default function BatchBugsPage() {
-  // Group & peer selection
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [fixerPeerId, setFixerPeerId] = useState<string | null>(null);
-  const [verifierPeerId, setVerifierPeerId] = useState<string | null>(null);
-
   // Form inputs
   const [jiraUrls, setJiraUrls] = useState("");
   const [validationLevel, setValidationLevel] =
@@ -30,18 +26,21 @@ export default function BatchBugsPage() {
   const [failurePolicy, setFailurePolicy] =
     useState<FailurePolicy>("skip");
 
-  // Hooks
-  const { currentJob, submitting, stats, submit, cancel } = useBatchJob();
-  const history = useJobHistory();
+  const [activeBugIndex, setActiveBugIndex] = useState<number | null>(null);
 
-  const handleGroupChange = useCallback(
-    (groupId: string, _group: CCCCGroup | undefined) => {
-      setSelectedGroupId(groupId);
-      setFixerPeerId(null);
-      setVerifierPeerId(null);
-    },
-    []
-  );
+  // Hooks
+  const { currentJob, submitting, stats, submit, cancel, aiThinkingEvents, aiThinkingStats } = useBatchJob();
+  const history = useJobHistory();
+  const aiThinking = useAIThinking({
+    allEvents: aiThinkingEvents,
+    stats: aiThinkingStats,
+    activeBugIndex,
+  });
+
+  // Auto-select first in_progress bug for AI thinking
+  const inProgressIndex = currentJob?.bugs.findIndex((b) => b.status === "in_progress") ?? -1;
+  const effectiveBugIndex = activeBugIndex ?? (inProgressIndex >= 0 ? inProgressIndex : null);
+  const activeBugLabel = effectiveBugIndex !== null ? currentJob?.bugs[effectiveBugIndex]?.bug_id : undefined;
 
   const parseJiraUrls = useCallback(() => {
     return jiraUrls
@@ -52,29 +51,23 @@ export default function BatchBugsPage() {
 
   const handleSubmit = useCallback(async () => {
     const urls = parseJiraUrls();
-    if (!selectedGroupId || urls.length === 0) return;
+    if (urls.length === 0) return;
 
     const result = await submit({
-      target_group_id: selectedGroupId,
       jira_urls: urls,
       config: {
         validation_level: validationLevel,
         failure_policy: failurePolicy,
       },
-      ...(fixerPeerId && { fixer_peer_id: fixerPeerId }),
-      ...(verifierPeerId && { verifier_peer_id: verifierPeerId }),
     });
 
     if (result) {
       history.loadHistory();
     }
   }, [
-    selectedGroupId,
     parseJiraUrls,
     validationLevel,
     failurePolicy,
-    fixerPeerId,
-    verifierPeerId,
     submit,
     history,
   ]);
@@ -128,15 +121,6 @@ export default function BatchBugsPage() {
         <div className="flex flex-1 gap-6">
           {/* Left Column - Input */}
           <div className="flex w-1/2 flex-col gap-4">
-            <GroupSelector
-              selectedGroupId={selectedGroupId}
-              fixerPeerId={fixerPeerId}
-              verifierPeerId={verifierPeerId}
-              onGroupChange={handleGroupChange}
-              onFixerChange={setFixerPeerId}
-              onVerifierChange={setVerifierPeerId}
-            />
-
             <BugInput
               jiraUrls={jiraUrls}
               onJiraUrlsChange={setJiraUrls}
@@ -155,7 +139,6 @@ export default function BatchBugsPage() {
                 onClick={handleSubmit}
                 disabled={
                   submitting ||
-                  !selectedGroupId ||
                   parseJiraUrls().length === 0
                 }
               >
@@ -192,6 +175,16 @@ export default function BatchBugsPage() {
                       Bug 详情
                     </TabsTrigger>
                     <TabsTrigger
+                      value="ai-thinking"
+                      data-testid="tab-ai-thinking"
+                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
+                    >
+                      AI 思考
+                      {aiThinking.stats.streaming && (
+                        <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger
                       value="history"
                       data-testid="tab-history"
                       className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
@@ -215,6 +208,14 @@ export default function BatchBugsPage() {
 
                     <TabsContent value="detail" className="mt-0">
                       <BugDetailTab currentJob={currentJob} />
+                    </TabsContent>
+
+                    <TabsContent value="ai-thinking" className="mt-0 h-[calc(100vh-280px)]">
+                      <AIThinkingPanel
+                        events={aiThinking.events}
+                        stats={aiThinking.stats}
+                        bugLabel={activeBugLabel}
+                      />
                     </TabsContent>
 
                     <TabsContent value="history" className="mt-0">

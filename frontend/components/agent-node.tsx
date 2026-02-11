@@ -27,7 +27,6 @@ const STATUS_STYLES: Record<AgentNodeStatus, { bg: string; border: string; dot: 
 
 const NODE_TYPE_ICONS: Record<string, string> = {
   llm_agent: "🤖",
-  cccc_peer: "👥",
   peer1_plan: "📋",
   peer2_review: "🔍",
   foreman_summary: "📊",

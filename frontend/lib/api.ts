@@ -247,49 +247,22 @@ export async function getNodeTypes(): Promise<NodeTypeInfo[]> {
   return handleResponse<NodeTypeInfo[]>(response);
 }
 
-// ============ CCCC Types ============
-
-export interface CCCCPeer {
-  id: string;
-  title: string;
-  role: string;
-  enabled?: boolean;
-  running?: boolean;
-}
-
-export interface CCCCGroup {
-  group_id: string;
-  title: string;
-  state: "active" | "idle" | "paused";
-  running: boolean;
-  actor_count: number;
-  scope: string;
-  ready: boolean;
-  enabled_peers: number;
-  peers?: CCCCPeer[];
-}
-
-export interface CCCCGroupsResponse {
-  groups: CCCCGroup[];
-}
+// ============ Batch Bug Fix Types ============
 
 export interface BatchBugFixRequest {
-  target_group_id: string;
   jira_urls: string[];
+  cwd?: string;
   config?: {
     validation_level?: "minimal" | "standard" | "thorough";
     failure_policy?: "stop" | "skip" | "retry";
     max_retries?: number;
   };
-  fixer_peer_id?: string;
-  verifier_peer_id?: string;
 }
 
 export interface BatchBugFixResponse {
   job_id: string;
   status: string;
   total_bugs: number;
-  target_group_id: string;
   created_at: string;
 }
 
@@ -303,7 +276,6 @@ export interface BugStatusDetail {
 export interface BatchJobStatusResponse {
   job_id: string;
   status: string;
-  target_group_id: string;
   bugs: BugStatusDetail[];
   completed: number;
   failed: number;
@@ -316,7 +288,6 @@ export interface BatchJobStatusResponse {
 export interface BatchJobHistoryItem {
   job_id: string;
   status: string;
-  target_group_id: string;
   total_bugs: number;
   completed: number;
   failed: number;
@@ -331,18 +302,10 @@ export interface BatchJobHistoryResponse {
   page_size: number;
 }
 
-// ============ CCCC API ============
-
-export async function getCCCCGroups(filter?: "running" | "ready"): Promise<CCCCGroupsResponse> {
-  const params = new URLSearchParams();
-  if (filter) params.set("filter", filter);
-  const query = params.toString();
-  const response = await fetch(`${API_BASE}/api/v2/cccc/groups${query ? `?${query}` : ""}`);
-  return handleResponse<CCCCGroupsResponse>(response);
-}
+// ============ Batch Bug Fix API ============
 
 export async function submitBatchBugFix(payload: BatchBugFixRequest): Promise<BatchBugFixResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/cccc/batch-bug-fix`, {
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -351,12 +314,12 @@ export async function submitBatchBugFix(payload: BatchBugFixRequest): Promise<Ba
 }
 
 export async function getBatchJobStatus(jobId: string): Promise<BatchJobStatusResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/cccc/batch-bug-fix/${jobId}`);
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix/${jobId}`);
   return handleResponse<BatchJobStatusResponse>(response);
 }
 
 export async function cancelBatchJob(jobId: string): Promise<{ success: boolean; job_id: string; status: string }> {
-  const response = await fetch(`${API_BASE}/api/v2/cccc/batch-bug-fix/${jobId}/cancel`, {
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix/${jobId}/cancel`, {
     method: "POST",
   });
   return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
@@ -388,7 +351,7 @@ export interface JiraQueryResponse {
 }
 
 export async function queryJiraBugs(payload: JiraQueryRequest): Promise<JiraQueryResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/cccc/jira/query`, {
+  const response = await fetch(`${API_BASE}/api/v2/jira/query`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -406,69 +369,8 @@ export async function getBatchJobHistory(
     page_size: String(pageSize),
   });
   if (status) params.set("status", status);
-  const response = await fetch(`${API_BASE}/api/v2/cccc/batch-bug-fix?${params}`);
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix?${params}`);
   return handleResponse<BatchJobHistoryResponse>(response);
-}
-
-// --- Task Polling API (for target groups) ---
-
-export interface BatchBugFixConfig {
-  validation_level: "minimal" | "standard" | "thorough";
-  failure_policy: "stop" | "skip" | "retry";
-  max_retries: number;
-}
-
-export interface TaskForGroup {
-  job_id: string;
-  bug_index: number;
-  url: string;
-  status: string;
-  config: BatchBugFixConfig;
-}
-
-export interface TasksForGroupResponse {
-  tasks: TaskForGroup[];
-  total: number;
-}
-
-export interface BugStatusUpdateResponse {
-  success: boolean;
-  job_id: string;
-  bug_index: number;
-  new_status: string;
-  job_status: string;
-}
-
-/**
- * Get tasks assigned to a specific group.
- * Target groups should poll this endpoint to get tasks assigned to them.
- */
-export async function getTasksForGroup(
-  groupId: string,
-  status?: "pending" | "in_progress" | "all"
-): Promise<TasksForGroupResponse> {
-  const params = new URLSearchParams({ group_id: groupId });
-  if (status) params.set("status", status);
-  const response = await fetch(`${API_BASE}/api/v2/cccc/tasks?${params}`);
-  return handleResponse<TasksForGroupResponse>(response);
-}
-
-/**
- * Update the status of a specific bug in a job.
- * Target groups should call this to report progress on bug fixes.
- */
-export async function updateBugStatus(
-  jobId: string,
-  bugIndex: number,
-  status: "in_progress" | "completed" | "failed" | "skipped",
-  error?: string
-): Promise<BugStatusUpdateResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/cccc/tasks/${jobId}/bugs/${bugIndex}/status`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status, error }),
-  });
-  return handleResponse<BugStatusUpdateResponse>(response);
 }
 
 /**
@@ -476,5 +378,5 @@ export async function updateBugStatus(
  * Use with EventSource to receive real-time progress updates.
  */
 export function getBatchJobStreamUrl(jobId: string): string {
-  return `${API_BASE}/api/v2/cccc/batch-bug-fix/${jobId}/stream`;
+  return `${API_BASE}/api/v2/batch/bug-fix/${jobId}/stream`;
 }

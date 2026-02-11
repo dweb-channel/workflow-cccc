@@ -32,7 +32,7 @@ export function WorkflowTab() {
         <StepNode
           number={2}
           label="AI 修复"
-          description="CCCC Peer 分析代码并实施修复"
+          description="AI Agent 分析代码并实施修复"
           color="indigo"
         />
         <Arrow />
@@ -41,7 +41,7 @@ export function WorkflowTab() {
         <StepNode
           number={3}
           label="验证修复"
-          description="Peer 运行测试，确认修复有效"
+          description="运行测试，确认修复有效"
           color="violet"
         />
         <Arrow />

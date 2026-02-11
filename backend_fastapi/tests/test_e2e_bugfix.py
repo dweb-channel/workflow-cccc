@@ -1,22 +1,18 @@
 """E2E Integration Tests for Bug Fix Workflow (M4 T045)
 
-Phase 1: Template & Validation (T1-T7, 15 tests)
+Phase 1: Template & Validation (T1-T7)
 - Template API: list, get, 404 handling
 - Bug Fix workflow creation from template
-- Node types verification (cccc_peer, llm_agent)
+- Node types verification (llm_agent, verify)
 - Workflow CRUD operations
 
-Phase 2: Execution (T8-T9, 6 tests)
-- CCCCPeerNode mock execution
-- Template variable rendering
+Phase 2: Execution (T7)
 - Workflow run API
 """
 
 import asyncio
-import json
 import os
 import sys
-from typing import Dict, Any
 
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -37,9 +33,6 @@ async def run_tests():
     """Run all E2E Bug Fix workflow tests."""
     errors = []
     passed = 0
-
-    # Enable CCCC mock mode for testing
-    os.environ["CCCC_MOCK"] = "true"
 
     await setup_db()
 
@@ -116,7 +109,7 @@ async def run_tests():
             nodes = template.get("nodes", [])
             if len(nodes) == 6:
                 node_types = [n.get("type") for n in nodes]
-                expected_types = ["data_source", "cccc_peer", "cccc_peer", "cccc_peer", "condition", "output"]
+                expected_types = ["data_source", "llm_agent", "llm_agent", "llm_agent", "condition", "output"]
                 if sorted(node_types) == sorted(expected_types):
                     print("OK (correct node types)")
                     passed += 1
@@ -244,43 +237,14 @@ async def run_tests():
                 errors.append(("T4.3-validate", msg))
 
         # =================================================================
-        # Scenario 5: CCCC_MOCK Environment Variable
+        # Scenario 5: Node Types Verification
         # =================================================================
-        print("\n=== Scenario 5: CCCC_MOCK Mode ===")
-        print("Test T5.1: CCCC_MOCK is set ... ", end="")
-
-        if os.environ.get("CCCC_MOCK") == "true":
-            print("OK (CCCC_MOCK=true)")
-            passed += 1
-        else:
-            msg = f"FAIL - CCCC_MOCK={os.environ.get('CCCC_MOCK')}"
-            print(msg)
-            errors.append(("T5.1-mock", msg))
-
-        # =================================================================
-        # Scenario 6: Node Types Include CCCC Peer
-        # =================================================================
-        print("\n=== Scenario 6: Node Types Verification ===")
-        print("Test T6.1: cccc_peer node type registered ... ", end="")
+        print("\n=== Scenario 5: Node Types Verification ===")
+        print("Test T5.1: llm_agent node type registered ... ", end="")
 
         resp = await client.get("/api/v2/node-types")
         if resp.status_code == 200:
             types = resp.json()
-            cccc_peer = next((t for t in types if t.get("node_type") == "cccc_peer"), None)
-            if cccc_peer:
-                print(f"OK (display: {cccc_peer.get('display_name')})")
-                passed += 1
-            else:
-                msg = "FAIL - cccc_peer not in node types"
-                print(msg)
-                errors.append(("T6.1-cccc-peer", msg))
-        else:
-            msg = f"FAIL status={resp.status_code}"
-            print(msg)
-            errors.append(("T6.1-types", msg))
-
-        print("Test T6.2: llm_agent node type registered ... ", end="")
-        if resp.status_code == 200:
             llm_agent = next((t for t in types if t.get("node_type") == "llm_agent"), None)
             if llm_agent:
                 print(f"OK (display: {llm_agent.get('display_name')})")
@@ -288,13 +252,39 @@ async def run_tests():
             else:
                 msg = "FAIL - llm_agent not in node types"
                 print(msg)
-                errors.append(("T6.2-llm-agent", msg))
+                errors.append(("T5.1-llm-agent", msg))
+        else:
+            msg = f"FAIL status={resp.status_code}"
+            print(msg)
+            errors.append(("T5.1-types", msg))
+
+        print("Test T5.2: verify node type registered ... ", end="")
+        if resp.status_code == 200:
+            verify_type = next((t for t in types if t.get("node_type") == "verify"), None)
+            if verify_type:
+                print(f"OK (display: {verify_type.get('display_name')})")
+                passed += 1
+            else:
+                msg = "FAIL - verify not in node types"
+                print(msg)
+                errors.append(("T5.2-verify", msg))
+
+        print("Test T5.3: cccc_peer NOT in node types ... ", end="")
+        if resp.status_code == 200:
+            cccc_peer = next((t for t in types if t.get("node_type") == "cccc_peer"), None)
+            if cccc_peer is None:
+                print("OK (cccc_peer correctly removed)")
+                passed += 1
+            else:
+                msg = "FAIL - cccc_peer should not be in node types"
+                print(msg)
+                errors.append(("T5.3-no-cccc", msg))
 
         # =================================================================
-        # Scenario 7: Workflow CRUD with Template-based Graph
+        # Scenario 6: Workflow CRUD with Template-based Graph
         # =================================================================
-        print("\n=== Scenario 7: Workflow CRUD Operations ===")
-        print("Test T7.1: Update workflow name ... ", end="")
+        print("\n=== Scenario 6: Workflow CRUD Operations ===")
+        print("Test T6.1: Update workflow name ... ", end="")
 
         if wf_id:
             resp = await client.patch(
@@ -309,13 +299,13 @@ async def run_tests():
                 else:
                     msg = f"FAIL - name not updated: {updated.get('name')}"
                     print(msg)
-                    errors.append(("T7.1-update", msg))
+                    errors.append(("T6.1-update", msg))
             else:
                 msg = f"FAIL status={resp.status_code}"
                 print(msg)
-                errors.append(("T7.1-update", msg))
+                errors.append(("T6.1-update", msg))
 
-        print("Test T7.2: Delete workflow ... ", end="")
+        print("Test T6.2: Delete workflow ... ", end="")
         if wf_id:
             resp = await client.delete(f"/api/v2/workflows/{wf_id}")
             if resp.status_code == 204:
@@ -327,129 +317,17 @@ async def run_tests():
                 else:
                     msg = f"FAIL - delete succeeded but GET returned {resp2.status_code}"
                     print(msg)
-                    errors.append(("T7.2-delete", msg))
+                    errors.append(("T6.2-delete", msg))
             else:
                 msg = f"FAIL status={resp.status_code}"
                 print(msg)
-                errors.append(("T7.2-delete", msg))
+                errors.append(("T6.2-delete", msg))
 
         # =================================================================
-        # Phase 2: CCCCPeerNode Execution Tests
+        # Scenario 7: Workflow Run API (validation only, Temporal may not be available)
         # =================================================================
-        print("\n=== Scenario 8: CCCCPeerNode Mock Execution ===")
-        print("Test T8.1: CCCCPeerNode execute with mock ... ", end="")
-
-        try:
-            from workflow.nodes.agents import CCCCPeerNode
-
-            # Set up mock environment
-            os.environ["CCCC_GROUP_ID"] = "test-group"
-
-            # Create a CCCCPeerNode instance
-            node = CCCCPeerNode(
-                node_id="test_peer_node",
-                node_type="cccc_peer",
-                config={
-                    "name": "Test Peer",
-                    "peer_id": "domain-expert",
-                    "prompt": "Test prompt: {input_data}",
-                    "timeout": 10
-                }
-            )
-
-            # Execute with mock mode (CCCC_MOCK=true already set)
-            result = await node.execute({"input_data": "Hello from test"})
-
-            if result.get("success") and "MOCK" in result.get("response", ""):
-                print(f"OK (response: {result['response'][:40]}...)")
-                passed += 1
-            else:
-                msg = f"FAIL - unexpected result: {result}"
-                print(msg)
-                errors.append(("T8.1-execute", msg))
-        except Exception as e:
-            msg = f"FAIL - exception: {e}"
-            print(msg)
-            errors.append(("T8.1-execute", msg))
-
-        print("Test T8.2: CCCCPeerNode template rendering ... ", end="")
-        try:
-            node2 = CCCCPeerNode(
-                node_id="test_template_node",
-                node_type="cccc_peer",
-                config={
-                    "name": "Template Test",
-                    "peer_id": "code-simplifier",
-                    "prompt": "Fix this bug: {bug_report.description}\nCode: {bug_report.code}",
-                    "timeout": 10
-                }
-            )
-
-            # Execute with nested context
-            result = await node2.execute({
-                "bug_report": {
-                    "description": "NullPointerException",
-                    "code": "obj.method()"
-                }
-            })
-
-            if result.get("success"):
-                print("OK (nested template rendered)")
-                passed += 1
-            else:
-                msg = f"FAIL - execution failed: {result}"
-                print(msg)
-                errors.append(("T8.2-template", msg))
-        except Exception as e:
-            msg = f"FAIL - exception: {e}"
-            print(msg)
-            errors.append(("T8.2-template", msg))
-
-        print("Test T8.3: CCCCPeerNode missing group_id handling ... ", end="")
-        try:
-            # Clear group_id to test error handling
-            old_group_id = os.environ.pop("CCCC_GROUP_ID", None)
-
-            node3 = CCCCPeerNode(
-                node_id="no_group_node",
-                node_type="cccc_peer",
-                config={
-                    "name": "No Group Test",
-                    "peer_id": "test-peer",
-                    "prompt": "Test",
-                    "timeout": 5
-                }
-            )
-
-            result = await node3.execute({})
-
-            # Should fail gracefully with error message
-            if not result.get("success") and "group_id" in result.get("response", "").lower():
-                print("OK (graceful error for missing group_id)")
-                passed += 1
-            else:
-                msg = f"FAIL - should error on missing group_id: {result}"
-                print(msg)
-                errors.append(("T8.3-no-group", msg))
-
-            # Restore group_id
-            if old_group_id:
-                os.environ["CCCC_GROUP_ID"] = old_group_id
-        except Exception as e:
-            msg = f"FAIL - exception: {e}"
-            print(msg)
-            errors.append(("T8.3-no-group", msg))
-            if old_group_id:
-                os.environ["CCCC_GROUP_ID"] = old_group_id
-
-        # =================================================================
-        # Scenario 9: Workflow Run API (validation only, Temporal may not be available)
-        # =================================================================
-        print("\n=== Scenario 9: Workflow Run API ===")
-        print("Test T9.1: Create workflow for run test ... ", end="")
-
-        # Restore group_id for remaining tests
-        os.environ["CCCC_GROUP_ID"] = "test-group"
+        print("\n=== Scenario 7: Workflow Run API ===")
+        print("Test T7.1: Create workflow for run test ... ", end="")
 
         resp = await client.post("/api/v2/workflows", json={"name": "Bug Fix Run Test"})
         if resp.status_code == 201:
@@ -459,10 +337,10 @@ async def run_tests():
         else:
             msg = f"FAIL status={resp.status_code}"
             print(msg)
-            errors.append(("T9.1-create", msg))
+            errors.append(("T7.1-create", msg))
             run_wf_id = None
 
-        print("Test T9.2: Save bug_fix template graph ... ", end="")
+        print("Test T7.2: Save bug_fix template graph ... ", end="")
         if run_wf_id:
             resp = await client.get("/api/v2/templates/bug_fix")
             if resp.status_code == 200:
@@ -482,13 +360,13 @@ async def run_tests():
                 else:
                     msg = f"FAIL save status={resp.status_code}"
                     print(msg)
-                    errors.append(("T9.2-save", msg))
+                    errors.append(("T7.2-save", msg))
             else:
                 msg = f"FAIL template status={resp.status_code}"
                 print(msg)
-                errors.append(("T9.2-template", msg))
+                errors.append(("T7.2-template", msg))
 
-        print("Test T9.3: Run workflow API call ... ", end="")
+        print("Test T7.3: Run workflow API call ... ", end="")
         if run_wf_id:
             # Try to run - may fail due to Temporal not being available, but should validate first
             resp = await client.post(
@@ -505,7 +383,7 @@ async def run_tests():
                 else:
                     msg = f"FAIL - missing run_id: {result}"
                     print(msg)
-                    errors.append(("T9.3-run", msg))
+                    errors.append(("T7.3-run", msg))
             elif resp.status_code == 503:
                 # Temporal not available - this is expected in test environment
                 print("OK (503 - Temporal not available, validation passed)")
@@ -514,11 +392,11 @@ async def run_tests():
                 # Validation error - this is a real failure
                 msg = f"FAIL - validation error: {resp.json()}"
                 print(msg)
-                errors.append(("T9.3-run", msg))
+                errors.append(("T7.3-run", msg))
             else:
                 msg = f"FAIL status={resp.status_code} body={resp.text}"
                 print(msg)
-                errors.append(("T9.3-run", msg))
+                errors.append(("T7.3-run", msg))
 
         # Cleanup
         if run_wf_id:
