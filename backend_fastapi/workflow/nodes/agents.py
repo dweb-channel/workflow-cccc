@@ -149,9 +149,9 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
                     # Suppress noisy exploration events, emit periodic summary
                     state["explore_count"] += 1
                     now = time.monotonic()
-                    # Emit a summary every 10 exploration events or every 15 seconds
-                    if (state["explore_count"] % 10 == 1
-                            or now - state["last_explore_summary_at"] > 15):
+                    # Emit a summary every 15 exploration events or every 20 seconds
+                    if (state["explore_count"] % 15 == 1
+                            or now - state["last_explore_summary_at"] > 20):
                         state["last_explore_summary_at"] = now
                         push_job_event(job_id, "ai_thinking", {
                             "type": "thinking",
@@ -170,27 +170,29 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
                 push_job_event(job_id, "ai_thinking", transformed)
 
             elif event.type == ClaudeEvent.TEXT:
-                content = event.content
-                # Suppress tool result noise entirely
-                if content.startswith("[Tool Result]"):
-                    return
-                push_job_event(job_id, "ai_thinking", event_dict)
+                # Skip all intermediate text output (usually English Claude output)
+                # Only the RESULT event matters for final output
+                return
 
             elif event.type == ClaudeEvent.RESULT:
-                # Final result — add Chinese wrapper
+                # Final result — node-aware Chinese labels
                 content = event.content
                 if event.is_error:
-                    event_dict["content"] = f"❌ 执行出错：{content}"
+                    event_dict["content"] = f"执行出错：{content}"
                 else:
-                    event_dict["content"] = f"✅ 分析完成：{content}"
+                    # Truncate long results to keep panel clean
+                    if len(content) > 800:
+                        content = content[:800] + "\n..."
+                    event_dict["content"] = content
                 # Include exploration summary in result
                 if state["explore_count"] > 0:
                     event_dict["explore_count"] = state["explore_count"]
                 push_job_event(job_id, "ai_thinking", event_dict)
 
             else:
-                # THINKING events — always push
-                push_job_event(job_id, "ai_thinking", event_dict)
+                # THINKING events — skip to reduce noise
+                # User only needs to see actions (edit/bash) and results
+                return
 
             # Push stats on result events
             if event.type == ClaudeEvent.RESULT and event.usage:

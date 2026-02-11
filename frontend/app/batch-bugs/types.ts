@@ -57,6 +57,7 @@ export interface AIThinkingEventBase {
   type: AIThinkingEventType;
   timestamp: string;
   bug_index: number;
+  node_id?: string;
 }
 
 export interface AIThinkingThinkingEvent extends AIThinkingEventBase {

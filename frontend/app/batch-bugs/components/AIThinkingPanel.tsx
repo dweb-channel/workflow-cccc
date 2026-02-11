@@ -86,7 +86,7 @@ export function AIThinkingPanel({ events, stats, bugLabel }: AIThinkingPanelProp
 /* ---- Event Renderers ---- */
 
 const EVENT_CONFIG: Record<string, { icon: string; bg: string; tagColor: string; label: string }> = {
-  thinking: { icon: "\u{1F4AD}", bg: "#faf5ff", tagColor: "#7c3aed", label: "思考中" },
+  thinking: { icon: "\u{1F4AD}", bg: "#faf5ff", tagColor: "#7c3aed", label: "分析中" },
   text:     { icon: "\u{1F4AC}", bg: "#f8fafc", tagColor: "#475569", label: "输出" },
   read:     { icon: "\u{1F4D6}", bg: "#f0fdf4", tagColor: "#16a34a", label: "读取文件" },
   edit:     { icon: "\u270F\uFE0F", bg: "#fffbeb", tagColor: "#d97706", label: "修改代码" },
@@ -94,20 +94,34 @@ const EVENT_CONFIG: Record<string, { icon: string; bg: string; tagColor: string;
   result:   { icon: "\u2705",     bg: "#eff6ff", tagColor: "#3b82f6", label: "完成" },
 };
 
+// Node-specific overrides for result events
+const NODE_RESULT_CONFIG: Record<string, { icon: string; bg: string; tagColor: string; label: string }> = {
+  fix_bug_peer: { icon: "\u{1F527}", bg: "#eff6ff", tagColor: "#2563eb", label: "修复结果" },
+  verify_fix:   { icon: "\u{1F50D}", bg: "#f0fdf4", tagColor: "#16a34a", label: "验证结果" },
+};
+
 function EventRow({ event }: { event: AIThinkingEvent }) {
-  const cfg = EVENT_CONFIG[event.type] ?? EVENT_CONFIG.text;
+  // Use node-specific config for result events
+  const nodeId = "node_id" in event ? (event as AIThinkingEvent & { node_id?: string }).node_id : undefined;
+  const cfg = event.type === "result" && nodeId && NODE_RESULT_CONFIG[nodeId]
+    ? NODE_RESULT_CONFIG[nodeId]
+    : EVENT_CONFIG[event.type] ?? EVENT_CONFIG.text;
+
+  // For result events with errors, override icon
+  const isError = event.type === "result" && "content" in event && (event as { content: string }).content.startsWith("执行出错");
+  const icon = isError ? "\u274C" : cfg.icon;
 
   return (
     <div className="flex gap-2.5">
       {/* Icon */}
       <div
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
-        style={{ backgroundColor: cfg.bg }}
+        style={{ backgroundColor: isError ? "#fef2f2" : cfg.bg }}
       >
         {event.type === "bash" ? (
-          <span className="text-[11px] font-bold text-[#22c55e]">{cfg.icon}</span>
+          <span className="text-[11px] font-bold text-[#22c55e]">{icon}</span>
         ) : (
-          <span className="text-sm">{cfg.icon}</span>
+          <span className="text-sm">{icon}</span>
         )}
       </div>
 
@@ -117,9 +131,9 @@ function EventRow({ event }: { event: AIThinkingEvent }) {
         <div className="flex items-center gap-1.5">
           <span
             className="text-[11px] font-semibold"
-            style={{ color: cfg.tagColor }}
+            style={{ color: isError ? "#dc2626" : cfg.tagColor }}
           >
-            {cfg.label}
+            {isError ? "执行出错" : cfg.label}
           </span>
           <span className="text-[10px] text-[#94a3b8]">
             {formatTimestamp(event.timestamp)}
@@ -152,10 +166,23 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "bash":
       return <BashBlock event={event} />;
 
-    case "result":
+    case "result": {
+      const resultNodeId = "node_id" in event ? (event as AIThinkingEvent & { node_id?: string }).node_id : undefined;
+      const isVerify = resultNodeId === "verify_fix";
+      const isFix = resultNodeId === "fix_bug_peer";
+      const borderColor = isVerify ? "#bbf7d0" : isFix ? "#bfdbfe" : "#e2e8f0";
+      const bgColor = isVerify ? "#f0fdf4" : isFix ? "#eff6ff" : "#f8fafc";
       return (
-        <p className="text-xs leading-relaxed text-[#475569]">{event.content}</p>
+        <div
+          className="rounded-md border px-3 py-2"
+          style={{ borderColor, backgroundColor: bgColor }}
+        >
+          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[#334155]">
+            {event.content}
+          </pre>
+        </div>
       );
+    }
 
     default:
       return (

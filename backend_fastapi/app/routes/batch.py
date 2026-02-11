@@ -239,6 +239,7 @@ async def execute_batch_bug_fix_workflow(
             "current_index": 0,
             "retry_count": 0,
             "results": [],
+            "context": {},
             "config": config,
         }
 
@@ -355,30 +356,34 @@ async def _execute_with_realtime_sync(
                 if start_key in node_start_times:
                     duration_ms = (now - node_start_times[start_key]).total_seconds() * 1000
 
-                # Extract output preview from node output
+                # Extract output preview from the node-specific result
+                # node_output is the full workflow state; actual node result is at node_output[node_id]
+                actual_result = node_output.get(node_id, {}) if isinstance(node_output, dict) else {}
+                if not isinstance(actual_result, dict):
+                    actual_result = {}
+
                 output_preview = None
-                if isinstance(node_output, dict):
-                    # LLMAgentNode returns {result, success}
-                    if "result" in node_output:
-                        resp = node_output["result"]
-                        if isinstance(resp, str) and len(resp) > 0:
-                            output_preview = resp[:200] + ("..." if len(resp) > 200 else "")
-                    # VerifyNode returns {verified, message, details}
-                    elif "message" in node_output:
-                        msg = node_output["message"]
-                        if isinstance(msg, str) and len(msg) > 0:
-                            output_preview = msg[:200] + ("..." if len(msg) > 200 else "")
+                # LLMAgentNode returns {result, success}
+                if "result" in actual_result:
+                    resp = actual_result["result"]
+                    if isinstance(resp, str) and len(resp) > 0:
+                        output_preview = resp[:500] + ("..." if len(resp) > 500 else "")
+                # VerifyNode returns {verified, message, details}
+                elif "message" in actual_result:
+                    msg = actual_result["message"]
+                    if isinstance(msg, str) and len(msg) > 0:
+                        output_preview = msg[:500] + ("..." if len(msg) > 500 else "")
 
                 # Determine step status
                 step_status = "completed"
                 step_error = None
                 if step_name == "failed":
                     step_status = "failed"
-                elif isinstance(node_output, dict):
-                    if node_output.get("success") is False:
+                elif isinstance(actual_result, dict):
+                    if actual_result.get("success") is False:
                         step_status = "failed"
                         step_error = output_preview
-                    elif node_output.get("verified") is False:
+                    elif actual_result.get("verified") is False:
                         step_status = "failed"
                         step_error = output_preview
 
