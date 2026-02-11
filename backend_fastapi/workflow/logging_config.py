@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
-# Log directory
-LOG_DIR = Path(__file__).parent.parent / "logs"
+# Log directory — configurable via LOG_DIR env var for Docker
+LOG_DIR = Path(os.getenv("LOG_DIR", str(Path(__file__).parent.parent / "logs")))
 LOG_DIR.mkdir(exist_ok=True)
 
 # Prevent duplicate handlers

@@ -5,6 +5,7 @@ Configures the app, lifespan, CORS, and includes all route modules.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -30,13 +31,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="工作流操作台 API", version="2.0.0", lifespan=lifespan)
 
-# CORS configuration
+# CORS configuration — configurable via CORS_ORIGINS env var (comma-separated)
+_default_origins = "http://localhost:3000,http://127.0.0.1:3000"
+CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", _default_origins).split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -56,3 +59,9 @@ app.include_router(execution_router)
 app.include_router(validation_router)
 app.include_router(templates_router)
 app.include_router(cccc_router)
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    return {"status": "ok"}

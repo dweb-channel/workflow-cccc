@@ -1,0 +1,66 @@
+# ---- Backend: FastAPI + Temporal Worker + LangGraph ----
+# Multi-stage build: builder (compile deps) → runner (slim production)
+
+# ==== Stage 1: Builder ====
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend_fastapi/pyproject.toml ./
+RUN pip install --no-cache-dir wheel && \
+    pip wheel --no-cache-dir --wheel-dir /wheels . && \
+    pip wheel --no-cache-dir --wheel-dir /wheels pyyaml
+
+# ==== Stage 2: Runner ====
+FROM python:3.11-slim AS runner
+
+WORKDIR /app
+
+# Install only runtime deps (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pre-built wheels (no build tools needed)
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
+
+# Copy application code (no tests)
+COPY backend_fastapi/app ./app
+COPY backend_fastapi/workflow ./workflow
+COPY backend_fastapi/alembic ./alembic
+COPY backend_fastapi/alembic.ini ./
+COPY backend_fastapi/pyproject.toml ./
+
+# Install the project itself (non-editable)
+RUN pip install --no-cache-dir --no-deps .
+
+# Non-root user
+RUN groupadd --system --gid 1001 appgroup && \
+    useradd --system --uid 1001 --gid appgroup appuser && \
+    mkdir -p /data/logs && chown -R appuser:appgroup /data
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Default env vars (override via docker-compose or -e)
+ENV API_HOST=0.0.0.0
+ENV API_PORT=8000
+ENV DATABASE_URL=sqlite+aiosqlite:////data/workflow.db
+ENV TEMPORAL_ADDRESS=temporal:7233
+
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+COPY entrypoint.backend.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+USER appuser
+
+ENTRYPOINT ["/entrypoint.sh"]

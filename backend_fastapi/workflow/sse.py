@@ -10,13 +10,16 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional, TypedDict
 
+import os
+
 import httpx
 
 from .logging_config import get_worker_logger
 
-# API base URL for pushing SSE events
+# API base URL for pushing SSE events (Worker → FastAPI)
 # Use 127.0.0.1 instead of localhost to avoid IPv6 timeout issues
-API_BASE_URL = "http://127.0.0.1:8000"
+# Override via env var for Docker (e.g. http://backend:8000)
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 logger = get_worker_logger()
 

@@ -1,6 +1,11 @@
-"""Workflow configuration constants."""
+"""Workflow configuration constants — single source of truth for all env vars."""
 
 import os
 
-# Temporal task queue name — single source of truth
+# Temporal
+TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
 TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "business-workflow-task-queue")
+
+# Server binding — used by entrypoint / uvicorn
+API_HOST = os.getenv("API_HOST", "0.0.0.0")
+API_PORT = int(os.getenv("API_PORT", "8000"))

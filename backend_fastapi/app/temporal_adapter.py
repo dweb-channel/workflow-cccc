@@ -5,15 +5,12 @@ Manages Temporal client lifecycle and provides workflow start functions.
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 from uuid import uuid4
 
 from temporalio.client import Client
 
-from workflow.config import TASK_QUEUE as TEMPORAL_TASK_QUEUE
-
-TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
+from workflow.config import TASK_QUEUE as TEMPORAL_TASK_QUEUE, TEMPORAL_ADDRESS
 
 # Singleton client instance (initialized via lifespan)
 _client: Optional[Client] = None

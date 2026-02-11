@@ -78,7 +78,30 @@ def _read_json(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _get_daemon_endpoint(paths: Optional[DaemonPaths] = None) -> Dict[str, Any]:
-    """Get the daemon endpoint configuration."""
+    """Get the daemon endpoint configuration.
+
+    Resolution order:
+    1. CCCC_DAEMON_ADDR env var (e.g. "tcp://host:port") — for Docker/remote
+    2. ccccd.addr.json file — auto-discovery
+    3. Unix socket fallback
+    """
+    # 1. Direct env var override (Docker-friendly)
+    daemon_addr = os.environ.get("CCCC_DAEMON_ADDR", "").strip()
+    if daemon_addr:
+        if daemon_addr.startswith("tcp://"):
+            addr = daemon_addr[6:]  # strip "tcp://"
+            if ":" in addr:
+                host, port_str = addr.rsplit(":", 1)
+                try:
+                    port = int(port_str)
+                    if port > 0:
+                        return {"transport": "tcp", "host": host, "port": port}
+                except ValueError:
+                    pass
+        elif daemon_addr.startswith("unix://"):
+            return {"transport": "unix", "path": daemon_addr[7:]}
+
+    # 2. File-based discovery
     p = paths or _default_paths()
     doc = _read_json(p.addr_path)
     if isinstance(doc, dict):
@@ -95,7 +118,7 @@ def _get_daemon_endpoint(paths: Optional[DaemonPaths] = None) -> Dict[str, Any]:
             path = str(doc.get("path") or "").strip()
             if path:
                 return {"transport": "unix", "path": path}
-    # Fallback to Unix socket
+    # 3. Fallback to Unix socket
     return {"transport": "unix", "path": str(p.sock_path)}
 
 

@@ -4,12 +4,12 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from .activities import execute_dynamic_graph_activity
-from ..config import TASK_QUEUE
+from ..config import TASK_QUEUE, TEMPORAL_ADDRESS
 from .workflows import DynamicWorkflow
 
 
 async def main() -> None:
-    client = await Client.connect("localhost:7233")
+    client = await Client.connect(TEMPORAL_ADDRESS)
     worker = Worker(
         client,
         task_queue=TASK_QUEUE,

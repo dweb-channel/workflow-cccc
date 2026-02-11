@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+
+# Node
+frontend/node_modules
+frontend/.next
+frontend/test-results
+
+# Python
+backend_fastapi/.venv
+backend_fastapi/__pycache__
+backend_fastapi/**/__pycache__
+backend_fastapi/*.egg-info
+backend_fastapi/workflow_backend.egg-info
+backend_fastapi/.pytest_cache
+backend_fastapi/workflow.db
+backend_fastapi/tests
+backend_fastapi/logs
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# Docs / Design
+docs/
+design/
+*.pen
+*.md
+!backend_fastapi/README.md
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,69 @@
+# Work-Flow Platform — Docker Compose (Phase 1)
+# Usage: docker-compose up --build
+# Services: backend (FastAPI+Worker), frontend (Next.js), temporal (dev server)
+
+services:
+  # ---- Temporal Dev Server ----
+  temporal:
+    image: temporalio/auto-setup:latest
+    ports:
+      - "7233:7233"   # gRPC
+      - "8080:8080"   # Web UI
+    environment:
+      - DB=sqlite
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ---- Backend: FastAPI + Temporal Worker + LangGraph ----
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend-data:/data
+      - ./backend_fastapi/app/templates:/app/app/templates:ro
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/workflow.db
+      - TEMPORAL_ADDRESS=temporal:7233
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_BASE_URL=http://backend:8000
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      - LOG_DIR=/data/logs
+      # CCCC (Phase 2) — uncomment when CCCC container added
+      # - CCCC_DAEMON_ADDR=tcp://cccc:9765
+      # - CCCC_HOME=/cccc-data
+    depends_on:
+      temporal:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ---- Frontend: Next.js ----
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  backend-data:
