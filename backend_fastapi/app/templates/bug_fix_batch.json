@@ -66,7 +66,7 @@
         "name": "修复 Bug",
         "description": "调用 CCCC Peer 执行 Bug 修复",
         "peer_id": "{fixer_peer_id}",
-        "prompt": "请修复以下 Bug：\n\nURL: {current_bug}\n验证级别: {config.validation_level}\n\n请分析 Bug 详情并实施修复。完成后请报告修复结果。",
+        "prompt": "请修复以下 Bug：\n\nURL: {current_bug}\n验证级别: {config.validation_level}\n\n请使用 mcp-atlassian Jira MCP 工具（如 jira_get_issue）获取 Bug 详情，分析问题并实施修复。完成后请将结果直接回复给 workflow-activity（不要回复给 @all 或 @foreman）。",
         "via_foreman": false
       }
     },
@@ -77,7 +77,7 @@
         "name": "验证修复结果",
         "verify_type": "cccc_peer",
         "peer_id": "{verifier_peer_id}",
-        "prompt_template": "请验证以下 Bug 修复是否正确:\n\nBug URL: {current_bug}\n修复结果: {fix_bug_peer.response}\n\n请检查:\n1. 修复是否完整解决了问题\n2. 是否引入新的问题\n3. 测试是否通过\n\n回复 'VERIFIED' 表示验证通过，'FAILED' 表示验证失败并说明原因。"
+        "prompt_template": "请验证以下 Bug 修复是否正确:\n\nBug URL: {current_bug}\n修复结果: {fix_bug_peer.response}\n\n请使用 mcp-atlassian Jira MCP 工具（如 jira_get_issue）查看原始 Bug 描述，然后检查:\n1. 修复是否完整解决了问题\n2. 是否引入新的问题\n3. 测试是否通过\n\n回复 'VERIFIED' 表示验证通过，'FAILED' 表示验证失败并说明原因。请将结果直接回复给 workflow-activity。"
       }
     },
     {

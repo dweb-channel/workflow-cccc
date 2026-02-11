@@ -434,9 +434,20 @@ class CCCCClient:
                     data = msg.get("data", {})
                     text = data.get("text", "") if isinstance(data, dict) else ""
                     event_id = msg.get("id", "")
+                    to = data.get("to", []) if isinstance(data, dict) else []
 
                     # Skip messages before our send timestamp
                     if after_ts and msg_ts and msg_ts <= after_ts:
+                        continue
+
+                    # Only accept messages explicitly addressed to us (workflow-activity).
+                    # Reject @all/@peers broadcasts to avoid picking up stand-up or
+                    # other unrelated messages as workflow responses.
+                    if to and self.inbox_as not in to:
+                        logger.debug(
+                            f"Skipping message from {by} addressed to {to} "
+                            f"(not directly to {self.inbox_as})"
+                        )
                         continue
 
                     if by == from_peer:
