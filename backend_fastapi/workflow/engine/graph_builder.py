@@ -645,7 +645,7 @@ def build_graph_from_config(workflow: WorkflowDefinition):
                         # Skip metadata keys
                         if key not in ("updated_fields", "error", "has_more"):
                             # Merge state-updating fields at top level
-                            if key in state or key in ("results", "current_index", "retry_count", "current_bug"):
+                            if key in state or key in ("results", "current_index", "retry_count", "current_bug", "context"):
                                 new_state[key] = value
 
                 return new_state

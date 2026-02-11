@@ -206,6 +206,85 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
     return on_event
 
 
+def _extract_fix_summary(result: str, max_len: int = 500) -> str:
+    """Extract a concise summary from fix node output.
+
+    Tries to parse the structured format (根因分析 + 修改摘要 + 测试结果).
+    Falls back to truncated raw output.
+    """
+    sections = []
+    for header in ("## 根因分析", "## 修改摘要", "## 测试结果"):
+        idx = result.find(header)
+        if idx >= 0:
+            # Find the end (next ## or end of string)
+            end = result.find("\n## ", idx + len(header))
+            section = result[idx:end].strip() if end > 0 else result[idx:].strip()
+            sections.append(section)
+
+    if sections:
+        summary = "\n".join(sections)
+        return summary[:max_len] + ("..." if len(summary) > max_len else "")
+
+    # Fallback: truncate raw output
+    return result[:max_len] + ("..." if len(result) > max_len else "")
+
+
+def _accumulate_fix_context(
+    inputs: Dict[str, Any], result: str, success: bool,
+) -> Dict[str, Any]:
+    """Build updated context after a fix node execution.
+
+    Writes fix_summary, fix_attempt_N, and retry_history.
+    Only called when 'context' field exists in workflow state.
+    """
+    ctx = dict(inputs.get("context") or {})
+    attempt = int(inputs.get("retry_count", 0)) + 1
+
+    summary = _extract_fix_summary(result)
+    ctx["fix_summary"] = summary
+    ctx[f"fix_attempt_{attempt}"] = summary[:300]
+
+    # Build retry_history as a readable string for prompt injection
+    history_parts = []
+    for i in range(1, attempt + 1):
+        key = f"fix_attempt_{i}"
+        if key in ctx:
+            history_parts.append(f"尝试 {i}: {ctx[key][:200]}")
+    ctx["retry_history"] = "\n".join(history_parts) if history_parts else "首次尝试"
+
+    return ctx
+
+
+def _accumulate_verify_context(
+    inputs: Dict[str, Any], verified: bool, message: str,
+) -> Dict[str, Any]:
+    """Build updated context after a verify node execution.
+
+    Writes verify_feedback, verify_result, and updates retry_history.
+    Only called when 'context' field exists in workflow state.
+    """
+    ctx = dict(inputs.get("context") or {})
+    attempt = int(inputs.get("retry_count", 0)) + 1
+
+    ctx["verify_feedback"] = message[:300]
+    ctx["verify_result"] = "VERIFIED" if verified else "FAILED"
+
+    # Update retry_history with verify result appended
+    history_parts = []
+    for i in range(1, attempt + 1):
+        fix_key = f"fix_attempt_{i}"
+        fix_text = ctx.get(fix_key, "")[:150]
+        if fix_text:
+            if i == attempt:
+                verify_label = "通过" if verified else "失败"
+                history_parts.append(f"尝试 {i}: 修复={fix_text} → 验证={verify_label}")
+            else:
+                history_parts.append(f"尝试 {i}: 修复={fix_text} → 验证=失败")
+    ctx["retry_history"] = "\n".join(history_parts) if history_parts else ""
+
+    return ctx
+
+
 def _render_template(template: str, context: Dict[str, Any]) -> str:
     """Render a prompt template with variable substitution.
 
@@ -306,7 +385,14 @@ class LLMAgentNode(BaseNodeImpl):
             success = not result.startswith("[Error]")
             if not success:
                 logger.error(f"LLMAgentNode {self.node_id}: Claude CLI error: {result[:200]}")
-            return {"result": result, "success": success}
+
+            output: Dict[str, Any] = {"result": result, "success": success}
+
+            # Context accumulation — only when workflow has context support
+            if "context" in inputs:
+                output["context"] = _accumulate_fix_context(inputs, result, success)
+
+            return output
         except Exception as e:
             logger.error(f"LLMAgentNode {self.node_id}: Execution failed: {e}")
             return {"result": f"[Error] {e}", "success": False}
@@ -496,11 +582,20 @@ class VerifyNode(BaseNodeImpl):
             if "FAILED" in response_upper or "失败" in response or "未通过" in response:
                 verified = False
 
-            return {
+            message = response[:500] if len(response) > 500 else response
+            output: Dict[str, Any] = {
                 "verified": verified,
-                "message": response[:500] if len(response) > 500 else response,
+                "message": message,
                 "details": {"full_response": response},
             }
+
+            # Context accumulation — only when workflow has context support
+            if "context" in inputs:
+                output["context"] = _accumulate_verify_context(
+                    inputs, verified, message,
+                )
+
+            return output
 
         except Exception as e:
             logger.error(f"VerifyNode {self.node_id}: LLM verification failed: {e}")
