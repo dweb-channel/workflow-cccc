@@ -1213,6 +1213,83 @@ async def cancel_batch_job(job_id: str):
     )
 
 
+@router.delete("/bug-fix/{job_id}", response_model=JobControlResponse)
+async def delete_batch_job(job_id: str):
+    """Delete a batch job and all its bug results.
+
+    Running jobs will be cancelled first, then deleted.
+    """
+    # Cancel if still running
+    async with _tasks_lock:
+        workflow_task = WORKFLOW_TASKS.get(job_id)
+    if workflow_task and not workflow_task.done():
+        workflow_task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(workflow_task), timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            pass
+
+    # Remove from caches
+    async with _cache_lock:
+        BATCH_JOBS_CACHE.pop(job_id, None)
+    async with _tasks_lock:
+        WORKFLOW_TASKS.pop(job_id, None)
+    async with _sse_lock:
+        JOB_SSE_QUEUES.pop(job_id, None)
+
+    # Delete from database
+    try:
+        async with get_session_ctx() as session:
+            repo = BatchJobRepository(session)
+            deleted = await repo.delete(job_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {e}")
+
+    logger.info(f"Job {job_id}: Deleted successfully")
+    return JobControlResponse(
+        success=True,
+        job_id=job_id,
+        status="deleted",
+        message="Job deleted successfully",
+    )
+
+
+class BatchDeleteRequest(BaseModel):
+    """Request for batch deletion."""
+    job_ids: List[str] = Field(..., description="List of job IDs to delete")
+
+
+class BatchDeleteResponse(BaseModel):
+    """Response for batch deletion."""
+    deleted: List[str]
+    failed: List[str]
+    message: str
+
+
+@router.post("/bug-fix/batch-delete", response_model=BatchDeleteResponse)
+async def batch_delete_jobs(request: BatchDeleteRequest):
+    """Delete multiple batch jobs at once."""
+    deleted = []
+    failed = []
+    for job_id in request.job_ids:
+        try:
+            await delete_batch_job(job_id)
+            deleted.append(job_id)
+        except Exception:
+            failed.append(job_id)
+
+    return BatchDeleteResponse(
+        deleted=deleted,
+        failed=failed,
+        message=f"Deleted {len(deleted)}/{len(request.job_ids)} jobs",
+    )
+
+
 # --- Jira Integration Endpoints ---
 
 jira_router = APIRouter(prefix="/api/v2/jira", tags=["jira"])

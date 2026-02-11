@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getBatchJobHistory, getBatchJobStatus, type BatchJobHistoryItem } from "@/lib/api";
+import { getBatchJobHistory, getBatchJobStatus, deleteBatchJob, type BatchJobHistoryItem } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
 import type { BatchJob } from "../types";
 
@@ -70,6 +70,28 @@ export function useJobHistory() {
     [expandedJobId, toast]
   );
 
+  const deleteJob = useCallback(
+    async (jobId: string) => {
+      try {
+        await deleteBatchJob(jobId);
+        setHistoryJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+        setHistoryTotal((prev) => Math.max(0, prev - 1));
+        if (expandedJobId === jobId) {
+          setExpandedJobId(null);
+          setExpandedJobDetails(null);
+        }
+        toast({ title: "已删除", description: jobId });
+      } catch (err) {
+        toast({
+          title: "删除失败",
+          description: err instanceof Error ? err.message : "请稍后重试",
+          variant: "destructive",
+        });
+      }
+    },
+    [expandedJobId, toast]
+  );
+
   return {
     historyJobs,
     historyPage,
@@ -80,5 +102,6 @@ export function useJobHistory() {
     setHistoryPage,
     loadHistory,
     toggleJobDetails,
+    deleteJob,
   };
 }

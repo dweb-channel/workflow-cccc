@@ -325,6 +325,13 @@ export async function cancelBatchJob(jobId: string): Promise<{ success: boolean;
   return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
 }
 
+export async function deleteBatchJob(jobId: string): Promise<{ success: boolean; job_id: string; status: string }> {
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix/${jobId}`, {
+    method: "DELETE",
+  });
+  return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
+}
+
 // --- Jira JQL Query API ---
 
 export interface JiraBug {

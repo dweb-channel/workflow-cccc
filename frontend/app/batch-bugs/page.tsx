@@ -247,6 +247,7 @@ export default function BatchBugsPage() {
                         onRefresh={history.loadHistory}
                         onPageChange={history.setHistoryPage}
                         onToggleDetails={history.toggleJobDetails}
+                        onDelete={history.deleteJob}
                       />
                     </TabsContent>
                   </div>

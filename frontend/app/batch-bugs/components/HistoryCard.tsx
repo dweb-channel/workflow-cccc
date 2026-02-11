@@ -13,6 +13,7 @@ interface HistoryCardProps {
   onRefresh: () => void;
   onPageChange: (page: number) => void;
   onToggleDetails: (jobId: string) => void;
+  onDelete?: (jobId: string) => void;
 }
 
 export function HistoryCard({
@@ -25,6 +26,7 @@ export function HistoryCard({
   onRefresh,
   onPageChange,
   onToggleDetails,
+  onDelete,
 }: HistoryCardProps) {
   return (
     <div>
@@ -71,6 +73,18 @@ export function HistoryCard({
                       </span>
                     )}
                   </div>
+                  {onDelete && (
+                    <button
+                      className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                      title="删除"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(job.job_id);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  )}
                   <span className="text-slate-400">
                     {expandedJobId === job.job_id ? "▼" : "▶"}
                   </span>
