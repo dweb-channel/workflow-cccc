@@ -51,7 +51,7 @@ export interface BatchJobStats {
 
 // ============ AI Thinking Events ============
 
-export type AIThinkingEventType = "thinking" | "read" | "edit" | "bash" | "result";
+export type AIThinkingEventType = "thinking" | "text" | "read" | "edit" | "bash" | "result";
 
 export interface AIThinkingEventBase {
   type: AIThinkingEventType;
@@ -83,6 +83,11 @@ export interface AIThinkingBashEvent extends AIThinkingEventBase {
   output?: string;
 }
 
+export interface AIThinkingTextEvent extends AIThinkingEventBase {
+  type: "text";
+  content: string;
+}
+
 export interface AIThinkingResultEvent extends AIThinkingEventBase {
   type: "result";
   content: string;
@@ -90,6 +95,7 @@ export interface AIThinkingResultEvent extends AIThinkingEventBase {
 
 export type AIThinkingEvent =
   | AIThinkingThinkingEvent
+  | AIThinkingTextEvent
   | AIThinkingReadEvent
   | AIThinkingEditEvent
   | AIThinkingBashEvent

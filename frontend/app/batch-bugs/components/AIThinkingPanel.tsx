@@ -85,16 +85,17 @@ export function AIThinkingPanel({ events, stats, bugLabel }: AIThinkingPanelProp
 
 /* ---- Event Renderers ---- */
 
-const EVENT_CONFIG = {
+const EVENT_CONFIG: Record<string, { icon: string; bg: string; tagColor: string; label: string }> = {
   thinking: { icon: "\u{1F4AD}", bg: "#faf5ff", tagColor: "#7c3aed", label: "Thinking" },
+  text:     { icon: "\u{1F4AC}", bg: "#f8fafc", tagColor: "#475569", label: "Output" },
   read:     { icon: "\u{1F4D6}", bg: "#f0fdf4", tagColor: "#16a34a", label: "Read" },
   edit:     { icon: "\u270F\uFE0F", bg: "#fffbeb", tagColor: "#d97706", label: "Edit" },
   bash:     { icon: ">_",         bg: "#1e293b", tagColor: "#1e293b", label: "Bash" },
   result:   { icon: "\u2705",     bg: "#eff6ff", tagColor: "#3b82f6", label: "Result" },
-} as const;
+};
 
 function EventRow({ event }: { event: AIThinkingEvent }) {
-  const cfg = EVENT_CONFIG[event.type];
+  const cfg = EVENT_CONFIG[event.type] ?? EVENT_CONFIG.text;
 
   return (
     <div className="flex gap-2.5">
@@ -135,8 +136,11 @@ function EventRow({ event }: { event: AIThinkingEvent }) {
 function EventContent({ event }: { event: AIThinkingEvent }) {
   switch (event.type) {
     case "thinking":
+    case "text":
       return (
-        <p className="text-xs leading-relaxed text-[#475569]">{event.content}</p>
+        <p className="text-xs leading-relaxed text-[#475569]">
+          {"content" in event ? event.content : ""}
+        </p>
       );
 
     case "read":
@@ -151,6 +155,13 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "result":
       return (
         <p className="text-xs leading-relaxed text-[#475569]">{event.content}</p>
+      );
+
+    default:
+      return (
+        <p className="text-xs leading-relaxed text-[#94a3b8]">
+          {"content" in event ? (event as { content: string }).content : JSON.stringify(event)}
+        </p>
       );
   }
 }
