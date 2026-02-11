@@ -115,7 +115,8 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
     """Create a callback that pushes ClaudeEvents as SSE ai_thinking events.
 
     Uses job_id from inputs to route events to the correct SSE queue.
-    Transforms tool_use events into frontend-specific types (read/edit/bash).
+    Filters noisy exploration events (read/glob/grep) to keep output clean.
+    Only pushes key events: thinking, edit/write, bash, and final results.
     Returns None if no job_id is available (non-batch context).
     """
     job_id = inputs.get("job_id")
@@ -123,31 +124,58 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
     if not job_id:
         return None
 
+    # Exploration tools that produce noise — suppress individual events
+    _EXPLORATION_TOOLS = frozenset({
+        "read", "view", "glob", "grep", "search", "list",
+        "task", "webfetch", "web_fetch",
+    })
+
+    # Counter for suppressed exploration events (used for periodic summary)
+    state = {"explore_count": 0, "last_explore_summary_at": 0}
+
     def on_event(event: ClaudeEvent):
         try:
             from app.routes.batch import push_job_event
+            import time
 
             event_dict = event.to_dict()
             event_dict["node_id"] = node_id
             event_dict["bug_index"] = bug_index
 
-            # Transform tool_use into specific frontend types with Chinese descriptions
             if event.type == ClaudeEvent.TOOL_USE:
+                tool_name = (event.tool_name or "").lower()
+
+                if tool_name in _EXPLORATION_TOOLS:
+                    # Suppress noisy exploration events, emit periodic summary
+                    state["explore_count"] += 1
+                    now = time.monotonic()
+                    # Emit a summary every 10 exploration events or every 15 seconds
+                    if (state["explore_count"] % 10 == 1
+                            or now - state["last_explore_summary_at"] > 15):
+                        state["last_explore_summary_at"] = now
+                        push_job_event(job_id, "ai_thinking", {
+                            "type": "thinking",
+                            "content": f"正在分析代码... (已探索 {state['explore_count']} 个文件/位置)",
+                            "timestamp": event_dict["timestamp"],
+                            "node_id": node_id,
+                            "bug_index": bug_index,
+                        })
+                    return
+
+                # Important tool events (edit, write, bash) — always push
                 transformed = _humanize_tool_event(event_dict)
                 transformed["timestamp"] = event_dict["timestamp"]
                 transformed["node_id"] = node_id
                 transformed["bug_index"] = bug_index
                 push_job_event(job_id, "ai_thinking", transformed)
+
             elif event.type == ClaudeEvent.TEXT:
-                # Tool results — humanize the "[Tool Result]" prefix
                 content = event.content
+                # Suppress tool result noise entirely
                 if content.startswith("[Tool Result]"):
-                    raw = content[len("[Tool Result]"):].strip()
-                    # Truncate long tool results
-                    if len(raw) > 300:
-                        raw = raw[:300] + "..."
-                    event_dict["content"] = f"📎 工具返回结果：{raw}"
+                    return
                 push_job_event(job_id, "ai_thinking", event_dict)
+
             elif event.type == ClaudeEvent.RESULT:
                 # Final result — add Chinese wrapper
                 content = event.content
@@ -155,8 +183,13 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
                     event_dict["content"] = f"❌ 执行出错：{content}"
                 else:
                     event_dict["content"] = f"✅ 分析完成：{content}"
+                # Include exploration summary in result
+                if state["explore_count"] > 0:
+                    event_dict["explore_count"] = state["explore_count"]
                 push_job_event(job_id, "ai_thinking", event_dict)
+
             else:
+                # THINKING events — always push
                 push_job_event(job_id, "ai_thinking", event_dict)
 
             # Push stats on result events

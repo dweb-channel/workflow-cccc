@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
+import { GitBranch, Bug, type LucideIcon } from "lucide-react";
 
 interface NavItemProps {
   href: string;
-  icon: string;
+  icon: LucideIcon;
   label: string;
   isActive: boolean;
 }
 
-function NavItem({ href, icon, label, isActive }: NavItemProps) {
+function NavItem({ href, icon: Icon, label, isActive }: NavItemProps) {
   return (
     <Link
       href={href}
@@ -21,7 +22,7 @@ function NavItem({ href, icon, label, isActive }: NavItemProps) {
           : "bg-slate-50 text-slate-500 hover:bg-slate-100"
       }`}
     >
-      <span className="text-base">{icon}</span>
+      <Icon className="h-4 w-4" />
       <span>{label}</span>
     </Link>
   );
@@ -48,13 +49,13 @@ export function Sidebar({ children }: SidebarProps) {
       <div className="space-y-1 px-4">
         <NavItem
           href="/"
-          icon="📋"
+          icon={GitBranch}
           label="工作流"
           isActive={isWorkflowPage}
         />
         <NavItem
           href="/batch-bugs"
-          icon="🐛"
+          icon={Bug}
           label="批量修复"
           isActive={isBatchBugsPage}
         />

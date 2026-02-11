@@ -2,6 +2,8 @@
 
 import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -21,6 +23,7 @@ import { AIThinkingPanel } from "./components/AIThinkingPanel";
 export default function BatchBugsPage() {
   // Form inputs
   const [jiraUrls, setJiraUrls] = useState("");
+  const [targetCwd, setTargetCwd] = useState("");
   const [validationLevel, setValidationLevel] =
     useState<ValidationLevel>("standard");
   const [failurePolicy, setFailurePolicy] =
@@ -55,6 +58,7 @@ export default function BatchBugsPage() {
 
     const result = await submit({
       jira_urls: urls,
+      cwd: targetCwd.trim() || undefined,
       config: {
         validation_level: validationLevel,
         failure_policy: failurePolicy,
@@ -66,6 +70,7 @@ export default function BatchBugsPage() {
     }
   }, [
     parseJiraUrls,
+    targetCwd,
     validationLevel,
     failurePolicy,
     submit,
@@ -133,6 +138,21 @@ export default function BatchBugsPage() {
               onValidationLevelChange={setValidationLevel}
               onFailurePolicyChange={setFailurePolicy}
             />
+
+            <Card>
+              <CardContent className="pt-4 pb-3 space-y-2">
+                <Label className="text-xs">目标代码库路径</Label>
+                <Input
+                  placeholder="/path/to/target/project (留空则使用默认目录)"
+                  value={targetCwd}
+                  onChange={(e) => setTargetCwd(e.target.value)}
+                  className="text-sm font-mono"
+                />
+                <p className="text-xs text-slate-400">
+                  Claude CLI 的工作目录，指向需要修复的项目代码库
+                </p>
+              </CardContent>
+            </Card>
 
             <div className="flex gap-3">
               <Button
