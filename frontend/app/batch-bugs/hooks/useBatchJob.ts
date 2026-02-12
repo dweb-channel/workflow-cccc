@@ -4,6 +4,7 @@ import {
   getBatchJobStreamUrl,
   getBatchJobStatus,
   cancelBatchJob,
+  getActiveJob,
   type BatchBugFixRequest,
 } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
@@ -40,6 +41,36 @@ export function useBatchJob() {
     tokens_out: 0,
     cost: 0,
   });
+
+  // Recovery: on mount, check for active (non-terminal) job in DB
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const activeJob = await getActiveJob();
+        if (cancelled || !activeJob) return;
+        // Restore currentJob state from DB response
+        const bugs: BugStatus[] = activeJob.bugs.map((b, idx) => ({
+          bug_id: `BUG-${idx + 1}`,
+          url: b.url,
+          status: b.status,
+          error: b.error,
+          steps: b.steps,
+          retry_count: b.retry_count,
+        }));
+        setCurrentJob({
+          job_id: activeJob.job_id,
+          bugs,
+          started_at: activeJob.created_at,
+          job_status: activeJob.status,
+        });
+      } catch {
+        // Recovery failure is non-critical — user can start a new job
+        console.warn("Failed to recover active job on mount");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // SSE stream for real-time job status updates
   useEffect(() => {

@@ -28,6 +28,8 @@ class TemplateListItem(BaseModel):
     title: str
     description: str
     icon: Optional[str] = None
+    category: str = "graph"  # 'graph' = editable workflow, 'page' = standalone page
+    path: Optional[str] = None  # frontend route for 'page' category
 
 
 class NodePosition(BaseModel):
@@ -120,22 +122,39 @@ def _parse_node(n: Dict[str, Any]) -> TemplateNode:
     )
 
 
+# Hardcoded page-type templates (not backed by JSON workflow files)
+_PAGE_TEMPLATES: List[TemplateListItem] = [
+    TemplateListItem(
+        name="batch-bug-fix",
+        title="批量 Bug 修复",
+        icon="bug",
+        description="批量提交多个 Bug，自动依次分析修复",
+        category="page",
+        path="/batch-bugs",
+    ),
+]
+
+
 @router.get("", response_model=List[TemplateListItem])
 async def list_templates() -> List[TemplateListItem]:
     """List all available workflow templates.
 
-    Returns a list of template summaries (name, title, description, icon).
+    Returns a list of template summaries with category metadata.
+    Category 'graph' = editable workflow template, 'page' = standalone page.
     """
     templates = _list_templates()
-    return [
+    items = [
         TemplateListItem(
             name=t["name"],
             title=t["title"],
             description=t["description"],
             icon=t.get("icon"),
+            category=t.get("category", "graph"),
         )
         for t in templates
     ]
+    items.extend(_PAGE_TEMPLATES)
+    return items
 
 
 @router.get("/{name}", response_model=TemplateDetail)

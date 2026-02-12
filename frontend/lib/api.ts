@@ -266,16 +266,32 @@ export interface BatchBugFixResponse {
   created_at: string;
 }
 
-export interface BugStatusDetail {
-  bug_id: string;
-  url: string;
+export interface BugStepDetail {
+  step: string;
+  label: string;
   status: "pending" | "in_progress" | "completed" | "failed";
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  output_preview?: string;
   error?: string;
+  attempt?: number;
+}
+
+export interface BugStatusDetail {
+  url: string;
+  status: "pending" | "in_progress" | "completed" | "failed" | "skipped";
+  error?: string;
+  started_at?: string;
+  completed_at?: string;
+  steps?: BugStepDetail[];
+  retry_count?: number;
 }
 
 export interface BatchJobStatusResponse {
   job_id: string;
   status: string;
+  total_bugs: number;
   bugs: BugStatusDetail[];
   completed: number;
   failed: number;
@@ -283,6 +299,7 @@ export interface BatchJobStatusResponse {
   in_progress: number;
   pending: number;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface BatchJobHistoryItem {
@@ -378,6 +395,18 @@ export async function getBatchJobHistory(
   if (status) params.set("status", status);
   const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix?${params}`);
   return handleResponse<BatchJobHistoryResponse>(response);
+}
+
+/**
+ * Get the most recent active (non-terminal) batch job, if any.
+ * Used for page refresh recovery — restores running job state from DB.
+ */
+export async function getActiveJob(): Promise<BatchJobStatusResponse | null> {
+  // Query for jobs with non-terminal status (started or running)
+  const listResp = await getBatchJobHistory(1, 1, "started,running");
+  if (listResp.jobs.length === 0) return null;
+  // Fetch full status with bug details
+  return getBatchJobStatus(listResp.jobs[0].job_id);
 }
 
 /**

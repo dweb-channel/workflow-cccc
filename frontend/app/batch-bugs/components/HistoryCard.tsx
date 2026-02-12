@@ -54,6 +54,7 @@ export function HistoryCard({
                     {job.status === "completed" && "✅"}
                     {job.status === "running" && "🔄"}
                     {job.status === "failed" && "❌"}
+                    {job.status === "cancelled" && "⛔"}
                     {job.status === "pending" && "⏳"}
                   </span>
                   <div className="flex-1">
@@ -63,6 +64,7 @@ export function HistoryCard({
                     <p className="text-xs text-slate-400">
                       {new Date(job.created_at).toLocaleString()} ·{" "}
                       {job.total_bugs} bugs
+                      {job.status === "cancelled" && " · 已取消"}
                     </p>
                   </div>
                   <div className="text-right text-xs">

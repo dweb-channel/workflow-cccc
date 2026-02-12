@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
 import { GitBranch, Bug, type LucideIcon } from "lucide-react";
 
 interface NavItemProps {
@@ -28,15 +27,14 @@ function NavItem({ href, icon: Icon, label, isActive }: NavItemProps) {
   );
 }
 
-interface SidebarProps {
-  children?: ReactNode;
-}
+// TODO: Replace static navItems with dynamic API: GET /api/workflows/nav
+const navItems = [
+  { title: "工作流编辑器", path: "/", icon: GitBranch },
+  { title: "批量 Bug 修复", path: "/batch-bugs", icon: Bug },
+];
 
-export function Sidebar({ children }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname();
-
-  const isWorkflowPage = pathname === "/" || pathname.startsWith("/workflow");
-  const isBatchBugsPage = pathname === "/batch-bugs";
 
   return (
     <aside className="flex w-[240px] shrink-0 flex-col border-r border-slate-200 bg-white">
@@ -45,29 +43,24 @@ export function Sidebar({ children }: SidebarProps) {
         <h1 className="text-lg font-bold text-slate-800">工作流平台</h1>
       </div>
 
-      {/* Navigation */}
-      <div className="space-y-1 px-4">
-        <NavItem
-          href="/"
-          icon={GitBranch}
-          label="工作流"
-          isActive={isWorkflowPage}
-        />
-        <NavItem
-          href="/batch-bugs"
-          icon={Bug}
-          label="批量修复"
-          isActive={isBatchBugsPage}
-        />
-      </div>
-
-      {/* Divider */}
-      <div className="mx-4 my-4 h-px bg-slate-200" />
-
-      {/* Content area - workflow list or batch info */}
-      <div className="flex-1 overflow-y-auto px-4">
-        {children}
-      </div>
+      {/* Navigation — workflow directory */}
+      <nav className="space-y-1 px-4">
+        {navItems.map((item) => {
+          const isActive =
+            item.path === "/"
+              ? pathname === "/" || pathname.startsWith("/workflow")
+              : pathname === item.path || pathname.startsWith(item.path + "/");
+          return (
+            <NavItem
+              key={item.path}
+              href={item.path}
+              icon={item.icon}
+              label={item.title}
+              isActive={isActive}
+            />
+          );
+        })}
+      </nav>
     </aside>
   );
 }

@@ -1,24 +1,29 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Sidebar } from "@/components/sidebar/Sidebar";
+import { FileEdit, Play } from "lucide-react";
 
 import type { ValidationLevel, FailurePolicy } from "./types";
 import { useBatchJob } from "./hooks/useBatchJob";
 import { useJobHistory } from "./hooks/useJobHistory";
-import { useAIThinking } from "./hooks/useAIThinking";
 import { BugInput } from "./components/BugInput";
 import { ConfigOptions } from "./components/ConfigOptions";
 import { DirectoryPicker } from "./components/DirectoryPicker";
 import { OverviewTab } from "./components/OverviewTab";
-import { BugDetailTab } from "./components/BugDetailTab";
 import { HistoryCard } from "./components/HistoryCard";
-import { WorkflowTab } from "./components/WorkflowTab";
-import { AIThinkingPanel } from "./components/AIThinkingPanel";
+import { ActivityFeed } from "./components/ActivityFeed";
+import { PipelineBar } from "./components/PipelineBar";
+
+/* ================================================================
+   BatchBugsPage — Two-tab layout:
+   Tab 1 (配置):  Left=Input form, Right=History
+   Tab 2 (执行):  Pipeline + ActivityFeed(main) + Right panel
+   Both tabs stay mounted (forceMount) to preserve SSE + scroll.
+   ================================================================ */
 
 export default function BatchBugsPage() {
   // Form inputs
@@ -30,20 +35,34 @@ export default function BatchBugsPage() {
     useState<FailurePolicy>("skip");
 
   const [activeBugIndex, setActiveBugIndex] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("config");
 
   // Hooks
   const { currentJob, submitting, stats, submit, cancel, aiThinkingEvents, aiThinkingStats } = useBatchJob();
   const history = useJobHistory();
-  const aiThinking = useAIThinking({
-    allEvents: aiThinkingEvents,
-    stats: aiThinkingStats,
-    activeBugIndex,
-  });
 
-  // Auto-select first in_progress bug for AI thinking
-  const inProgressIndex = currentJob?.bugs.findIndex((b) => b.status === "in_progress") ?? -1;
-  const effectiveBugIndex = activeBugIndex ?? (inProgressIndex >= 0 ? inProgressIndex : null);
-  const activeBugLabel = effectiveBugIndex !== null ? currentJob?.bugs[effectiveBugIndex]?.bug_id : undefined;
+  // Auto-switch to execution tab when job starts running
+  const jobActive = currentJob && !["completed", "failed", "cancelled"].includes(currentJob.job_status);
+  useEffect(() => {
+    if (jobActive) setActiveTab("execution");
+  }, [jobActive]);
+
+  // Execution tab is disabled when there's no job at all
+  const hasJob = !!currentJob;
+
+  // Dynamic execution tab label with mini progress
+  const executionTabSuffix = useMemo(() => {
+    if (!currentJob) return "";
+    const total = currentJob.bugs.length;
+    const done = stats.completed;
+    switch (currentJob.job_status) {
+      case "running":   return ` (${done}/${total} 修复中...)`;
+      case "completed": return ` (${done}/${total} ✅)`;
+      case "failed":    return ` (${done}/${total} ❌)`;
+      case "cancelled": return ` (${done}/${total} ⛔)`;
+      default:          return ` (${done}/${total} 修复中...)`;
+    }
+  }, [currentJob?.job_status, currentJob?.bugs.length, stats.completed]);
 
   const parseJiraUrls = useCallback(() => {
     return jiraUrls
@@ -66,6 +85,7 @@ export default function BatchBugsPage() {
     });
 
     if (result) {
+      setActiveTab("execution");
       history.loadHistory();
     }
   }, [
@@ -77,186 +97,255 @@ export default function BatchBugsPage() {
     history,
   ]);
 
-  return (
-    <main className="flex h-screen overflow-hidden">
-      <Sidebar>
-        <div className="space-y-3">
-          <h2 className="text-xs font-medium text-slate-500">当前任务</h2>
-          {currentJob ? (
-            <div className="rounded-lg bg-green-50 p-3">
-              <div className="flex items-center gap-2">
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    currentJob.job_status === "completed"
-                      ? "bg-green-500"
-                      : currentJob.job_status === "failed" ||
-                          currentJob.job_status === "cancelled"
-                        ? "bg-red-500"
-                        : "bg-blue-500 animate-pulse"
-                  }`}
-                />
-                <span className="text-sm font-medium text-green-800">
-                  {currentJob.job_status === "completed"
-                    ? "已完成"
-                    : currentJob.job_status === "failed"
-                      ? "失败"
-                      : currentJob.job_status === "cancelled"
-                        ? "已取消"
-                        : "修复中"}
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-slate-500">
-                {stats.completed}/{currentJob.bugs.length} 完成
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400">尚未启动任务</p>
-          )}
-        </div>
-      </Sidebar>
+  const handleNewJob = () => {
+    setActiveTab("config");
+    setActiveBugIndex(null);
+  };
 
-      <div className="flex flex-1 flex-col overflow-y-auto p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-900">批量 Bug 修复</h1>
-          <p className="text-sm text-slate-500">
+  const isFinished = currentJob && ["completed", "failed", "cancelled"].includes(currentJob.job_status);
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden p-6">
+        {/* ---- Header ---- */}
+        <div className="mb-4 shrink-0">
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-slate-900">批量 Bug 修复</h1>
+            {currentJob && (
+              <>
+                <span className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 font-mono text-xs text-[#2563eb]">
+                  {currentJob.job_id}
+                </span>
+                <JobStatusBadge status={currentJob.job_status} />
+              </>
+            )}
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
             粘贴 Jira Bug 链接，一键启动自动修复流程
           </p>
         </div>
 
-        <div className="flex flex-1 gap-6">
-          {/* Left Column - Input */}
-          <div className="flex w-1/2 flex-col gap-4">
-            <BugInput
-              jiraUrls={jiraUrls}
-              onJiraUrlsChange={setJiraUrls}
-              parseJiraUrls={parseJiraUrls}
-            />
+        {/* ---- Two Big Tabs ---- */}
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="flex flex-1 flex-col overflow-hidden"
+        >
+          <TabsList className="mb-4 w-fit shrink-0 bg-slate-100 p-1 rounded-lg" data-testid="main-tabs">
+            <TabsTrigger
+              value="config"
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
+              data-testid="tab-config"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <FileEdit className="h-3.5 w-3.5" /> 配置
+              </span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="execution"
+              disabled={!hasJob}
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
+              data-testid="tab-execution"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <Play className="h-3.5 w-3.5" /> 执行{executionTabSuffix}
+              </span>
+            </TabsTrigger>
+          </TabsList>
 
-            <ConfigOptions
-              validationLevel={validationLevel}
-              failurePolicy={failurePolicy}
-              onValidationLevelChange={setValidationLevel}
-              onFailurePolicyChange={setFailurePolicy}
-            />
-
-            <Card>
-              <CardContent className="pt-4 pb-3 space-y-2">
-                <Label className="text-xs">目标代码库路径</Label>
-                <DirectoryPicker
-                  value={targetCwd}
-                  onChange={setTargetCwd}
+          {/* Config Tab — always mounted */}
+          <TabsContent
+            value="config"
+            forceMount
+            className="flex-1 overflow-hidden data-[state=inactive]:hidden"
+          >
+            <div className="flex flex-1 h-full gap-6 overflow-hidden">
+              {/* Left: Input form */}
+              <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2">
+                <BugInput
+                  jiraUrls={jiraUrls}
+                  onJiraUrlsChange={setJiraUrls}
+                  parseJiraUrls={parseJiraUrls}
                 />
-                <p className="text-xs text-slate-400">
-                  Claude CLI 的工作目录，指向需要修复的项目代码库
-                </p>
-              </CardContent>
-            </Card>
 
-            <div className="flex gap-3">
-              <Button
-                onClick={handleSubmit}
-                disabled={
-                  submitting ||
-                  parseJiraUrls().length === 0
-                }
-              >
-                {submitting ? "提交中..." : "开始修复"}
-              </Button>
+                <ConfigOptions
+                  validationLevel={validationLevel}
+                  failurePolicy={failurePolicy}
+                  onValidationLevelChange={setValidationLevel}
+                  onFailurePolicyChange={setFailurePolicy}
+                />
+
+                <Card>
+                  <CardContent className="pt-4 pb-3 space-y-2">
+                    <Label className="text-xs">目标代码库路径</Label>
+                    <DirectoryPicker
+                      value={targetCwd}
+                      onChange={setTargetCwd}
+                    />
+                    <p className="text-xs text-slate-400">
+                      Claude CLI 的工作目录，指向需要修复的项目代码库
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={submitting || parseJiraUrls().length === 0}
+                  >
+                    {submitting ? "提交中..." : "开始修复"}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Right: History */}
+              <div className="w-[380px] shrink-0 overflow-y-auto">
+                <Card>
+                  <CardContent className="p-4">
+                    <HistoryCard
+                      historyJobs={history.historyJobs}
+                      historyTotal={history.historyTotal}
+                      historyPage={history.historyPage}
+                      loadingHistory={history.loadingHistory}
+                      expandedJobId={history.expandedJobId}
+                      expandedJobDetails={history.expandedJobDetails}
+                      onRefresh={history.loadHistory}
+                      onPageChange={history.setHistoryPage}
+                      onToggleDetails={history.toggleJobDetails}
+                      onDelete={history.deleteJob}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </div>
+          </TabsContent>
 
-          {/* Right Column - 4 Tab Layout */}
-          <div className="flex w-1/2 flex-col">
-            <Card className="flex-1">
-              <CardContent className="p-0">
-                <Tabs defaultValue="overview" className="h-full">
-                  <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-4 pt-2">
-                    <TabsTrigger
-                      value="workflow"
-                      data-testid="tab-workflow"
-                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
-                    >
-                      工作流程
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="overview"
-                      data-testid="tab-overview"
-                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
-                    >
-                      总览
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="detail"
-                      data-testid="tab-detail"
-                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
-                    >
-                      Bug 详情
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="ai-thinking"
-                      data-testid="tab-ai-thinking"
-                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
-                    >
-                      AI 思考
-                      {aiThinking.stats.streaming && (
-                        <span className="ml-1.5 h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse inline-block" />
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="history"
-                      data-testid="tab-history"
-                      className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none"
-                    >
-                      历史记录
-                    </TabsTrigger>
-                  </TabsList>
+          {/* Execution Tab — always mounted to preserve SSE + scroll */}
+          <TabsContent
+            value="execution"
+            forceMount
+            className="flex-1 overflow-hidden data-[state=inactive]:hidden"
+          >
+            <div className="flex flex-1 h-full flex-col overflow-hidden gap-4">
+              <PipelineBar
+                currentJob={currentJob}
+                activeBugIndex={activeBugIndex}
+                onBugSelect={setActiveBugIndex}
+              />
 
-                  <div className="overflow-y-auto p-4" style={{ maxHeight: "calc(100vh - 220px)" }}>
-                    <TabsContent value="workflow" className="mt-0">
-                      <WorkflowTab />
-                    </TabsContent>
+              <div className="flex flex-1 gap-4 overflow-hidden">
+                {/* Left: Activity Feed (main view) */}
+                <div className="flex-1 overflow-hidden">
+                  <ActivityFeed
+                    currentJob={currentJob}
+                    allAiEvents={aiThinkingEvents}
+                    aiStats={aiThinkingStats}
+                    activeBugIndex={activeBugIndex}
+                    onBugSelect={setActiveBugIndex}
+                  />
+                </div>
 
-                    <TabsContent value="overview" className="mt-0">
-                      <OverviewTab
-                        currentJob={currentJob}
-                        stats={stats}
-                        onCancel={cancel}
-                      />
-                    </TabsContent>
+                {/* Right: Overview / History panel (320px) */}
+                <div className="w-[320px] shrink-0 overflow-hidden">
+                  <Card className="h-full flex flex-col">
+                    <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
+                      <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
+                        <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2 pt-1 shrink-0">
+                          <TabsTrigger
+                            value="overview"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none text-[13px]"
+                          >
+                            总览
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="history"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none text-[13px]"
+                          >
+                            历史记录
+                          </TabsTrigger>
+                        </TabsList>
 
-                    <TabsContent value="detail" className="mt-0">
-                      <BugDetailTab currentJob={currentJob} />
-                    </TabsContent>
+                        <div className="flex-1 overflow-y-auto p-4">
+                          <TabsContent value="overview" className="mt-0">
+                            <OverviewTab
+                              currentJob={currentJob}
+                              stats={stats}
+                              onCancel={cancel}
+                            />
+                            {/* Action buttons */}
+                            <div className="mt-4 flex gap-2">
+                              {!isFinished && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
+                                  onClick={cancel}
+                                >
+                                  取消任务
+                                </Button>
+                              )}
+                              <Button
+                                variant={isFinished ? "default" : "outline"}
+                                size="sm"
+                                className="flex-1"
+                                onClick={handleNewJob}
+                              >
+                                新建任务
+                              </Button>
+                            </div>
+                          </TabsContent>
 
-                    <TabsContent value="ai-thinking" className="mt-0 h-[calc(100vh-280px)]">
-                      <AIThinkingPanel
-                        events={aiThinking.events}
-                        stats={aiThinking.stats}
-                        bugLabel={activeBugLabel}
-                      />
-                    </TabsContent>
+                          <TabsContent value="history" className="mt-0">
+                            <HistoryCard
+                              historyJobs={history.historyJobs}
+                              historyTotal={history.historyTotal}
+                              historyPage={history.historyPage}
+                              loadingHistory={history.loadingHistory}
+                              expandedJobId={history.expandedJobId}
+                              expandedJobDetails={history.expandedJobDetails}
+                              onRefresh={history.loadHistory}
+                              onPageChange={history.setHistoryPage}
+                              onToggleDetails={history.toggleJobDetails}
+                              onDelete={history.deleteJob}
+                            />
+                          </TabsContent>
+                        </div>
+                      </Tabs>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+    </div>
+  );
+}
 
-                    <TabsContent value="history" className="mt-0">
-                      <HistoryCard
-                        historyJobs={history.historyJobs}
-                        historyTotal={history.historyTotal}
-                        historyPage={history.historyPage}
-                        loadingHistory={history.loadingHistory}
-                        expandedJobId={history.expandedJobId}
-                        expandedJobDetails={history.expandedJobDetails}
-                        onRefresh={history.loadHistory}
-                        onPageChange={history.setHistoryPage}
-                        onToggleDetails={history.toggleJobDetails}
-                        onDelete={history.deleteJob}
-                      />
-                    </TabsContent>
-                  </div>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </div>
-    </main>
+/* ================================================================
+   Job Status Badge
+   ================================================================ */
+
+function JobStatusBadge({ status }: { status: string }) {
+  const config: Record<string, { bg: string; dotColor: string; text: string; label: string }> = {
+    running:   { bg: "#dcfce7", dotColor: "#22c55e", text: "#16a34a", label: "修复中" },
+    completed: { bg: "#dcfce7", dotColor: "#22c55e", text: "#16a34a", label: "已完成" },
+    failed:    { bg: "#fef2f2", dotColor: "#ef4444", text: "#dc2626", label: "失败" },
+    cancelled: { bg: "#fef3c7", dotColor: "#f59e0b", text: "#d97706", label: "已取消" },
+  };
+  const c = config[status] ?? config.running;
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5"
+      style={{ backgroundColor: c.bg }}
+    >
+      <span
+        className={`h-2 w-2 rounded-full ${status === "running" ? "animate-pulse" : ""}`}
+        style={{ backgroundColor: c.dotColor }}
+      />
+      <span className="text-xs font-medium" style={{ color: c.text }}>
+        {c.label}
+      </span>
+    </span>
   );
 }

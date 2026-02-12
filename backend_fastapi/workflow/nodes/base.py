@@ -65,10 +65,12 @@ class DataSourceNode(BaseNodeImpl):
             if not user_input:
                 # Fallback to config.data if no runtime input
                 user_input = self.config.get("data", "")
-            logger.info(f"DataSourceNode {self.node_id}: Manual input = {user_input[:100] if user_input else '(empty)'}...")
-            return {"data": user_input}
+            if user_input:
+                logger.info(f"DataSourceNode {self.node_id}: Manual input = {user_input[:100]}...")
+                return {"data": user_input}
+            # No user input — fall through to schema-based generation if available
 
-        # For other source types, generate based on schema (placeholder implementation)
+        # For other source types (or manual with no input), generate based on schema
         output_schema = self.config.get("output_schema", {})
         output_data = {}
 

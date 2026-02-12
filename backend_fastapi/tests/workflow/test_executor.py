@@ -83,7 +83,7 @@ class TestExecutorLoopControl:
         # Mock the graph build and stream
         mock_graph = AsyncMock()
 
-        async def fake_stream(state):
+        async def fake_stream(state, config=None):
             yield {"node-1": {"data": "hello"}}
             yield {"node-2": {"result": "processed"}}
 
@@ -106,7 +106,7 @@ class TestExecutorLoopControl:
         mock_graph = AsyncMock()
 
         # Simulate: start → process → check → process (loop) → check → output
-        async def fake_stream(state):
+        async def fake_stream(state, config=None):
             yield {"start": {"data": "init"}}
             yield {"process": {"result": "step1"}}
             yield {"check": {"condition_result": False}}
@@ -141,7 +141,7 @@ class TestExecutorLoopControl:
         mock_graph = AsyncMock()
 
         # Simulate infinite loop: process/check repeat > max_iterations (3)
-        async def fake_stream(state):
+        async def fake_stream(state, config=None):
             yield {"start": {"data": "init"}}
             for i in range(10):  # More than max_iterations=3
                 yield {"process": {"result": f"step{i+1}"}}
@@ -174,7 +174,7 @@ class TestExecutorLoopControl:
         """Test that workflow_start SSE event includes loop metadata."""
         mock_graph = AsyncMock()
 
-        async def fake_stream(state):
+        async def fake_stream(state, config=None):
             yield {"start": {"data": "init"}}
 
         mock_graph.astream = fake_stream
@@ -202,7 +202,7 @@ class TestExecutorLoopControl:
         """Test that workflow_complete SSE event includes node_execution_counts."""
         mock_graph = AsyncMock()
 
-        async def fake_stream(state):
+        async def fake_stream(state, config=None):
             yield {"node-1": {"data": "hello"}}
             yield {"node-2": {"result": "done"}}
 

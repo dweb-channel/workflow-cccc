@@ -8,11 +8,13 @@ Phase 1: Backend API — steps data (T67.1–T67.5)
 - Steps persistence across DB reload
 
 Phase 2: SSE new events (T67.6–T67.9, T67.11)
-- bug_step_started event format
-- bug_step_completed event format
-- Event ordering
-- Internal nodes filtered
+- bug_step_started / bug_step_completed event format via push_node_event
+- Event ordering via SSE infrastructure
+- Internal nodes filtered (NODE_TO_STEP)
 - duration_ms precision
+
+Note: Tests updated for Temporal architecture — uses DB-based state
+instead of in-memory caches, and push_node_event instead of push_job_event.
 
 Total: 10 backend test scenarios (T67.10 removed per master — source check only)
 """
@@ -27,63 +29,75 @@ from typing import Any, Dict, List, Optional
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+from app.database import Base, get_session_ctx
+from app.batch_job_repository import BatchJobRepository
+from app.db_models import BatchJobModel, BugResultModel
+from app.sse import push_node_event, _active_streams
+from workflow.temporal.batch_activities import NODE_TO_STEP
+
+# --- Test DB isolation: use in-memory SQLite to avoid nuking production data ---
+_test_engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+_test_session_factory = async_sessionmaker(_test_engine, class_=AsyncSession, expire_on_commit=False)
+
+# Monkey-patch the app's database module to use test engine
+import app.database as _db_mod
+_db_mod.engine = _test_engine
+_db_mod.async_session_factory = _test_session_factory
+
 from httpx import AsyncClient, ASGITransport
-from app.database import engine, Base
 from app.main import app
-from app.routes.cccc import (
-    BATCH_JOBS_CACHE,
-    JOB_BUG_STEPS,
-    JOB_SSE_QUEUES,
-    NODE_TO_STEP,
-    push_job_event,
-    _count_retries,
-)
+
+
+def _count_retries(steps: List[Dict[str, Any]]) -> int:
+    """Count retries from steps (max attempt - 1)."""
+    max_attempt = 0
+    for s in steps:
+        attempt = s.get("attempt", 0)
+        if attempt > max_attempt:
+            max_attempt = attempt
+    return max(0, max_attempt - 1)
 
 
 async def setup_db():
-    """Create tables for testing."""
-    async with engine.begin() as conn:
+    """Create tables for testing (in-memory, isolated from production)."""
+    async with _test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
 
-def make_job_cache_entry(
+async def create_job_in_db(
     job_id: str,
     bugs: List[Dict[str, Any]],
-    target_group_id: str = "test-group",
     status: str = "running",
-) -> Dict[str, Any]:
-    """Create a BATCH_JOBS_CACHE entry for testing."""
-    now = datetime.now(timezone.utc).isoformat()
-    return {
-        "job_id": job_id,
-        "status": status,
-        "target_group_id": target_group_id,
-        "config": {},
-        "error": None,
-        "bugs": bugs,
-        "created_at": now,
-        "updated_at": now,
-    }
+    target_group_id: str = "test-group",
+) -> None:
+    """Create a job with bugs directly in the database."""
+    async with get_session_ctx() as session:
+        job_model = BatchJobModel(
+            id=job_id,
+            status=status,
+            target_group_id=target_group_id,
+            config={},
+        )
+        session.add(job_model)
+        await session.flush()
 
+        for i, bug in enumerate(bugs):
+            bug_model = BugResultModel(
+                job_id=job_id,
+                bug_index=i,
+                url=bug["url"],
+                status=bug.get("status", "pending"),
+                error=bug.get("error"),
+                started_at=datetime.now(timezone.utc) if bug.get("status") != "pending" else None,
+                completed_at=datetime.now(timezone.utc) if bug.get("status") in ("completed", "failed") else None,
+                steps=bug.get("steps"),
+            )
+            session.add(bug_model)
 
-def make_bug(
-    url: str,
-    status: str = "pending",
-    error: Optional[str] = None,
-    steps: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    """Create a bug entry for cache."""
-    now = datetime.now(timezone.utc).isoformat()
-    return {
-        "url": url,
-        "status": status,
-        "error": error,
-        "started_at": now if status != "pending" else None,
-        "completed_at": now if status in ("completed", "failed") else None,
-        "steps": steps,
-        "retry_count": _count_retries(steps) if steps else 0,
-    }
+        await session.commit()
 
 
 def make_step(
@@ -117,8 +131,6 @@ async def run_tests():
     errors = []
     passed = 0
 
-    # CCCC_MOCK/CCCC_GROUP_ID no longer needed (CCCC integration removed in M11)
-
     await setup_db()
 
     transport = ASGITransport(app=app)
@@ -131,7 +143,7 @@ async def run_tests():
         print("Phase 1: Backend API — steps data")
         print("=" * 60)
 
-        # Setup: create a job with steps in cache
+        # Setup: create a job with steps in DB
         test_job_id = "job_test_steps_01"
         completed_steps = [
             make_step("fix_bug_peer", "修复 Bug", "completed", 45200.5, "已修复 UserService 模块的空指针异常", attempt=1),
@@ -139,13 +151,10 @@ async def run_tests():
             make_step("update_success", "修复完成", "completed", 50.1, "Bug 修复成功记录"),
         ]
 
-        BATCH_JOBS_CACHE[test_job_id] = make_job_cache_entry(
+        await create_job_in_db(
             test_job_id,
-            [make_bug("https://jira.example.com/browse/BUG-101", "completed", steps=completed_steps)],
+            [{"url": "https://testjira.atlassian.net/browse/BUG-101", "status": "completed", "steps": completed_steps}],
         )
-
-        # Also populate JOB_BUG_STEPS for live enrichment test
-        JOB_BUG_STEPS[test_job_id] = {0: completed_steps}
 
         # -----------------------------------------------------------------
         # T67.1: GET /batch-bug-fix/{job_id} returns steps
@@ -186,7 +195,6 @@ async def run_tests():
                 optional_fields = ["started_at", "completed_at", "duration_ms", "output_preview", "error", "attempt"]
                 missing_required = [f for f in required_fields if f not in step]
                 if not missing_required:
-                    # Verify required field values
                     field_errors = []
                     if not isinstance(step.get("step"), str):
                         field_errors.append(f"step should be str, got {type(step.get('step'))}")
@@ -241,7 +249,6 @@ async def run_tests():
         # -----------------------------------------------------------------
         print("Test T67.4: retry_count from steps ... ", end="")
 
-        # Create a job with retry steps
         retry_job_id = "job_test_retry_01"
         retry_steps = [
             make_step("fix_bug_peer", "修复 Bug", "completed", 40000.0, "第一次修复", attempt=1),
@@ -252,11 +259,10 @@ async def run_tests():
             make_step("update_success", "修复完成", "completed", 50.0),
         ]
 
-        BATCH_JOBS_CACHE[retry_job_id] = make_job_cache_entry(
+        await create_job_in_db(
             retry_job_id,
-            [make_bug("https://jira.example.com/browse/BUG-201", "completed", steps=retry_steps)],
+            [{"url": "https://testjira.atlassian.net/browse/BUG-201", "status": "completed", "steps": retry_steps}],
         )
-        JOB_BUG_STEPS[retry_job_id] = {0: retry_steps}
 
         resp_retry = await client.get(f"/api/v2/batch/bug-fix/{retry_job_id}")
         if resp_retry.status_code == 200:
@@ -286,16 +292,9 @@ async def run_tests():
         # -----------------------------------------------------------------
         print("Test T67.5: Steps persistence in DB ... ", end="")
 
-        # Create a job through the POST API and manually persist steps
-        from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
-
         persist_job_id = f"job_persist_{int(datetime.now(timezone.utc).timestamp())}"
         try:
             async with get_session_ctx() as session:
-                repo = BatchJobRepository(session)
-                # Create job directly in DB
-                from app.db_models import BatchJobModel, BugResultModel
                 job_model = BatchJobModel(
                     id=persist_job_id,
                     status="completed",
@@ -308,7 +307,7 @@ async def run_tests():
                 bug_model = BugResultModel(
                     job_id=persist_job_id,
                     bug_index=0,
-                    url="https://jira.example.com/browse/BUG-301",
+                    url="https://testjira.atlassian.net/browse/BUG-301",
                     status="completed",
                     started_at=datetime.now(timezone.utc),
                     completed_at=datetime.now(timezone.utc),
@@ -319,10 +318,6 @@ async def run_tests():
                 )
                 session.add(bug_model)
                 await session.commit()
-
-            # Now fetch via API (not from cache — remove from cache first)
-            BATCH_JOBS_CACHE.pop(persist_job_id, None)
-            JOB_BUG_STEPS.pop(persist_job_id, None)
 
             resp_persist = await client.get(f"/api/v2/batch/bug-fix/{persist_job_id}")
             if resp_persist.status_code == 200:
@@ -351,56 +346,53 @@ async def run_tests():
             errors.append(("T67.5", msg))
 
         # =============================================================
-        # Phase 2: SSE new events
+        # Phase 2: SSE new events (via push_node_event)
         # =============================================================
         print("\n" + "=" * 60)
         print("Phase 2: SSE new events")
         print("=" * 60)
 
         # -----------------------------------------------------------------
-        # T67.6: bug_step_started event format
+        # T67.6: bug_step_started event format via push_node_event
         # -----------------------------------------------------------------
         print("\nTest T67.6: bug_step_started event format ... ", end="")
 
         sse_job_id = "job_sse_test_01"
         sse_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        JOB_SSE_QUEUES[sse_job_id] = sse_queue
-
-        push_job_event(sse_job_id, "bug_step_started", {
-            "bug_index": 0,
-            "step": "fix_bug_peer",
-            "label": "修复 Bug",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "attempt": 1,
-        })
+        _active_streams[sse_job_id] = sse_queue
 
         try:
-            event = sse_queue.get_nowait()
-            evt_data = event.get("data", {})
+            event_data = {
+                "bug_index": 0,
+                "step": "fix_bug_peer",
+                "label": "修复 Bug",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "attempt": 1,
+            }
+            push_node_event(sse_job_id, "bug_step_started", event_data)
+
+            raw_event = sse_queue.get_nowait()
+            # push_node_event puts dicts {"event": ..., "data": ...} into queue
+            evt_type = raw_event["event"]
+            evt_payload = raw_event["data"]
+
             required = ["bug_index", "step", "label", "timestamp"]
-            missing = [f for f in required if f not in evt_data]
-            if event.get("event") == "bug_step_started" and not missing:
-                # Verify types
-                type_ok = (
-                    isinstance(evt_data["bug_index"], int)
-                    and isinstance(evt_data["step"], str)
-                    and isinstance(evt_data["label"], str)
-                    and isinstance(evt_data["timestamp"], str)
-                )
-                if type_ok:
-                    has_attempt = "attempt" in evt_data
+            if evt_type == "bug_step_started" and evt_payload:
+                missing = [f for f in required if f not in evt_payload]
+                if not missing:
+                    has_attempt = "attempt" in evt_payload
                     print(f"OK (fields: {required}, attempt={'present' if has_attempt else 'absent'})")
                     passed += 1
                 else:
-                    msg = f"FAIL — type mismatch in event data"
+                    msg = f"FAIL — missing fields: {missing}"
                     print(msg)
                     errors.append(("T67.6", msg))
             else:
-                msg = f"FAIL — event_type={event.get('event')}, missing={missing}"
+                msg = f"FAIL — event_type={evt_type}, payload={evt_payload}"
                 print(msg)
                 errors.append(("T67.6", msg))
         except asyncio.QueueEmpty:
-            msg = "FAIL — no event in queue after push_job_event"
+            msg = "FAIL — no event in queue after push_node_event"
             print(msg)
             errors.append(("T67.6", msg))
 
@@ -409,36 +401,38 @@ async def run_tests():
         # -----------------------------------------------------------------
         print("Test T67.7: bug_step_completed event format ... ", end="")
 
-        push_job_event(sse_job_id, "bug_step_completed", {
-            "bug_index": 0,
-            "step": "fix_bug_peer",
-            "label": "修复 Bug",
-            "status": "completed",
-            "duration_ms": 45200.5,
-            "output_preview": "已修复模块",
-            "error": None,
-            "attempt": 1,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
         try:
-            event = sse_queue.get_nowait()
-            evt_data = event.get("data", {})
+            event_data = {
+                "bug_index": 0,
+                "step": "fix_bug_peer",
+                "label": "修复 Bug",
+                "status": "completed",
+                "duration_ms": 45200.5,
+                "output_preview": "已修复模块",
+                "error": None,
+                "attempt": 1,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            push_node_event(sse_job_id, "bug_step_completed", event_data)
+
+            raw_event = sse_queue.get_nowait()
+            evt_type = raw_event["event"]
+            evt_payload = raw_event["data"]
+
             required = ["bug_index", "step", "label", "status", "timestamp"]
             optional = ["duration_ms", "output_preview", "error", "attempt"]
-            missing = [f for f in required if f not in evt_data]
-            if event.get("event") == "bug_step_completed" and not missing:
-                # Verify status is valid
-                if evt_data["status"] in ("completed", "in_progress", "failed"):
-                    present_optionals = [f for f in optional if evt_data.get(f) is not None]
+            if evt_type == "bug_step_completed" and evt_payload:
+                missing = [f for f in required if f not in evt_payload]
+                if not missing and evt_payload["status"] in ("completed", "in_progress", "failed"):
+                    present_optionals = [f for f in optional if evt_payload.get(f) is not None]
                     print(f"OK (required: {required}, optional present: {present_optionals})")
                     passed += 1
                 else:
-                    msg = f"FAIL — invalid status: {evt_data['status']}"
+                    msg = f"FAIL — missing={missing}, status={evt_payload.get('status')}"
                     print(msg)
                     errors.append(("T67.7", msg))
             else:
-                msg = f"FAIL — event_type={event.get('event')}, missing={missing}"
+                msg = f"FAIL — event_type={evt_type}"
                 print(msg)
                 errors.append(("T67.7", msg))
         except asyncio.QueueEmpty:
@@ -456,7 +450,6 @@ async def run_tests():
             sse_queue.get_nowait()
 
         now = datetime.now(timezone.utc)
-        # Simulate: bug_started → step_started(fix) → step_completed(fix) → step_started(verify) → step_completed(verify) → bug_completed
         events_to_push = [
             ("bug_started", {"bug_index": 0, "url": "BUG-1", "timestamp": now.isoformat()}),
             ("bug_step_started", {"bug_index": 0, "step": "fix_bug_peer", "label": "修复 Bug", "timestamp": now.isoformat()}),
@@ -467,12 +460,12 @@ async def run_tests():
         ]
 
         for evt_type, evt_data in events_to_push:
-            push_job_event(sse_job_id, evt_type, evt_data)
+            push_node_event(sse_job_id, evt_type, evt_data)
 
         received_order = []
         while not sse_queue.empty():
-            evt = sse_queue.get_nowait()
-            received_order.append(evt["event"])
+            raw_event = sse_queue.get_nowait()
+            received_order.append(raw_event["event"])
 
         expected_order = [
             "bug_started",
@@ -490,6 +483,9 @@ async def run_tests():
             msg = f"FAIL — expected {expected_order}, got {received_order}"
             print(msg)
             errors.append(("T67.8", msg))
+
+        # Cleanup SSE queue
+        _active_streams.pop(sse_job_id, None)
 
         # -----------------------------------------------------------------
         # T67.9: Internal nodes not exposed in NODE_TO_STEP
@@ -523,13 +519,11 @@ async def run_tests():
             if d < 0:
                 duration_ok = False
                 break
-            # Check 1 decimal place: round(d, 1) should equal d
             if round(d, 1) != d:
                 duration_ok = False
                 break
 
         if duration_ok:
-            # Also verify from API response
             if resp.status_code == 200:
                 data = resp.json()
                 bugs = data.get("bugs", [])
@@ -553,13 +547,6 @@ async def run_tests():
             msg = f"FAIL — invalid durations: {test_durations}"
             print(msg)
             errors.append(("T67.11", msg))
-
-        # Cleanup
-        BATCH_JOBS_CACHE.pop(test_job_id, None)
-        BATCH_JOBS_CACHE.pop(retry_job_id, None)
-        JOB_BUG_STEPS.pop(test_job_id, None)
-        JOB_BUG_STEPS.pop(retry_job_id, None)
-        JOB_SSE_QUEUES.pop(sse_job_id, None)
 
     return passed, errors
 

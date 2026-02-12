@@ -30,8 +30,37 @@ export function OverviewTab({ currentJob, stats, onCancel }: OverviewTabProps) {
         )
       : 0;
 
+  const statusLabel =
+    currentJob.job_status === "completed"
+      ? "已完成"
+      : currentJob.job_status === "failed"
+        ? "失败"
+        : currentJob.job_status === "cancelled"
+          ? "已取消"
+          : "修复中";
+
+  const dotColor =
+    currentJob.job_status === "completed"
+      ? "bg-green-500"
+      : currentJob.job_status === "failed" || currentJob.job_status === "cancelled"
+        ? "bg-red-500"
+        : "bg-blue-500 animate-pulse";
+
   return (
     <div className="space-y-4" data-testid="tab-overview">
+      {/* Current task status */}
+      <div className="rounded-lg bg-green-50 p-3">
+        <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+          <span className="text-sm font-medium text-green-800">
+            {statusLabel}
+          </span>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">
+          {stats.completed}/{total} 完成
+        </p>
+      </div>
+
       {/* Header with progress */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -103,8 +103,14 @@ class BatchJobRepository:
         count_query = select(func.count()).select_from(BatchJobModel)
 
         if status:
-            query = query.where(BatchJobModel.status == status)
-            count_query = count_query.where(BatchJobModel.status == status)
+            # Support comma-separated status values (e.g., "started,running")
+            statuses = [s.strip() for s in status.split(",") if s.strip()]
+            if len(statuses) == 1:
+                query = query.where(BatchJobModel.status == statuses[0])
+                count_query = count_query.where(BatchJobModel.status == statuses[0])
+            else:
+                query = query.where(BatchJobModel.status.in_(statuses))
+                count_query = count_query.where(BatchJobModel.status.in_(statuses))
 
         if target_group_id:
             query = query.where(BatchJobModel.target_group_id == target_group_id)

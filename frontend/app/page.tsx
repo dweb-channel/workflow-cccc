@@ -49,8 +49,6 @@ import { NodeConfigPanel } from "@/components/workflow-editor/NodeConfigPanel";
 import { TemplateSelector, type TemplateDetail } from "@/components/workflow-editor/TemplateSelector";
 import { EdgeConfigPanel } from "@/components/workflow-editor/EdgeConfigPanel";
 import { toWorkflowDefinition, fromWorkflowDefinition, applyLoopStyles } from "@/lib/workflow-converter";
-import { Sidebar } from "@/components/sidebar/Sidebar";
-
 const nodeTypes = { agentNode: AgentNode };
 
 type FlowNode = {
@@ -713,10 +711,9 @@ function WorkflowPage() {
     : null;
 
   return (
-    <main className="flex h-screen overflow-hidden">
-      {/* Sidebar with Navigation */}
-      <Sidebar>
-        {/* Workflow List */}
+    <div className="flex h-full overflow-hidden">
+      {/* Workflow List Panel */}
+      <div className="w-[200px] shrink-0 border-r border-slate-200 bg-white overflow-y-auto p-4">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-medium text-slate-500">工作流列表</h2>
@@ -794,7 +791,7 @@ function WorkflowPage() {
             disabled={!workflow || running}
           />
         </div>
-      </Sidebar>
+      </div>
 
       {/* Main Content */}
       <div className="flex flex-1 flex-col gap-4 overflow-hidden px-6 py-6">
@@ -1006,7 +1003,7 @@ function WorkflowPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </main>
+    </div>
   );
 }
 

@@ -9,12 +9,27 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from ..agents.claude import run_claude_agent, stream_claude_events, ClaudeEvent
 from .registry import BaseNodeImpl, register_node_type
 
 logger = logging.getLogger(__name__)
+
+
+# --- Configurable Event Push ---
+# Temporal worker sets this via set_job_event_pusher() to an HTTP-based pusher.
+_job_event_push_fn: Optional[Callable] = None
+
+
+def set_job_event_pusher(fn: Callable[[str, str, Dict[str, Any]], None]) -> None:
+    """Configure the function used to push batch job SSE events.
+
+    Args:
+        fn: Callable(job_id, event_type, data) — pushes one event.
+    """
+    global _job_event_push_fn
+    _job_event_push_fn = fn
 
 
 def _humanize_tool_event(event_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -117,17 +132,32 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
     Uses job_id from inputs to route events to the correct SSE queue.
     Filters noisy exploration events (read/glob/grep) to keep output clean.
     Only pushes key events: thinking, edit/write, bash, and final results.
-    Returns None if no job_id is available (non-batch context).
+    Returns None if no job_id is available or no push function is configured.
     """
     job_id = inputs.get("job_id")
     bug_index = inputs.get("current_index", 0)
     if not job_id:
         return None
 
-    # Exploration tools that produce noise — suppress individual events
-    _EXPLORATION_TOOLS = frozenset({
-        "read", "view", "glob", "grep", "search", "list",
-        "task", "webfetch", "web_fetch",
+    # Use configured pusher (set by batch_activities via set_job_event_pusher)
+    push_fn = _job_event_push_fn
+    if push_fn is None:
+        return None
+
+    # Node ID -> Chinese label for frontend display
+    _NODE_LABEL_MAP: Dict[str, str] = {
+        "get_current_bug": "获取 Bug 信息",
+        "fix_bug_peer": "修复 Bug",
+        "verify_fix": "验证修复结果",
+        "increment_retry": "准备重试",
+        "update_success": "修复完成",
+        "update_failure": "修复失败",
+    }
+    node_label = _NODE_LABEL_MAP.get(node_id, node_id)
+
+    # Whitelist: only these tools are shown in the AI thinking panel
+    _IMPORTANT_TOOLS = frozenset({
+        "edit", "write", "bash", "execute", "shell",
     })
 
     # Counter for suppressed exploration events (used for periodic summary)
@@ -135,39 +165,40 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
 
     def on_event(event: ClaudeEvent):
         try:
-            from app.routes.batch import push_job_event
             import time
 
             event_dict = event.to_dict()
             event_dict["node_id"] = node_id
+            event_dict["node_label"] = node_label
             event_dict["bug_index"] = bug_index
 
             if event.type == ClaudeEvent.TOOL_USE:
                 tool_name = (event.tool_name or "").lower()
 
-                if tool_name in _EXPLORATION_TOOLS:
-                    # Suppress noisy exploration events, emit periodic summary
+                # Whitelist: only show code-change tools (edit/write/bash)
+                if tool_name in _IMPORTANT_TOOLS:
+                    transformed = _humanize_tool_event(event_dict)
+                    transformed["timestamp"] = event_dict["timestamp"]
+                    transformed["node_id"] = node_id
+                    transformed["node_label"] = node_label
+                    transformed["bug_index"] = bug_index
+                    push_fn(job_id, "ai_thinking", transformed)
+                else:
+                    # All other tools (read, grep, MCP, TodoWrite, etc.) — suppress
                     state["explore_count"] += 1
                     now = time.monotonic()
-                    # Emit a summary every 15 exploration events or every 20 seconds
-                    if (state["explore_count"] % 15 == 1
-                            or now - state["last_explore_summary_at"] > 20):
+                    if (state["explore_count"] % 20 == 1
+                            or now - state["last_explore_summary_at"] > 30):
                         state["last_explore_summary_at"] = now
-                        push_job_event(job_id, "ai_thinking", {
+                        push_fn(job_id, "ai_thinking", {
                             "type": "thinking",
                             "content": f"正在分析代码... (已探索 {state['explore_count']} 个文件/位置)",
                             "timestamp": event_dict["timestamp"],
                             "node_id": node_id,
+                            "node_label": node_label,
                             "bug_index": bug_index,
                         })
-                    return
-
-                # Important tool events (edit, write, bash) — always push
-                transformed = _humanize_tool_event(event_dict)
-                transformed["timestamp"] = event_dict["timestamp"]
-                transformed["node_id"] = node_id
-                transformed["bug_index"] = bug_index
-                push_job_event(job_id, "ai_thinking", transformed)
+                return
 
             elif event.type == ClaudeEvent.TEXT:
                 # Skip all intermediate text output (usually English Claude output)
@@ -187,7 +218,7 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
                 # Include exploration summary in result
                 if state["explore_count"] > 0:
                     event_dict["explore_count"] = state["explore_count"]
-                push_job_event(job_id, "ai_thinking", event_dict)
+                push_fn(job_id, "ai_thinking", event_dict)
 
             else:
                 # THINKING events — skip to reduce noise
@@ -196,7 +227,7 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
 
             # Push stats on result events
             if event.type == ClaudeEvent.RESULT and event.usage:
-                push_job_event(job_id, "ai_thinking_stats", {
+                push_fn(job_id, "ai_thinking_stats", {
                     "tokens_in": event.usage.get("input_tokens", 0),
                     "tokens_out": event.usage.get("output_tokens", 0),
                     "cost": event.cost_usd or 0,
@@ -385,6 +416,18 @@ class LLMAgentNode(BaseNodeImpl):
                 full_prompt, cwd=cwd, timeout=timeout, on_event=on_event,
             )
             success = not result.startswith("[Error]")
+            # Detect structured failure indicators in the summary sections
+            # (e.g., agent couldn't access Jira URL or produced no modifications).
+            # Only check within ## 根因分析 and ## 修改摘要 sections to avoid
+            # false positives from legitimate content like "修改了不可达的代码路径".
+            if success:
+                _FAILURE_INDICATORS = ("无修改", "无法获取", "不可达", "无法访问")
+                summary_text = _extract_fix_summary(result, max_len=1000)
+                if summary_text and any(ind in summary_text for ind in _FAILURE_INDICATORS):
+                    success = False
+                    logger.warning(
+                        f"LLMAgentNode {self.node_id}: Summary contains failure indicator: {summary_text[:200]}"
+                    )
             if not success:
                 logger.error(f"LLMAgentNode {self.node_id}: Claude CLI error: {result[:200]}")
 

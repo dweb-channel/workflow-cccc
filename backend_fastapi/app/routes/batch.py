@@ -1,83 +1,46 @@
 """Batch Bug Fix and Jira Integration API endpoints.
 
 Provides endpoints for dispatching batch bug fix tasks and querying Jira.
+Workflow execution is delegated to Temporal Worker (separate process).
+SSE events arrive via the shared /api/internal/events/{run_id} endpoint.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
-
-from workflow.engine.graph_builder import (
-    EdgeDefinition,
-    NodeConfig,
-    WorkflowDefinition,
-)
-
-# Import template utilities
-from app.templates import load_template, template_to_workflow_definition
+from pydantic import BaseModel, Field, field_validator
 
 # Database imports
 from app.database import get_session_ctx
 from app.batch_job_repository import BatchJobRepository
 from app.db_models import BatchJobModel, BugResultModel
 
+# SSE infrastructure (shared with generic workflow execution)
+from app.sse import sse_event_generator, push_node_event
+
+# Temporal client (lazy import to avoid startup dependency)
+from app.temporal_adapter import get_client
+from workflow.config import TASK_QUEUE
+
 logger = logging.getLogger("workflow.routes.batch")
 
 router = APIRouter(prefix="/api/v2/batch", tags=["batch"])
 
-# In-memory cache for active jobs (used during workflow execution for SSE sync)
-# Jobs are persisted to DB, this is just for real-time tracking
-BATCH_JOBS_CACHE: Dict[str, Dict[str, Any]] = {}
-
-# Active workflow tasks (for cancellation if needed)
-WORKFLOW_TASKS: Dict[str, asyncio.Task] = {}
-
-# SSE streams for real-time progress updates
-JOB_SSE_QUEUES: Dict[str, asyncio.Queue] = {}
-
-# --- Concurrency locks for global state ---
-_cache_lock = asyncio.Lock()
-_tasks_lock = asyncio.Lock()
-_sse_lock = asyncio.Lock()
-_steps_lock = asyncio.Lock()
-
-# Maximum execution time for a batch workflow (seconds)
-WORKFLOW_TIMEOUT = int(os.environ.get("WORKFLOW_TIMEOUT", "3600"))  # 1 hour default
-
-# Node ID → user-facing step mapping (None = internal node, not exposed to UI)
-NODE_TO_STEP: Dict[str, Optional[tuple]] = {
-    "get_current_bug": ("fetching", "获取 Bug 信息"),
-    "fix_bug_peer": ("fixing", "修复 Bug"),
-    "verify_fix": ("verifying", "验证修复结果"),
-    "check_verify_result": None,  # internal
-    "check_retry": None,  # internal
-    "increment_retry": ("retrying", "准备重试"),
-    "update_success": ("completed", "修复完成"),
-    "update_failure": ("failed", "修复失败"),
-    "check_more_bugs": None,  # internal
-    "input_node": None,  # internal
-    "output_node": None,  # internal
-}
-
-# Track per-bug execution steps during workflow execution
-# Key: job_id, Value: Dict[bug_index, List[step_dict]]
-JOB_BUG_STEPS: Dict[str, Dict[int, List[Dict[str, Any]]]] = {}
+# No in-memory workflow handles — use Temporal client to get handles by ID.
+# This survives FastAPI restarts (workflow ID = "batch-{job_id}").
 
 
 # --- Schemas ---
-
-
-# --- Batch Bug Fix Schemas ---
 
 
 class BatchBugFixConfig(BaseModel):
@@ -95,6 +58,43 @@ class BatchBugFixRequest(BaseModel):
         description="Working directory for Claude CLI (defaults to current directory)",
     )
     config: Optional[BatchBugFixConfig] = None
+
+    @field_validator("jira_urls")
+    @classmethod
+    def validate_jira_urls(cls, urls: List[str]) -> List[str]:
+        """Validate that each URL is a reachable Jira-like URL.
+
+        Rejects:
+        - Non-HTTP(S) URLs
+        - Reserved/example domains (example.com, localhost, etc.)
+        - Malformed URLs without proper host
+        """
+        _BLOCKED_HOSTS = {"example.com", "example.org", "example.net", "localhost", "127.0.0.1"}
+
+        invalid = []
+        for url in urls:
+            url = url.strip()
+            if not url:
+                invalid.append(("(empty)", "URL cannot be empty"))
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                invalid.append((url, f"must use http or https (got '{parsed.scheme}')"))
+                continue
+            host = (parsed.hostname or "").lower()
+            if not host:
+                invalid.append((url, "missing hostname"))
+                continue
+            # Check blocked domains (exact match or subdomain)
+            base_host = ".".join(host.rsplit(".", 2)[-2:]) if "." in host else host
+            if base_host in _BLOCKED_HOSTS or host in _BLOCKED_HOSTS:
+                invalid.append((url, f"'{host}' is a reserved/example domain, not a real Jira instance"))
+                continue
+
+        if invalid:
+            details = "; ".join(f"{u}: {reason}" for u, reason in invalid)
+            raise ValueError(f"Invalid Jira URL(s): {details}")
+        return urls
 
 
 class BugStepInfo(BaseModel):
@@ -163,635 +163,6 @@ class BatchJobListResponse(BaseModel):
     page_size: int
 
 
-# --- Workflow Execution ---
-
-
-async def execute_batch_bug_fix_workflow(
-    job_id: str,
-    jira_urls: List[str],
-    cwd: str,
-    config: Dict[str, Any],
-) -> None:
-    """Execute the batch bug fix workflow asynchronously.
-
-    This function:
-    1. Loads the bug_fix_batch template
-    2. Executes the workflow with initial state
-    3. Syncs progress back to BATCH_JOBS_CACHE during execution (real-time via SSE hook)
-    4. Final sync when workflow completes
-
-    Args:
-        job_id: Unique job identifier
-        jira_urls: List of Jira bug URLs to fix
-        cwd: Working directory for Claude CLI
-        config: Job configuration (validation_level, failure_policy, max_retries)
-    """
-    logger.info(f"Starting workflow execution for job {job_id}")
-
-    async with _cache_lock:
-        if job_id not in BATCH_JOBS_CACHE:
-            logger.error(f"Job {job_id} not found in BATCH_JOBS_CACHE")
-            return
-        job = BATCH_JOBS_CACHE[job_id]
-        job["status"] = "running"
-        now = datetime.now(timezone.utc).isoformat()
-        job["updated_at"] = now
-
-        # Mark first bug as in_progress and push SSE event
-        if job["bugs"]:
-            first_bug = job["bugs"][0]
-            first_bug["status"] = "in_progress"
-            first_bug["started_at"] = now
-
-    if job.get("bugs"):
-        push_job_event(job_id, "bug_started", {
-            "bug_index": 0,
-            "url": job["bugs"][0].get("url", ""),
-            "timestamp": now,
-        })
-
-    # Track last synced results count for incremental sync
-    last_results_count = 0
-
-    try:
-        # Load workflow template
-        template = load_template("bug_fix_batch")
-        wf_dict = template_to_workflow_definition(template)
-
-        # Create WorkflowDefinition
-        nodes = [NodeConfig(**n) for n in wf_dict["nodes"]]
-        edges = [EdgeDefinition(**e) for e in wf_dict["edges"]]
-
-        workflow_def = WorkflowDefinition(
-            name=wf_dict["name"],
-            nodes=nodes,
-            edges=edges,
-            entry_point=wf_dict.get("entry_point"),
-            max_iterations=wf_dict.get("max_iterations", 100),
-        )
-
-        # Prepare initial state
-        initial_state = {
-            "bugs": jira_urls,
-            "bugs_count": len(jira_urls),
-            "job_id": job_id,
-            "cwd": cwd,
-            "current_index": 0,
-            "retry_count": 0,
-            "results": [],
-            "context": {},
-            "config": config,
-        }
-
-        logger.info(
-            f"Job {job_id}: Executing workflow with {len(jira_urls)} bugs, "
-            f"max_iterations={workflow_def.max_iterations}"
-        )
-
-        # Execute workflow with real-time state sync
-        final_state = await _execute_with_realtime_sync(
-            workflow_def=workflow_def,
-            initial_state=initial_state,
-            job_id=job_id,
-        )
-
-        # Final sync to ensure all results are captured
-        await _sync_workflow_results_to_job(job_id, final_state)
-
-        logger.info(f"Job {job_id}: Workflow execution completed")
-
-    except asyncio.CancelledError:
-        # Let the timeout wrapper (_run_workflow_with_timeout) handle this
-        logger.info(f"Job {job_id}: Workflow cancelled")
-        async with _cache_lock:
-            job["status"] = "cancelled"
-            job["updated_at"] = datetime.now(timezone.utc).isoformat()
-        raise  # Re-raise so wrapper can distinguish timeout vs user cancel
-
-    except Exception as e:
-        logger.error(f"Job {job_id}: Workflow execution failed: {e}")
-        async with _cache_lock:
-            job["status"] = "failed"
-            job["error"] = str(e)
-            job["updated_at"] = datetime.now(timezone.utc).isoformat()
-        push_job_event(job_id, "job_done", {
-            "status": "failed",
-            "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
-
-async def _execute_with_realtime_sync(
-    workflow_def: WorkflowDefinition,
-    initial_state: Dict[str, Any],
-    job_id: str,
-) -> Dict[str, Any]:
-    """Execute workflow with real-time state synchronization.
-
-    This wraps execute_dynamic_workflow and adds hooks to sync
-    state to BATCH_JOBS_CACHE after each update_state node completes.
-    Also pushes step-level SSE events for each user-visible node.
-
-    Args:
-        workflow_def: The workflow definition
-        initial_state: Initial workflow state
-        job_id: Job ID for state sync
-
-    Returns:
-        Final workflow state
-    """
-    from workflow.engine.graph_builder import build_graph_from_config, detect_loops
-    from workflow.sse import push_sse_event
-
-    logger.info(f"Job {job_id}: Starting workflow with real-time sync")
-
-    state = {**initial_state, "run_id": job_id}
-    last_synced_index = -1
-
-    # Initialize step tracking for this job (lock not needed: single writer at init)
-    JOB_BUG_STEPS[job_id] = {}
-
-    # Track node start times for duration calculation
-    node_start_times: Dict[str, datetime] = {}
-
-    # Build and compile the graph
-    compiled_graph = build_graph_from_config(workflow_def)
-
-    # Detect loops for iteration control
-    loops = detect_loops(workflow_def)
-    has_loops = len(loops) > 0
-
-    # Calculate recursion limit
-    recursion_limit = workflow_def.max_iterations * len(workflow_def.nodes) + len(workflow_def.nodes)
-    config = {"recursion_limit": recursion_limit} if has_loops else {}
-
-    # Execute with streaming to capture each node completion
-    async for event in compiled_graph.astream(state, config=config):
-        for node_id, node_output in event.items():
-            # With our state preservation fix, node_output contains the full state
-            # Update our tracking state with the latest values
-            if isinstance(node_output, dict):
-                # Merge all fields from node output into tracking state
-                for key, value in node_output.items():
-                    state[key] = value
-
-            # --- Step-level SSE events ---
-            bug_index = state.get("current_index", 0)
-            # After update_success/update_failure, current_index has been incremented,
-            # so the bug that just completed is at index - 1
-            if node_id in ["update_success", "update_failure", "check_more_bugs"]:
-                bug_index = max(0, bug_index - 1)
-
-            step_info = NODE_TO_STEP.get(node_id)
-            now = datetime.now(timezone.utc)
-            now_iso = now.isoformat()
-
-            if step_info is not None:
-                step_name, step_label = step_info
-                attempt = state.get("retry_count", 0) + 1 if step_name in ("fixing", "verifying", "retrying") else None
-
-                # Calculate duration if we have a start time
-                duration_ms = None
-                start_key = f"{bug_index}:{node_id}"
-                if start_key in node_start_times:
-                    duration_ms = (now - node_start_times[start_key]).total_seconds() * 1000
-
-                # Extract output preview from the node-specific result
-                # node_output is the full workflow state; actual node result is at node_output[node_id]
-                actual_result = node_output.get(node_id, {}) if isinstance(node_output, dict) else {}
-                if not isinstance(actual_result, dict):
-                    actual_result = {}
-
-                output_preview = None
-                # LLMAgentNode returns {result, success}
-                if "result" in actual_result:
-                    resp = actual_result["result"]
-                    if isinstance(resp, str) and len(resp) > 0:
-                        output_preview = resp[:500] + ("..." if len(resp) > 500 else "")
-                # VerifyNode returns {verified, message, details}
-                elif "message" in actual_result:
-                    msg = actual_result["message"]
-                    if isinstance(msg, str) and len(msg) > 0:
-                        output_preview = msg[:500] + ("..." if len(msg) > 500 else "")
-
-                # Determine step status
-                step_status = "completed"
-                step_error = None
-                if step_name == "failed":
-                    step_status = "failed"
-                elif isinstance(actual_result, dict):
-                    if actual_result.get("success") is False:
-                        step_status = "failed"
-                        step_error = output_preview
-                    elif actual_result.get("verified") is False:
-                        step_status = "failed"
-                        step_error = output_preview
-
-                # Build step record
-                step_record = {
-                    "step": node_id,
-                    "label": step_label,
-                    "status": step_status,
-                    "started_at": node_start_times.get(start_key, now).isoformat(),
-                    "completed_at": now_iso,
-                    "duration_ms": round(duration_ms, 1) if duration_ms else None,
-                    "output_preview": output_preview,
-                    "error": step_error,
-                }
-                if attempt is not None:
-                    step_record["attempt"] = attempt
-
-                # Store step in tracking dict (safe append)
-                job_steps = JOB_BUG_STEPS.setdefault(job_id, {})
-                job_steps.setdefault(bug_index, []).append(step_record)
-
-                # Push bug_step_completed SSE event
-                push_job_event(job_id, "bug_step_completed", {
-                    "bug_index": bug_index,
-                    "step": node_id,
-                    "label": step_label,
-                    "status": step_status,
-                    "duration_ms": round(duration_ms, 1) if duration_ms else None,
-                    "output_preview": output_preview,
-                    "error": step_error,
-                    "attempt": attempt,
-                    "timestamp": now_iso,
-                })
-
-            # --- Push bug_step_started for the NEXT user-visible node ---
-            # LangGraph astream yields node completion in order, so after node A completes,
-            # the next node in the graph will start. We can infer the next step from the
-            # workflow edges, but a simpler approach: push started event when we first see
-            # a user-visible node (record its start time).
-            # We record the start time for each node when we DON'T yet have one.
-            # The next iteration's step_info check will calculate duration from this.
-            _record_next_step_start(job_id, node_id, bug_index, state, node_start_times)
-
-            # Check if this is an update_state node (results may have changed)
-            if "results" in node_output or node_id in ["update_success", "update_failure"]:
-                # Get current results from state (now at top level)
-                current_results = state.get("results", [])
-                if not isinstance(current_results, list):
-                    # Try to get from nested node output
-                    nested = node_output.get(node_id, {})
-                    if isinstance(nested, dict):
-                        current_results = nested.get("results", [])
-
-                # Sync incrementally if new results
-                if isinstance(current_results, list) and len(current_results) > last_synced_index + 1:
-                    await _sync_incremental_results(job_id, current_results, last_synced_index + 1)
-                    last_synced_index = len(current_results) - 1
-                    logger.info(
-                        f"Job {job_id}: Synced result {last_synced_index + 1}/{state.get('bugs_count', '?')}"
-                    )
-
-                    # Persist steps to database for completed bugs
-                    await _persist_bug_steps(job_id, last_synced_index)
-
-    # Clean up step tracking
-    JOB_BUG_STEPS.pop(job_id, None)
-
-    state["success"] = True
-    return state
-
-
-def _record_next_step_start(
-    job_id: str,
-    completed_node_id: str,
-    bug_index: int,
-    state: Dict[str, Any],
-    node_start_times: Dict[str, datetime],
-) -> None:
-    """After a node completes, predict and record the start of the next user-visible node.
-
-    Uses workflow edge knowledge to determine the likely next node and push
-    a bug_step_started SSE event.
-    """
-    # Map from completed node to likely next user-visible node
-    next_node_map: Dict[str, Optional[str]] = {
-        "get_current_bug": "fix_bug_peer",
-        "fix_bug_peer": "verify_fix",
-        "verify_fix": None,  # depends on condition result
-        "increment_retry": "fix_bug_peer",
-        "input_node": "get_current_bug",
-    }
-
-    next_node = next_node_map.get(completed_node_id)
-    if next_node is None:
-        return
-
-    next_step_info = NODE_TO_STEP.get(next_node)
-    if next_step_info is None:
-        return
-
-    now = datetime.now(timezone.utc)
-    start_key = f"{bug_index}:{next_node}"
-    node_start_times[start_key] = now
-
-    step_name, step_label = next_step_info
-    attempt = state.get("retry_count", 0) + 1 if step_name in ("fixing", "verifying") else None
-
-    event_data: Dict[str, Any] = {
-        "bug_index": bug_index,
-        "step": next_node,
-        "label": step_label,
-        "timestamp": now.isoformat(),
-    }
-    if attempt is not None:
-        event_data["attempt"] = attempt
-
-    push_job_event(job_id, "bug_step_started", event_data)
-
-
-async def _persist_bug_steps(job_id: str, bug_index: int) -> None:
-    """Persist accumulated steps for a completed bug to the database."""
-    steps = JOB_BUG_STEPS.get(job_id, {}).get(bug_index)
-    if not steps:
-        return
-
-    try:
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            await repo.update_bug_steps(
-                job_id=job_id,
-                bug_index=bug_index,
-                steps=steps,
-            )
-        logger.info(f"Job {job_id}: Persisted {len(steps)} steps for bug {bug_index}")
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to persist steps for bug {bug_index}: {e}")
-        push_job_event(job_id, "db_warning", {
-            "message": f"Failed to persist steps for bug {bug_index}: {e}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
-
-async def _sync_incremental_results(
-    job_id: str,
-    results: List[Dict[str, Any]],
-    start_index: int,
-) -> None:
-    """Sync new results incrementally to cache, database, and push SSE events.
-
-    Only syncs results from start_index onwards.
-
-    Args:
-        job_id: Job identifier
-        results: Full results array
-        start_index: Index to start syncing from
-    """
-    if job_id not in BATCH_JOBS_CACHE:
-        return
-
-    job = BATCH_JOBS_CACHE[job_id]
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-
-    # Track updates for DB sync
-    db_updates: List[Dict[str, Any]] = []
-
-    for i in range(start_index, len(results)):
-        if i >= len(job["bugs"]):
-            break
-
-        result = results[i]
-        bug = job["bugs"][i]
-
-        result_status = result.get("status", "failed")
-        error_msg = None
-
-        if result_status == "completed":
-            bug["status"] = "completed"
-            # Push SSE event: bug_completed
-            push_job_event(job_id, "bug_completed", {
-                "bug_index": i,
-                "url": bug.get("url", ""),
-                "timestamp": now_iso,
-            })
-        elif result_status == "failed":
-            bug["status"] = "failed"
-            error_msg = result.get("error", result.get("response", "Unknown error"))
-            bug["error"] = error_msg
-            # Push SSE event: bug_failed
-            push_job_event(job_id, "bug_failed", {
-                "bug_index": i,
-                "url": bug.get("url", ""),
-                "error": bug["error"],
-                "timestamp": now_iso,
-            })
-        elif result_status == "skipped":
-            bug["status"] = "skipped"
-            error_msg = result.get("error", "Skipped")
-            bug["error"] = error_msg
-            # Push SSE event: bug_failed (skipped is a type of failure)
-            push_job_event(job_id, "bug_failed", {
-                "bug_index": i,
-                "url": bug.get("url", ""),
-                "error": bug["error"],
-                "skipped": True,
-                "timestamp": now_iso,
-            })
-
-        bug["completed_at"] = now_iso
-        db_updates.append({
-            "bug_index": i,
-            "status": bug["status"],
-            "error": error_msg,
-            "completed_at": now,
-        })
-
-    # Update job status in cache
-    job["updated_at"] = now_iso
-
-    # Mark in-progress bug if there's a next one
-    next_bug_index = None
-    bugs = job["bugs"]
-    for i, bug in enumerate(bugs):
-        if bug["status"] == "pending" and not bug.get("started_at"):
-            bug["status"] = "in_progress"
-            bug["started_at"] = now_iso
-            next_bug_index = i
-            # Push SSE event: bug_started
-            push_job_event(job_id, "bug_started", {
-                "bug_index": i,
-                "url": bug.get("url", ""),
-                "timestamp": now_iso,
-            })
-            break
-
-    # Sync to database (errors pushed to SSE instead of silently swallowed)
-    try:
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            for upd in db_updates:
-                await repo.update_bug_status(
-                    job_id=job_id,
-                    bug_index=upd["bug_index"],
-                    status=upd["status"],
-                    error=upd.get("error"),
-                    completed_at=upd.get("completed_at"),
-                )
-            if next_bug_index is not None:
-                await repo.update_bug_status(
-                    job_id=job_id,
-                    bug_index=next_bug_index,
-                    status="in_progress",
-                    started_at=now,
-                )
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to sync to database: {e}")
-        push_job_event(job_id, "db_warning", {
-            "message": f"Database sync failed: {e}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
-
-async def _sync_workflow_results_to_job(job_id: str, final_state: Dict[str, Any]) -> None:
-    """Sync workflow execution results back to cache and database.
-
-    Updates the job's bug statuses based on workflow results array.
-
-    Args:
-        job_id: Job identifier
-        final_state: Final workflow state containing results array
-    """
-    if job_id not in BATCH_JOBS_CACHE:
-        logger.warning(f"Job {job_id} not found for result sync")
-        return
-
-    job = BATCH_JOBS_CACHE[job_id]
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-
-    # Get results from workflow state
-    results = final_state.get("results", [])
-    workflow_success = final_state.get("success", False)
-
-    # Update each bug status based on results
-    for i, result in enumerate(results):
-        if i < len(job["bugs"]):
-            bug = job["bugs"][i]
-            result_status = result.get("status", "failed")
-
-            # Map workflow status to job status
-            if result_status == "completed":
-                bug["status"] = "completed"
-            elif result_status == "failed":
-                bug["status"] = "failed"
-                bug["error"] = result.get("error", result.get("response", "Unknown error"))
-            elif result_status == "skipped":
-                bug["status"] = "skipped"
-                bug["error"] = result.get("error", "Skipped due to failure policy")
-
-            bug["completed_at"] = now_iso
-
-    # Calculate overall job status
-    bugs = job["bugs"]
-    completed = sum(1 for b in bugs if b["status"] == "completed")
-    failed = sum(1 for b in bugs if b["status"] == "failed")
-    skipped = sum(1 for b in bugs if b["status"] == "skipped")
-    pending = sum(1 for b in bugs if b["status"] == "pending")
-
-    if pending == 0:
-        # All bugs processed
-        job["status"] = "completed" if failed == 0 else "failed"
-    elif workflow_success:
-        job["status"] = "completed"
-    else:
-        job["status"] = "failed"
-
-    job["updated_at"] = now_iso
-    logger.info(
-        f"Job {job_id}: Synced results - "
-        f"completed={completed}, failed={failed}, skipped={skipped}, pending={pending}"
-    )
-
-    # Sync final status to database
-    try:
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            await repo.update_status(job_id, job["status"])
-            # Update any remaining bug statuses
-            for i, bug in enumerate(bugs):
-                await repo.update_bug_status(
-                    job_id=job_id,
-                    bug_index=i,
-                    status=bug["status"],
-                    error=bug.get("error"),
-                    completed_at=now if bug.get("completed_at") else None,
-                )
-        logger.info(f"Job {job_id}: Final results synced to database")
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to sync final results to database: {e}")
-        push_job_event(job_id, "db_warning", {
-            "message": f"Final DB sync failed: {e}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-
-    # Push SSE event: job_done
-    push_job_event(job_id, "job_done", {
-        "status": job["status"],
-        "completed": completed,
-        "failed": failed,
-        "skipped": skipped,
-        "total": len(bugs),
-        "timestamp": now,
-    })
-
-
-# --- Workflow Timeout Wrapper ---
-
-
-async def _run_workflow_with_timeout(
-    job_id: str,
-    jira_urls: List[str],
-    cwd: str,
-    config: Dict[str, Any],
-) -> None:
-    """Run execute_batch_bug_fix_workflow with a global timeout.
-
-    The inner function handles its own exceptions (including CancelledError),
-    so we use a deadline-based approach instead of asyncio.wait_for.
-    """
-    deadline = asyncio.get_event_loop().time() + WORKFLOW_TIMEOUT
-    task = asyncio.current_task()
-
-    # Schedule a callback to cancel this task at the deadline
-    loop = asyncio.get_event_loop()
-    timeout_handle = loop.call_at(deadline, task.cancel)
-
-    try:
-        await execute_batch_bug_fix_workflow(
-            job_id=job_id,
-            jira_urls=jira_urls,
-            cwd=cwd,
-            config=config,
-        )
-    except asyncio.CancelledError:
-        # Check if this is a timeout or user-initiated cancel
-        if loop.time() >= deadline - 1:  # Within 1s of deadline = timeout
-            error_msg = f"Workflow timed out after {WORKFLOW_TIMEOUT}s"
-            logger.error(f"Job {job_id}: {error_msg}")
-            async with _cache_lock:
-                if job_id in BATCH_JOBS_CACHE:
-                    job = BATCH_JOBS_CACHE[job_id]
-                    job["status"] = "failed"
-                    job["error"] = error_msg
-                    job["updated_at"] = datetime.now(timezone.utc).isoformat()
-            push_job_event(job_id, "job_done", {
-                "status": "failed",
-                "error": error_msg,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-        else:
-            # User-initiated cancel — re-raise to let outer cancel handling work
-            raise
-    finally:
-        timeout_handle.cancel()  # Clean up the scheduled callback
-        async with _tasks_lock:
-            WORKFLOW_TASKS.pop(job_id, None)
-
-
 # --- Batch Bug Fix Endpoints ---
 
 
@@ -799,7 +170,7 @@ async def _run_workflow_with_timeout(
 async def create_batch_bug_fix(payload: BatchBugFixRequest):
     """Start a batch bug fix job.
 
-    Dispatches bug fix tasks using Claude CLI direct invocation.
+    Dispatches bug fix tasks to Temporal Worker via BatchBugFixWorkflow.
     Returns a job_id for tracking progress.
     """
     # Generate job ID
@@ -810,10 +181,10 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
     # Create job record
     config = payload.config or BatchBugFixConfig()
 
-    # Save to database (target_group_id kept nullable for backward compat)
+    # Save to database
     async with get_session_ctx() as session:
         repo = BatchJobRepository(session)
-        db_job = await repo.create(
+        await repo.create(
             job_id=job_id,
             target_group_id="",
             jira_urls=payload.jira_urls,
@@ -823,42 +194,35 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
         )
         logger.info(f"Job {job_id}: Saved to database")
 
-    # Also populate in-memory cache for real-time tracking during workflow execution
-    job = {
-        "job_id": job_id,
-        "status": "started",
-        "config": config.model_dump(),
-        "bugs": [
-            {
-                "url": url,
-                "status": "pending",
-                "error": None,
-                "started_at": None,
-                "completed_at": None,
-                "steps": None,
-                "retry_count": 0,
-            }
-            for url in payload.jira_urls
-        ],
-        "created_at": now,
-        "updated_at": now,
-    }
-    async with _cache_lock:
-        BATCH_JOBS_CACHE[job_id] = job
-
-    # Start workflow execution asynchronously with timeout protection
-    workflow_task = asyncio.create_task(
-        _run_workflow_with_timeout(
-            job_id=job_id,
-            jira_urls=payload.jira_urls,
-            cwd=cwd,
-            config=config.model_dump(),
+    # Start Temporal workflow (runs in separate Worker process)
+    try:
+        client = await get_client()
+        workflow_params = {
+            "job_id": job_id,
+            "jira_urls": payload.jira_urls,
+            "cwd": cwd,
+            "config": config.model_dump(),
+        }
+        await client.start_workflow(
+            "BatchBugFixWorkflow",
+            workflow_params,
+            id=f"batch-{job_id}",
+            task_queue=TASK_QUEUE,
         )
-    )
-    async with _tasks_lock:
-        WORKFLOW_TASKS[job_id] = workflow_task
+        logger.info(f"Job {job_id}: Temporal workflow started (id=batch-{job_id})")
 
-    logger.info(f"Job {job_id}: Workflow execution task started")
+    except Exception as e:
+        logger.error(f"Job {job_id}: Failed to start Temporal workflow: {e}")
+        try:
+            async with get_session_ctx() as session:
+                repo = BatchJobRepository(session)
+                await repo.update_status(job_id, "failed", error=str(e))
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to start workflow: {e}. Is Temporal running?",
+        )
 
     return BatchBugFixResponse(
         job_id=job_id,
@@ -907,32 +271,15 @@ def _count_retries(steps: Optional[List[Dict[str, Any]]]) -> int:
 @router.get("/bug-fix/{job_id}", response_model=BatchJobStatusResponse)
 async def get_batch_bug_fix_status(job_id: str):
     """Get the status of a batch bug fix job."""
-    job = None
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        db_job = await repo.get(job_id)
 
-    # First check in-memory cache (for active jobs)
-    async with _cache_lock:
-        if job_id in BATCH_JOBS_CACHE:
-            job = BATCH_JOBS_CACHE[job_id]
-    if job is None:
-        # Query from database
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            db_job = await repo.get(job_id)
-            if db_job:
-                job = _db_job_to_dict(db_job)
-
-    if not job:
+    if not db_job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
+    job = _db_job_to_dict(db_job)
     bugs = job.get("bugs", [])
-
-    # Enrich cache bugs with live step data from JOB_BUG_STEPS
-    if job_id in JOB_BUG_STEPS:
-        for i, bug in enumerate(bugs):
-            live_steps = JOB_BUG_STEPS[job_id].get(i)
-            if live_steps:
-                bug["steps"] = live_steps
-                bug["retry_count"] = _count_retries(live_steps)
 
     # Calculate counts
     completed = sum(1 for b in bugs if b["status"] == "completed")
@@ -972,11 +319,7 @@ async def list_batch_bug_fix_jobs(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ):
-    """List batch bug fix jobs with pagination.
-
-    Returns job summaries with basic statistics.
-    Use GET /batch-bug-fix/{job_id} for detailed bug-level status.
-    """
+    """List batch bug fix jobs with pagination."""
     async with get_session_ctx() as session:
         repo = BatchJobRepository(session)
         jobs, total = await repo.list(
@@ -987,7 +330,6 @@ async def list_batch_bug_fix_jobs(
 
         job_summaries = []
         for db_job in jobs:
-            # Calculate stats
             stats = {s: 0 for s in ["completed", "failed", "skipped", "in_progress", "pending"]}
             for bug in db_job.bugs:
                 if bug.status in stats:
@@ -1014,64 +356,33 @@ async def list_batch_bug_fix_jobs(
 # --- SSE Progress Streaming ---
 
 
-def push_job_event(job_id: str, event_type: str, data: Dict[str, Any]) -> None:
-    """Push an SSE event to connected clients for a job.
+async def _batch_sse_generator(job_id: str):
+    """SSE generator for batch job progress.
 
-    Thread-safe: reads JOB_SSE_QUEUES snapshot to avoid races with SSE cleanup.
-
-    Args:
-        job_id: The batch job ID
-        event_type: Event type (bug_started, bug_completed, bug_failed, job_done, db_warning)
-        data: Event data payload
+    Sends initial job state from DB, then streams real-time events
+    from the shared SSE infrastructure (events arrive from Temporal
+    Worker via HTTP POST to /api/internal/events/{job_id}).
     """
-    queue = JOB_SSE_QUEUES.get(job_id)
-    if queue:
-        try:
-            queue.put_nowait({"event": event_type, "data": data})
-            logger.debug(f"Job {job_id}: Pushed SSE event {event_type}")
-        except asyncio.QueueFull:
-            logger.warning(f"Job {job_id}: SSE queue full, dropping event {event_type}")
-        except Exception:
-            # Queue may have been removed between get() and put_nowait()
-            pass
-
-
-async def sse_job_generator(job_id: str):
-    """Generate SSE events for a batch job.
-
-    Yields:
-        SSE formatted event strings
-    """
-    logger.info(f"Job {job_id}: SSE client connected")
-    queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-    async with _sse_lock:
-        JOB_SSE_QUEUES[job_id] = queue
-
+    # Send initial job state from database
     try:
-        # Send initial job state
-        async with _cache_lock:
-            job = BATCH_JOBS_CACHE.get(job_id)
-        if job:
-            yield f"event: job_state\ndata: {json.dumps(job, default=str)}\n\n"
+        async with get_session_ctx() as session:
+            repo = BatchJobRepository(session)
+            db_job = await repo.get(job_id)
+        if db_job:
+            initial_state = _db_job_to_dict(db_job)
+            yield f"event: job_state\ndata: {json.dumps(initial_state, default=str)}\n\n"
+    except Exception as e:
+        logger.error(f"Job {job_id}: Failed to send initial SSE state: {e}")
 
-        # Stream events
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=30.0)
-                if event is None:  # Sentinel to stop
-                    break
-                yield f"event: {event['event']}\ndata: {json.dumps(event['data'], default=str)}\n\n"
-
-                # Stop streaming after job completion
-                if event.get("event") == "job_done":
-                    break
-            except asyncio.TimeoutError:
-                # Send keepalive
-                yield ": keepalive\n\n"
-    finally:
-        async with _sse_lock:
-            JOB_SSE_QUEUES.pop(job_id, None)
-        logger.info(f"Job {job_id}: SSE client disconnected")
+    # Stream events from shared SSE infrastructure.
+    # sse_event_generator creates a queue in _active_streams[job_id]
+    # that receives events pushed to /api/internal/events/{job_id}.
+    # It stops on "workflow_complete"; we also stop on "job_done".
+    async for event_str in sse_event_generator(job_id):
+        yield event_str
+        # Check if this is a job_done event (batch-specific stop signal)
+        if "job_done" in event_str and event_str.startswith("event:"):
+            break
 
 
 @router.get("/bug-fix/{job_id}/stream")
@@ -1082,23 +393,26 @@ async def stream_batch_job_progress(job_id: str):
     - job_state: Initial job state when connected
     - bug_started: When a bug fix starts (data: {bug_index, url})
     - bug_step_started: When a step begins (data: {bug_index, step, label, attempt?})
-    - bug_step_completed: When a step completes (data: {bug_index, step, label, status, duration_ms, output_preview, attempt?})
-    - bug_step_failed: When a step fails (data: {bug_index, step, label, error, attempt?})
+    - bug_step_completed: When a step completes (data: {bug_index, step, label, status, ...})
     - bug_completed: When a bug fix completes (data: {bug_index, url})
     - bug_failed: When a bug fix fails (data: {bug_index, url, error})
-    - ai_thinking: Real-time AI execution events (data: {node_id, bug_index, type, content, tool_name?, timestamp})
+    - ai_thinking: Real-time AI execution events (data: {node_id, bug_index, type, ...})
     - job_done: When the entire job completes (data: {status, completed, failed})
 
     Usage:
         const sse = new EventSource('/api/v2/batch/bug-fix/job_xxx/stream');
         sse.addEventListener('bug_step_started', (e) => console.log(JSON.parse(e.data)));
     """
-    async with _cache_lock:
-        if job_id not in BATCH_JOBS_CACHE:
-            raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    # Verify job exists in database
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        db_job = await repo.get(job_id)
+
+    if not db_job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
     return StreamingResponse(
-        sse_job_generator(job_id),
+        _batch_sse_generator(job_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1123,63 +437,40 @@ class JobControlResponse(BaseModel):
 async def cancel_batch_job(job_id: str):
     """Cancel a running batch bug fix job.
 
-    Terminates the workflow execution and marks the job as cancelled.
+    Cancels the Temporal workflow and marks the job as cancelled.
     Bugs that were in progress will be marked as failed.
     """
-    # Check cache first, then database
-    async with _cache_lock:
-        job = BATCH_JOBS_CACHE.get(job_id)
-    if not job:
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            db_job = await repo.get(job_id)
-            if db_job:
-                job = _db_job_to_dict(db_job)
+    # Check database
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        db_job = await repo.get(job_id)
 
-    if not job:
+    if not db_job:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
-    current_status = job.get("status", "")
-    if current_status in ["completed", "failed", "cancelled"]:
+    if db_job.status in ["completed", "failed", "cancelled"]:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot cancel job with status '{current_status}'"
+            detail=f"Cannot cancel job with status '{db_job.status}'"
         )
 
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
-    # Cancel the asyncio task if it exists
-    async with _tasks_lock:
-        workflow_task = WORKFLOW_TASKS.get(job_id)
-    if workflow_task and not workflow_task.done():
-        workflow_task.cancel()
-        # Wait for cancellation to propagate before cleaning up state
-        try:
-            await asyncio.wait_for(asyncio.shield(workflow_task), timeout=5.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-            pass
-        logger.info(f"Job {job_id}: Workflow task cancelled")
-
-    # Update cache
-    async with _cache_lock:
-        if job_id in BATCH_JOBS_CACHE:
-            cache_job = BATCH_JOBS_CACHE[job_id]
-            cache_job["status"] = "cancelled"
-            cache_job["updated_at"] = now_iso
-            # Mark in-progress bugs as failed
-            for bug in cache_job.get("bugs", []):
-                if bug["status"] == "in_progress":
-                    bug["status"] = "failed"
-                    bug["error"] = "Job cancelled"
-                    bug["completed_at"] = now_iso
+    # Cancel the Temporal workflow via client lookup (survives server restarts)
+    try:
+        client = await get_client()
+        handle = client.get_workflow_handle(f"batch-{job_id}")
+        await handle.cancel()
+        logger.info(f"Job {job_id}: Temporal workflow cancelled")
+    except Exception as e:
+        logger.warning(f"Job {job_id}: Failed to cancel Temporal workflow: {e}")
 
     # Update database
     try:
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)
             await repo.update_status(job_id, "cancelled")
-            # Update in-progress bugs
             db_job = await repo.get(job_id)
             if db_job:
                 for bug in db_job.bugs:
@@ -1194,21 +485,13 @@ async def cancel_batch_job(job_id: str):
         logger.info(f"Job {job_id}: Status updated to cancelled in database")
     except Exception as e:
         logger.error(f"Job {job_id}: Failed to update database: {e}")
-        push_job_event(job_id, "db_warning", {
-            "message": f"Cancel DB sync failed: {e}",
-            "timestamp": now_iso,
-        })
 
-    # Push SSE event
-    push_job_event(job_id, "job_done", {
+    # Push SSE event so connected clients know the job is done
+    push_node_event(job_id, "job_done", {
         "status": "cancelled",
         "message": "Job cancelled by user",
         "timestamp": now_iso,
     })
-
-    # Clean up
-    async with _tasks_lock:
-        WORKFLOW_TASKS.pop(job_id, None)
 
     return JobControlResponse(
         success=True,
@@ -1224,23 +507,13 @@ async def delete_batch_job(job_id: str):
 
     Running jobs will be cancelled first, then deleted.
     """
-    # Cancel if still running
-    async with _tasks_lock:
-        workflow_task = WORKFLOW_TASKS.get(job_id)
-    if workflow_task and not workflow_task.done():
-        workflow_task.cancel()
-        try:
-            await asyncio.wait_for(asyncio.shield(workflow_task), timeout=5.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
-            pass
-
-    # Remove from caches
-    async with _cache_lock:
-        BATCH_JOBS_CACHE.pop(job_id, None)
-    async with _tasks_lock:
-        WORKFLOW_TASKS.pop(job_id, None)
-    async with _sse_lock:
-        JOB_SSE_QUEUES.pop(job_id, None)
+    # Cancel Temporal workflow if still running (lookup by ID, survives restarts)
+    try:
+        client = await get_client()
+        handle = client.get_workflow_handle(f"batch-{job_id}")
+        await handle.cancel()
+    except Exception:
+        pass  # Workflow may already be completed/cancelled
 
     # Delete from database
     try:
@@ -1404,7 +677,6 @@ async def query_jira_bugs(payload: JiraQueryRequest):
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
 
     # Build request to Jira REST API
-    # Using GET with query params to avoid v3 POST pagination bugs
     search_url = f"{jira_url}/rest/api/3/search"
     headers = {
         "Authorization": f"Basic {auth_bytes}",
@@ -1417,13 +689,11 @@ async def query_jira_bugs(payload: JiraQueryRequest):
     }
 
     logger.info(f"Jira query: JQL='{payload.jql}', maxResults={payload.max_results}")
-    # Note: NOT logging credentials
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(search_url, headers=headers, params=params)
 
-            # Handle error responses
             if response.status_code == 401:
                 raise HTTPException(
                     status_code=401,
@@ -1434,7 +704,6 @@ async def query_jira_bugs(payload: JiraQueryRequest):
                 )
 
             if response.status_code == 400:
-                # JQL syntax error
                 error_data = response.json()
                 error_messages = error_data.get("errorMessages", [])
                 raise HTTPException(
@@ -1498,19 +767,15 @@ async def query_jira_bugs(payload: JiraQueryRequest):
         key = issue.get("key", "")
         fields = issue.get("fields", {})
 
-        # Extract status
         status_obj = fields.get("status", {})
         status = status_obj.get("name", "Unknown") if status_obj else "Unknown"
 
-        # Extract priority
         priority_obj = fields.get("priority")
         priority = priority_obj.get("name") if priority_obj else None
 
-        # Extract assignee
         assignee_obj = fields.get("assignee")
         assignee = assignee_obj.get("displayName") if assignee_obj else None
 
-        # Build issue URL
         issue_url = f"{jira_url}/browse/{key}"
 
         bugs.append(JiraBugInfo(
