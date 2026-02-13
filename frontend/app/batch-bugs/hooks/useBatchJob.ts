@@ -9,7 +9,7 @@ import {
   type BatchBugFixRequest,
 } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
-import type { BatchJob, BugStatus, BugStep, BatchJobStats, AIThinkingEvent, AIThinkingStats } from "../types";
+import type { BatchJob, BugStatus, BugStep, BatchJobStats, AIThinkingEvent, AIThinkingStats, DbSyncWarning } from "../types";
 
 /** Safe JSON.parse — returns null on failure instead of throwing */
 function safeParse(raw: string): unknown | null {
@@ -43,6 +43,9 @@ export function useBatchJob() {
     tokens_out: 0,
     cost: 0,
   });
+
+  // DB sync warnings
+  const [dbSyncWarnings, setDbSyncWarnings] = useState<DbSyncWarning[]>([]);
 
   // Recovery: on mount, check for active (non-terminal) job in DB
   useEffect(() => {
@@ -274,6 +277,30 @@ export function useBatchJob() {
       }));
     });
 
+    eventSource.addEventListener("db_sync_warning", (e) => {
+      const data = safeParse(e.data) as Record<string, unknown> | null;
+      if (!data) return;
+      setDbSyncWarnings((prev) => [
+        ...prev,
+        {
+          bug_index: (data.bug_index as number) ?? -1,
+          message: (data.message as string) ?? "数据库同步失败",
+          timestamp: (data.timestamp as string) ?? new Date().toISOString(),
+        },
+      ]);
+    });
+
+    eventSource.addEventListener("preflight_failed", (e) => {
+      const data = safeParse(e.data) as Record<string, unknown> | null;
+      if (!data) return;
+      const errors = (data.errors as string[]) ?? [];
+      toast({
+        title: "环境检查失败",
+        description: errors.join("\n") || "Pre-flight 检查未通过",
+        variant: "destructive",
+      });
+    });
+
     eventSource.addEventListener("job_done", (e) => {
       const data = safeParse(e.data) as Record<string, unknown> | null;
       if (!data) return;
@@ -357,6 +384,7 @@ export function useBatchJob() {
       setSubmitting(true);
       setAiThinkingEvents([]);
       setAiThinkingStats({ streaming: false, tokens_in: 0, tokens_out: 0, cost: 0 });
+      setDbSyncWarnings([]);
       try {
         const data = await submitBatchBugFix(request);
 
@@ -470,5 +498,6 @@ export function useBatchJob() {
     sseConnected,
     aiThinkingEvents,
     aiThinkingStats,
+    dbSyncWarnings,
   };
 }

@@ -4,11 +4,13 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import type {
   BatchJob,
   BugStatus,
+  BugStep,
   AIThinkingEvent,
   AIThinkingStats,
   AIThinkingReadEvent,
   AIThinkingEditEvent,
   AIThinkingBashEvent,
+  DbSyncWarning,
 } from "../types";
 
 /* ================================================================
@@ -27,6 +29,7 @@ interface ActivityFeedProps {
   onBugSelect: (index: number | null) => void;
   onRetryBug?: (bugIndex: number) => void;
   sseConnected?: boolean;
+  dbSyncWarnings?: DbSyncWarning[];
 }
 
 // ---- Node label mapping ----
@@ -152,6 +155,7 @@ export function ActivityFeed({
   onBugSelect,
   onRetryBug,
   sseConnected = true,
+  dbSyncWarnings = [],
 }: ActivityFeedProps) {
   const [expandedBugs, setExpandedBugs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -254,6 +258,7 @@ export function ActivityFeed({
               events={bugEvents}
               onCollapse={() => toggleBug(idx)}
               onRetry={onRetryBug ? () => onRetryBug(idx) : undefined}
+              dbSyncWarnings={dbSyncWarnings.filter((w) => w.bug_index === idx)}
             />
           ) : (
             <CollapsedBugRow
@@ -362,14 +367,20 @@ function ExpandedBugSection({
   events,
   onCollapse,
   onRetry,
+  dbSyncWarnings = [],
 }: {
   bug: BugStatus;
   bugIndex: number;
   events: AIThinkingEvent[];
   onCollapse: () => void;
   onRetry?: () => void;
+  dbSyncWarnings?: DbSyncWarning[];
 }) {
   const feedItems = useMemo(() => buildFeedItems(events), [events]);
+  const completedSteps = useMemo(
+    () => (bug.steps ?? []).filter((s) => s.status === "completed" && s.output_preview),
+    [bug.steps],
+  );
 
   return (
     <div className="border-b border-[#e2e8f0]">
@@ -392,6 +403,25 @@ function ExpandedBugSection({
             </button>
           )}
           <span className="text-[11px] text-[#94a3b8]">收起 ▴</span>
+        </div>
+      )}
+
+      {/* DB sync warnings */}
+      {dbSyncWarnings.map((w, i) => (
+        <div key={`dbw-${i}`} className="flex items-center gap-2 bg-[#fffbeb] border-b border-[#fde68a] px-4 py-2">
+          <span className="text-xs">⚠️</span>
+          <span className="text-xs font-medium text-[#92400e]">{w.message}</span>
+          <span className="ml-auto text-[10px] text-[#d97706]">{formatTime(w.timestamp)}</span>
+        </div>
+      ))}
+
+      {/* Step summary strip — shows pipeline step outcomes with output_preview */}
+      {completedSteps.length > 0 && (
+        <div className="border-b border-[#f1f5f9] bg-[#fafafa] px-4 py-2.5 space-y-1.5">
+          <span className="text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wide">步骤摘要</span>
+          {completedSteps.map((step, i) => (
+            <StepOutputRow key={`step-${i}`} step={step} />
+          ))}
         </div>
       )}
 
@@ -694,6 +724,78 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
         </p>
       );
   }
+}
+
+/* ================================================================
+   StepOutputRow — shows a pipeline step with expandable output_preview
+   ================================================================ */
+
+const STEP_ICONS: Record<string, string> = {
+  code_summary: "\u{1F4CA}",
+  git_commit: "\u{1F4E6}",
+  git_revert: "\u{1F504}",
+};
+
+function StepOutputRow({ step }: { step: BugStep }) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = step.output_preview ?? "";
+  const isLong = preview.length > 80;
+  const icon = STEP_ICONS[step.step] ?? "\u2705";
+
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <span className="shrink-0 mt-0.5">{icon}</span>
+      <span className="shrink-0 font-medium text-[#475569]">{step.label}</span>
+      <div className="min-w-0 flex-1">
+        <span className={`text-[#64748b] ${!expanded && isLong ? "line-clamp-1" : ""}`}>
+          <OutputPreviewText text={expanded ? preview : (isLong ? preview.slice(0, 80) + "..." : preview)} />
+        </span>
+        {isLong && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="ml-1 text-[11px] font-medium text-[#3b82f6] hover:text-[#2563eb]"
+          >
+            {expanded ? "收起" : "展开"}
+          </button>
+        )}
+      </div>
+      {step.duration_ms != null && step.duration_ms > 0 && (
+        <span className="shrink-0 font-mono text-[10px] text-[#94a3b8]">
+          {Math.round(step.duration_ms / 1000)}s
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Renders text with auto-linked URLs */
+function OutputPreviewText({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s,)]+)/g);
+
+  if (parts.length === 1) {
+    return <>{text}</>;
+  }
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#2563eb] underline hover:text-[#1d4ed8]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
 }
 
 /* ================================================================

@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { FileEdit, Play, BarChart3 } from "lucide-react";
+import { FileEdit, Play, BarChart3, Eye, X } from "lucide-react";
 
+import type { DryRunResponse } from "@/lib/api";
+import { submitDryRun } from "@/lib/api";
 import type { ValidationLevel, FailurePolicy } from "./types";
 import { useBatchJob } from "./hooks/useBatchJob";
 import { useJobHistory } from "./hooks/useJobHistory";
@@ -37,9 +39,11 @@ export default function BatchBugsPage() {
 
   const [activeBugIndex, setActiveBugIndex] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<string>("config");
+  const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
 
   // Hooks
-  const { currentJob, submitting, stats, submit, cancel, retryBug, sseConnected, aiThinkingEvents, aiThinkingStats } = useBatchJob();
+  const { currentJob, submitting, stats, submit, cancel, retryBug, sseConnected, aiThinkingEvents, aiThinkingStats, dbSyncWarnings } = useBatchJob();
   const history = useJobHistory();
 
   // Auto-switch to execution tab when job starts running
@@ -101,7 +105,34 @@ export default function BatchBugsPage() {
   const handleNewJob = () => {
     setActiveTab("config");
     setActiveBugIndex(null);
+    setDryRunResult(null);
   };
+
+  const handleDryRun = useCallback(async () => {
+    const urls = parseJiraUrls();
+    if (urls.length === 0) return;
+    setDryRunLoading(true);
+    try {
+      const result = await submitDryRun({
+        jira_urls: urls,
+        cwd: targetCwd.trim() || undefined,
+        config: {
+          validation_level: validationLevel,
+          failure_policy: failurePolicy,
+        },
+      });
+      setDryRunResult(result);
+    } catch {
+      setDryRunResult(null);
+    } finally {
+      setDryRunLoading(false);
+    }
+  }, [parseJiraUrls, targetCwd, validationLevel, failurePolicy]);
+
+  const handleConfirmExecute = useCallback(async () => {
+    setDryRunResult(null);
+    await handleSubmit();
+  }, [handleSubmit]);
 
   const isFinished = currentJob && ["completed", "failed", "cancelled"].includes(currentJob.job_status);
 
@@ -199,12 +230,30 @@ export default function BatchBugsPage() {
 
                 <div className="flex gap-3">
                   <Button
+                    variant="outline"
+                    onClick={handleDryRun}
+                    disabled={dryRunLoading || submitting || parseJiraUrls().length === 0}
+                  >
+                    <Eye className="mr-1.5 h-3.5 w-3.5" />
+                    {dryRunLoading ? "预览中..." : "预览"}
+                  </Button>
+                  <Button
                     onClick={handleSubmit}
                     disabled={submitting || parseJiraUrls().length === 0}
                   >
                     {submitting ? "提交中..." : "开始修复"}
                   </Button>
                 </div>
+
+                {/* Dry-run preview panel */}
+                {dryRunResult && (
+                  <DryRunPreviewPanel
+                    result={dryRunResult}
+                    onConfirm={handleConfirmExecute}
+                    onDismiss={() => setDryRunResult(null)}
+                    submitting={submitting}
+                  />
+                )}
               </div>
 
               {/* Right: History */}
@@ -253,6 +302,7 @@ export default function BatchBugsPage() {
                     onBugSelect={setActiveBugIndex}
                     onRetryBug={retryBug}
                     sseConnected={sseConnected}
+                    dbSyncWarnings={dbSyncWarnings}
                   />
                 </div>
 
@@ -340,6 +390,88 @@ export default function BatchBugsPage() {
     </div>
   );
 }
+
+/* ================================================================
+   Dry-Run Preview Panel
+   ================================================================ */
+
+function DryRunPreviewPanel({
+  result,
+  onConfirm,
+  onDismiss,
+  submitting,
+}: {
+  result: DryRunResponse;
+  onConfirm: () => void;
+  onDismiss: () => void;
+  submitting: boolean;
+}) {
+  return (
+    <Card className="border-blue-200 bg-blue-50/50">
+      <CardContent className="pt-4 pb-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-blue-900">
+            Dry Run 预览
+          </h3>
+          <button
+            onClick={onDismiss}
+            className="text-slate-400 hover:text-slate-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex gap-4 text-xs text-slate-600">
+          <span>Bug 数量: <strong>{result.total_bugs}</strong></span>
+          <span>工作目录: <code className="bg-white px-1.5 py-0.5 rounded text-[11px]">{result.cwd}</code></span>
+          <span>验证级别: <strong>{result.config.validation_level}</strong></span>
+          <span>失败策略: <strong>{result.config.failure_policy}</strong></span>
+        </div>
+
+        {/* Bug list */}
+        <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+          {result.bugs.map((bug, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-2 rounded bg-white px-3 py-1.5 text-xs"
+            >
+              <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 font-mono text-[10px] text-blue-700">
+                #{i + 1}
+              </span>
+              <span className="font-medium text-slate-800">{bug.jira_key}</span>
+              <span className="truncate text-slate-400">{bug.url}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Expected steps */}
+        <div className="text-xs text-slate-500">
+          <span className="font-medium">每个 Bug 的执行步骤: </span>
+          {result.expected_steps_per_bug.join(" → ")}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 pt-1">
+          <Button
+            size="sm"
+            onClick={onConfirm}
+            disabled={submitting}
+          >
+            {submitting ? "执行中..." : "确认执行"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onDismiss}
+          >
+            取消
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 
 /* ================================================================
    Job Status Badge

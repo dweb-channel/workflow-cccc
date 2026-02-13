@@ -888,7 +888,7 @@ class TestSyncFinalResultsRetryMode:
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_retry_skipped_bug_means_failed_overall(self, mock_ctx, mock_repo_cls, mock_push):
-        """A skipped bug counts as failure for overall status."""
+        """In retry mode (no index_map), a skipped bug counts as failure."""
         from workflow.temporal.batch_activities import _sync_final_results
 
         mock_repo = AsyncMock()
@@ -900,7 +900,7 @@ class TestSyncFinalResultsRetryMode:
         mock_repo.get.return_value = _make_job_model(
             bugs=[
                 _make_bug_model(0, "completed"),
-                _make_bug_model(1, "skipped"),   # skipped = failed
+                _make_bug_model(1, "skipped"),   # skipped = failed in retry mode
                 _make_bug_model(2, "completed"),
             ]
         )
@@ -1275,374 +1275,876 @@ class TestRetryEndpointValidation:
 
 
 # ===========================================================================
-# T101: PR/Jira Integration Tests
+# ===========================================================================
+# T104: Pre-flight Check Tests
 # ===========================================================================
 
 
-class TestGitBranchHelpers:
-    """Test per-bug branch creation, switching, and cleanup."""
+class TestPreflightCheck:
+    """Test _preflight_check environment validation."""
 
     @pytest.mark.asyncio
-    async def test_git_get_current_branch(self):
-        from workflow.temporal.batch_activities import _git_get_current_branch
+    async def test_all_checks_pass(self):
+        from workflow.temporal.batch_activities import _preflight_check
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, "main"),
-        ) as mock_run:
-            result = await _git_get_current_branch("/tmp/repo")
-            assert result == "main"
-            mock_run.assert_called_once_with(
-                "/tmp/repo", "rev-parse", "--abbrev-ref", "HEAD"
+        with patch("os.path.isdir", return_value=True):
+            with patch(
+                "workflow.temporal.batch_activities._git_is_repo",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with patch("shutil.which", side_effect=lambda x: f"/usr/bin/{x}"):
+                    ok, issues = await _preflight_check("/tmp/repo", {}, "job_1")
+                    assert ok is True
+                    assert issues == []
+
+    @pytest.mark.asyncio
+    async def test_cwd_not_exists(self):
+        from workflow.temporal.batch_activities import _preflight_check
+
+        with patch("os.path.isdir", return_value=False):
+            with patch("shutil.which", return_value=None):
+                with patch.dict("os.environ", {}, clear=True):
+                    ok, issues = await _preflight_check("/nonexistent", {}, "job_1")
+                    assert ok is False
+                    assert any("工作目录不存在" in e for e in issues)
+
+    @pytest.mark.asyncio
+    async def test_not_git_repo(self):
+        from workflow.temporal.batch_activities import _preflight_check
+
+        with patch("os.path.isdir", return_value=True):
+            with patch(
+                "workflow.temporal.batch_activities._git_is_repo",
+                new_callable=AsyncMock,
+                return_value=False,
+            ):
+                with patch("shutil.which", return_value=None):
+                    with patch.dict("os.environ", {}, clear=True):
+                        ok, issues = await _preflight_check("/tmp/repo", {}, "job_1")
+                        assert ok is False
+                        assert any("不是 Git 仓库" in e for e in issues)
+
+    @pytest.mark.asyncio
+    async def test_claude_cli_missing(self):
+        from workflow.temporal.batch_activities import _preflight_check
+
+        def mock_which(name):
+            if name == "claude":
+                return None
+            return f"/usr/bin/{name}"
+
+        with patch("os.path.isdir", return_value=True):
+            with patch(
+                "workflow.temporal.batch_activities._git_is_repo",
+                new_callable=AsyncMock,
+                return_value=True,
+            ):
+                with patch("shutil.which", side_effect=mock_which):
+                    ok, issues = await _preflight_check("/tmp/repo", {}, "job_1")
+                    assert ok is False
+                    assert any("Claude CLI" in e for e in issues)
+
+    @pytest.mark.asyncio
+    async def test_multiple_errors(self):
+        """cwd not exists + claude missing = 2 errors."""
+        from workflow.temporal.batch_activities import _preflight_check
+
+        with patch("os.path.isdir", return_value=False):
+            with patch("shutil.which", return_value=None):
+                with patch.dict("os.environ", {}, clear=True):
+                    ok, issues = await _preflight_check("/nonexistent", {}, "job_1")
+                    assert ok is False
+                    assert len([e for e in issues if "不存在" in e or "CLI" in e]) >= 2
+
+
+# ===========================================================================
+# T107: Dry-Run Preview Mode Tests
+# ===========================================================================
+
+
+class TestDryRunRoute:
+    """Test dry_run=true returns preview without starting Temporal."""
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_dry_run_returns_preview(self, mock_ctx, mock_client):
+        """dry_run=true should return preview without DB/Temporal."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        payload = BatchBugFixRequest(
+            jira_urls=[
+                "https://tssoft.atlassian.net/browse/XSZS-100",
+                "https://tssoft.atlassian.net/browse/XSZS-200",
+            ],
+            cwd="/tmp/project",
+            dry_run=True,
+        )
+        resp = await create_batch_bug_fix(payload)
+
+        # Should be a JSONResponse, not BatchBugFixResponse
+        import json
+        body = json.loads(resp.body.decode())
+        assert body["dry_run"] is True
+        assert body["total_bugs"] == 2
+        assert body["cwd"] == "/tmp/project"
+        assert len(body["bugs"]) == 2
+        assert body["bugs"][0]["jira_key"] == "XSZS-100"
+        assert body["bugs"][1]["jira_key"] == "XSZS-200"
+        assert len(body["expected_steps_per_bug"]) > 0
+
+        # DB and Temporal should NOT be called
+        mock_ctx.assert_not_called()
+        mock_client.assert_not_called()
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_dry_run_default_config(self, mock_ctx, mock_client):
+        """dry_run with no config should use defaults."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        payload = BatchBugFixRequest(
+            jira_urls=["https://tssoft.atlassian.net/browse/PROJ-1"],
+            dry_run=True,
+        )
+        resp = await create_batch_bug_fix(payload)
+
+        import json
+        body = json.loads(resp.body.decode())
+        assert body["dry_run"] is True
+        assert body["cwd"] == "."
+        assert body["config"]["validation_level"] == "standard"
+        assert body["config"]["failure_policy"] == "skip"
+        assert body["config"]["max_retries"] == 3
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_dry_run_status_code_200(self, mock_ctx, mock_client):
+        """dry_run should return HTTP 200, not 201."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        payload = BatchBugFixRequest(
+            jira_urls=["https://tssoft.atlassian.net/browse/PROJ-1"],
+            dry_run=True,
+        )
+        resp = await create_batch_bug_fix(payload)
+        assert resp.status_code == 200
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_dry_run_extracts_jira_key(self, mock_ctx, mock_client):
+        """Should extract Jira key from various URL formats."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        payload = BatchBugFixRequest(
+            jira_urls=[
+                "https://tssoft.atlassian.net/browse/XSZS-15463",
+                "https://tssoft.atlassian.net/browse/PROJ-42",
+                "https://tssoft.atlassian.net/browse/ABC-1",
+            ],
+            dry_run=True,
+        )
+        resp = await create_batch_bug_fix(payload)
+
+        import json
+        body = json.loads(resp.body.decode())
+        keys = [b["jira_key"] for b in body["bugs"]]
+        assert keys == ["XSZS-15463", "PROJ-42", "ABC-1"]
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_dry_run_bug_has_expected_steps(self, mock_ctx, mock_client):
+        """Each bug should have expected_steps list."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        payload = BatchBugFixRequest(
+            jira_urls=["https://tssoft.atlassian.net/browse/PROJ-1"],
+            dry_run=True,
+        )
+        resp = await create_batch_bug_fix(payload)
+
+        import json
+        body = json.loads(resp.body.decode())
+        bug_steps = body["bugs"][0]["expected_steps"]
+        assert len(bug_steps) >= 3
+        assert "修复 Bug" in bug_steps
+
+    @patch("app.routes.batch.get_client", new_callable=AsyncMock)
+    @patch("app.database.get_session_ctx")
+    async def test_non_dry_run_starts_workflow(self, mock_ctx, mock_client):
+        """dry_run=false (default) should proceed normally."""
+        from app.routes.batch import create_batch_bug_fix, BatchBugFixRequest
+
+        mock_session = AsyncMock()
+        mock_repo = AsyncMock()
+        mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock BatchJobRepository constructor
+        with patch("app.routes.batch.BatchJobRepository", return_value=mock_repo):
+            mock_temporal = AsyncMock()
+            mock_client.return_value = mock_temporal
+
+            payload = BatchBugFixRequest(
+                jira_urls=["https://tssoft.atlassian.net/browse/PROJ-1"],
+                cwd="/tmp",
             )
+            resp = await create_batch_bug_fix(payload)
 
-    @pytest.mark.asyncio
-    async def test_git_get_current_branch_fails(self):
-        from workflow.temporal.batch_activities import _git_get_current_branch
+            # Should return BatchBugFixResponse (not JSONResponse)
+            assert hasattr(resp, "job_id")
+            assert resp.status == "started"
+            assert resp.total_bugs == 1
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(1, ""),
-        ):
-            result = await _git_get_current_branch("/tmp/repo")
-            assert result is None
+            # Temporal should have been called
+            mock_temporal.start_workflow.assert_called_once()
 
-    @pytest.mark.asyncio
-    async def test_git_create_fix_branch(self):
-        from workflow.temporal.batch_activities import _git_create_fix_branch
+    async def test_extract_jira_key_helper(self):
+        """Verify _extract_jira_key_from_url helper."""
+        from app.routes.batch import _extract_jira_key_from_url
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),
-        ) as mock_run:
-            result = await _git_create_fix_branch(
-                "/tmp/repo",
-                "https://jira.example.com/browse/XSZS-123",
-                "job_1",
-            )
-            assert result == "fix/xszs-123"
-            mock_run.assert_called_once_with(
-                "/tmp/repo", "checkout", "-b", "fix/xszs-123"
-            )
-
-    @pytest.mark.asyncio
-    async def test_git_create_fix_branch_fails(self):
-        from workflow.temporal.batch_activities import _git_create_fix_branch
-
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(1, "branch already exists"),
-        ):
-            result = await _git_create_fix_branch(
-                "/tmp/repo",
-                "https://jira.example.com/browse/XSZS-123",
-                "job_1",
-            )
-            assert result is None
-
-    @pytest.mark.asyncio
-    async def test_git_switch_branch(self):
-        from workflow.temporal.batch_activities import _git_switch_branch
-
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),
-        ):
-            result = await _git_switch_branch("/tmp/repo", "main", "job_1")
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_git_switch_branch_fails(self):
-        from workflow.temporal.batch_activities import _git_switch_branch
-
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(1, "error"),
-        ):
-            result = await _git_switch_branch("/tmp/repo", "main", "job_1")
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_git_delete_branch(self):
-        from workflow.temporal.batch_activities import _git_delete_branch
-
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),
-        ):
-            result = await _git_delete_branch("/tmp/repo", "fix/xszs-123", "job_1")
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_git_delete_branch_fails(self):
-        from workflow.temporal.batch_activities import _git_delete_branch
-
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(1, "error"),
-        ):
-            result = await _git_delete_branch("/tmp/repo", "fix/xszs-123", "job_1")
-            assert result is False
+        assert _extract_jira_key_from_url("https://tssoft.atlassian.net/browse/XSZS-100") == "XSZS-100"
+        assert _extract_jira_key_from_url("https://tssoft.atlassian.net/browse/ABC-1") == "ABC-1"
+        assert _extract_jira_key_from_url("https://tssoft.atlassian.net/PROJ-42") == "PROJ-42"
 
 
-class TestGitPushAndCreatePr:
-    """Test PR creation via gh CLI."""
+# ---------------------------------------------------------------------------
+# 22. T105: _db_index helper
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_push_and_create_pr_success(self):
-        from workflow.temporal.batch_activities import _git_push_and_create_pr
 
-        mock_proc = AsyncMock()
-        mock_proc.returncode = 0
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"https://github.com/org/repo/pull/42\n", b"")
+class TestDbIndex:
+    """Test _db_index mapping helper."""
+
+    def test_offset_only_no_index_map(self):
+        from workflow.temporal.batch_activities import _db_index
+
+        assert _db_index(0, 3) == 3
+        assert _db_index(1, 3) == 4
+        assert _db_index(0, 0) == 0
+
+    def test_index_map_overrides_offset(self):
+        from workflow.temporal.batch_activities import _db_index
+
+        # index_map=[1, 3, 4] means workflow bug 0 → DB 1, 1 → 3, 2 → 4
+        index_map = [1, 3, 4]
+        assert _db_index(0, 0, index_map) == 1
+        assert _db_index(1, 0, index_map) == 3
+        assert _db_index(2, 0, index_map) == 4
+
+    def test_index_map_with_offset(self):
+        """index_map already includes offset, so offset param is ignored."""
+        from workflow.temporal.batch_activities import _db_index
+
+        # index_map=[5, 7] (already offset-adjusted)
+        index_map = [5, 7]
+        assert _db_index(0, 5, index_map) == 5
+        assert _db_index(1, 5, index_map) == 7
+
+    def test_index_map_out_of_range_fallback(self):
+        from workflow.temporal.batch_activities import _db_index
+
+        index_map = [2, 4]
+        # Index beyond map falls back to raw bug_index
+        assert _db_index(5, 0, index_map) == 5
+
+    def test_none_index_map_uses_offset(self):
+        from workflow.temporal.batch_activities import _db_index
+
+        assert _db_index(2, 10, None) == 12
+
+
+# ---------------------------------------------------------------------------
+# 23. T105: _jira_get_status
+# ---------------------------------------------------------------------------
+
+
+class TestJiraGetStatus:
+    """Test _jira_get_status helper."""
+
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    @patch("httpx.AsyncClient")
+    async def test_returns_done_for_resolved_issue(self, mock_client_cls):
+        from workflow.temporal.batch_activities import _jira_get_status
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "fields": {
+                "status": {
+                    "statusCategory": {"key": "Done"}
+                }
+            }
+        }
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _jira_get_status(
+            "https://jira.example.com/browse/TEST-1", "job_1"
+        )
+        assert result == "done"
+
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    @patch("httpx.AsyncClient")
+    async def test_returns_indeterminate_for_in_progress(self, mock_client_cls):
+        from workflow.temporal.batch_activities import _jira_get_status
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "fields": {
+                "status": {
+                    "statusCategory": {"key": "indeterminate"}
+                }
+            }
+        }
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _jira_get_status(
+            "https://jira.example.com/browse/TEST-2", "job_1"
+        )
+        assert result == "indeterminate"
+
+    @patch.dict("os.environ", {"JIRA_URL": "", "JIRA_EMAIL": "", "JIRA_API_TOKEN": ""})
+    async def test_returns_none_without_credentials(self):
+        from workflow.temporal.batch_activities import _jira_get_status
+
+        result = await _jira_get_status(
+            "https://jira.example.com/browse/TEST-1", "job_1"
+        )
+        assert result is None
+
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    @patch("httpx.AsyncClient")
+    async def test_returns_none_on_http_error(self, mock_client_cls):
+        from workflow.temporal.batch_activities import _jira_get_status
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 404
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _jira_get_status(
+            "https://jira.example.com/browse/MISSING-1", "job_1"
+        )
+        assert result is None
+
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    @patch("httpx.AsyncClient")
+    async def test_returns_none_on_exception(self, mock_client_cls):
+        from workflow.temporal.batch_activities import _jira_get_status
+
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = Exception("connection refused")
+        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        result = await _jira_get_status(
+            "https://jira.example.com/browse/TEST-1", "job_1"
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 24. T105: _prescan_closed_bugs
+# ---------------------------------------------------------------------------
+
+
+class TestPrescanClosedBugs:
+    """Test _prescan_closed_bugs helper."""
+
+    @patch.dict("os.environ", {"JIRA_URL": "", "JIRA_EMAIL": "", "JIRA_API_TOKEN": ""})
+    async def test_no_credentials_returns_empty(self):
+        from workflow.temporal.batch_activities import _prescan_closed_bugs
+
+        result = await _prescan_closed_bugs(
+            ["https://jira.example.com/browse/TEST-1"], "job_1"
+        )
+        assert result == set()
+
+    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    async def test_all_open_returns_empty(self, mock_status):
+        from workflow.temporal.batch_activities import _prescan_closed_bugs
+
+        mock_status.return_value = "indeterminate"
+        urls = [
+            "https://jira.example.com/browse/TEST-1",
+            "https://jira.example.com/browse/TEST-2",
+        ]
+        result = await _prescan_closed_bugs(urls, "job_1")
+        assert result == set()
+        assert mock_status.call_count == 2
+
+    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    async def test_some_closed_returns_indices(self, mock_status):
+        from workflow.temporal.batch_activities import _prescan_closed_bugs
+
+        # Bug 0: open, Bug 1: done, Bug 2: open, Bug 3: done
+        mock_status.side_effect = ["indeterminate", "done", "new", "done"]
+        urls = [
+            "https://jira.example.com/browse/TEST-1",
+            "https://jira.example.com/browse/TEST-2",
+            "https://jira.example.com/browse/TEST-3",
+            "https://jira.example.com/browse/TEST-4",
+        ]
+        result = await _prescan_closed_bugs(urls, "job_1")
+        assert result == {1, 3}
+
+    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    async def test_all_closed_returns_all_indices(self, mock_status):
+        from workflow.temporal.batch_activities import _prescan_closed_bugs
+
+        mock_status.return_value = "done"
+        urls = [
+            "https://jira.example.com/browse/TEST-1",
+            "https://jira.example.com/browse/TEST-2",
+        ]
+        result = await _prescan_closed_bugs(urls, "job_1")
+        assert result == {0, 1}
+
+    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch.dict("os.environ", {
+        "JIRA_URL": "https://jira.example.com",
+        "JIRA_EMAIL": "test@example.com",
+        "JIRA_API_TOKEN": "token123",
+    })
+    async def test_api_failure_returns_empty(self, mock_status):
+        """If Jira API returns None, bugs are NOT skipped (best-effort)."""
+        from workflow.temporal.batch_activities import _prescan_closed_bugs
+
+        mock_status.return_value = None
+        urls = ["https://jira.example.com/browse/TEST-1"]
+        result = await _prescan_closed_bugs(urls, "job_1")
+        assert result == set()
+
+
+# ---------------------------------------------------------------------------
+# 25. T105: _sync_incremental_results with index_map
+# ---------------------------------------------------------------------------
+
+
+class TestSyncIncrementalResultsWithIndexMap:
+    """Test _sync_incremental_results with index_map for skip scenarios."""
+
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    async def test_index_map_sse_uses_mapped_index(self, mock_push, mock_db):
+        """5-bug job, bugs 1,3 skipped → active bugs are 0,2,4.
+        index_map=[0, 2, 4]. Workflow bug 1 → DB bug 2."""
+        from workflow.temporal.batch_activities import _sync_incremental_results
+
+        mock_db.return_value = True
+        jira_urls = [
+            "https://jira.example.com/browse/TEST-0",
+            "https://jira.example.com/browse/TEST-2",
+            "https://jira.example.com/browse/TEST-4",
+        ]
+        results = [{"status": "completed"}, {"status": "failed", "error": "oops"}]
+        index_map = [0, 2, 4]
+
+        await _sync_incremental_results(
+            "job_1", jira_urls, results, 0,
+            bug_index_offset=0, index_map=index_map,
         )
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),  # git push succeeds
-        ):
-            with patch(
-                "asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=mock_proc,
-            ):
-                result = await _git_push_and_create_pr(
-                    "/tmp/repo", "fix/xszs-123", "main",
-                    "https://jira.example.com/browse/XSZS-123", "job_1",
-                )
-                assert result == "https://github.com/org/repo/pull/42"
+        # Bug completed event for workflow bug 0 → DB bug 0
+        bug_completed_calls = [
+            c for c in mock_push.call_args_list if c[0][1] == "bug_completed"
+        ]
+        assert len(bug_completed_calls) == 1
+        assert bug_completed_calls[0][0][2]["bug_index"] == 0
 
-    @pytest.mark.asyncio
-    async def test_push_fails(self):
-        from workflow.temporal.batch_activities import _git_push_and_create_pr
+        # Bug failed event for workflow bug 1 → DB bug 2
+        bug_failed_calls = [
+            c for c in mock_push.call_args_list if c[0][1] == "bug_failed"
+        ]
+        assert len(bug_failed_calls) == 1
+        assert bug_failed_calls[0][0][2]["bug_index"] == 2
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(1, "remote error"),
-        ):
-            result = await _git_push_and_create_pr(
-                "/tmp/repo", "fix/xszs-123", "main",
-                "https://jira.example.com/browse/XSZS-123", "job_1",
-            )
-            assert result is None
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    async def test_index_map_db_update_uses_mapped_index(self, mock_push, mock_db):
+        """DB update should use mapped index, not array index."""
+        from workflow.temporal.batch_activities import _sync_incremental_results
 
-    @pytest.mark.asyncio
-    async def test_gh_cli_not_found(self):
-        from workflow.temporal.batch_activities import _git_push_and_create_pr
+        mock_db.return_value = True
+        jira_urls = ["https://jira.example.com/browse/TEST-2"]
+        results = [{"status": "completed"}]
+        index_map = [2]  # workflow bug 0 → DB bug 2
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),
-        ):
-            with patch(
-                "asyncio.create_subprocess_exec",
-                side_effect=FileNotFoundError("gh not found"),
-            ):
-                result = await _git_push_and_create_pr(
-                    "/tmp/repo", "fix/xszs-123", "main",
-                    "https://jira.example.com/browse/XSZS-123", "job_1",
-                )
-                assert result is None
-
-    @pytest.mark.asyncio
-    async def test_gh_pr_create_fails(self):
-        from workflow.temporal.batch_activities import _git_push_and_create_pr
-
-        mock_proc = AsyncMock()
-        mock_proc.returncode = 1
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"already exists\n", b"")
+        await _sync_incremental_results(
+            "job_1", jira_urls, results, 0,
+            bug_index_offset=0, index_map=index_map,
         )
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, ""),
-        ):
-            with patch(
-                "asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=mock_proc,
-            ):
-                result = await _git_push_and_create_pr(
-                    "/tmp/repo", "fix/xszs-123", "main",
-                    "https://jira.example.com/browse/XSZS-123", "job_1",
+        # DB update for status should use bug_index=2
+        status_calls = [
+            c for c in mock_db.call_args_list
+            if len(c[0]) >= 3 and c[0][2] in ("completed", "failed")
+        ]
+        assert len(status_calls) == 1
+        assert status_calls[0][0][1] == 2  # db_i = index_map[0] = 2
+
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    async def test_index_map_next_bug_started_uses_mapped_index(self, mock_push, mock_db):
+        """Next bug_started should use mapped index for the next active bug."""
+        from workflow.temporal.batch_activities import _sync_incremental_results
+
+        mock_db.return_value = True
+        jira_urls = [
+            "https://jira.example.com/browse/TEST-0",
+            "https://jira.example.com/browse/TEST-3",
+        ]
+        results = [{"status": "completed"}]
+        index_map = [0, 3]  # workflow bug 0 → DB 0, workflow bug 1 → DB 3
+
+        await _sync_incremental_results(
+            "job_1", jira_urls, results, 0,
+            bug_index_offset=0, index_map=index_map,
+        )
+
+        bug_started_calls = [
+            c for c in mock_push.call_args_list if c[0][1] == "bug_started"
+        ]
+        assert len(bug_started_calls) == 1
+        assert bug_started_calls[0][0][2]["bug_index"] == 3  # index_map[1] = 3
+
+
+# ---------------------------------------------------------------------------
+# 26. T105: _sync_final_results with index_map and pre_skipped
+# ---------------------------------------------------------------------------
+
+
+class TestSyncFinalResultsWithSkip:
+    """Test _sync_final_results with index_map and pre_skipped."""
+
+    @patch("app.database.get_session_ctx")
+    async def test_skipped_bugs_not_counted_as_failure(self, mock_ctx):
+        """Pre-scan skipped bugs (already resolved) should not make job 'failed'."""
+        from workflow.temporal.batch_activities import _sync_final_results
+        from workflow.temporal.batch_activities import _push_event
+
+        mock_session = AsyncMock()
+        mock_repo = AsyncMock()
+        mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        # 5-bug job: 2 pre-scan skipped (done), 3 active (all completed)
+        bugs = [
+            _make_bug_model(0, "completed"),
+            _make_bug_model(1, "skipped"),    # pre-scan
+            _make_bug_model(2, "completed"),
+            _make_bug_model(3, "skipped"),    # pre-scan
+            _make_bug_model(4, "completed"),
+        ]
+        mock_repo.get.return_value = _make_job_model(bugs=bugs)
+        mock_repo.update_bug_status = AsyncMock()
+        mock_repo.update_status = AsyncMock()
+
+        with patch("app.repositories.batch_job.BatchJobRepository", return_value=mock_repo):
+            with patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock) as mock_push:
+                final_state = {
+                    "results": [
+                        {"status": "completed"},
+                        {"status": "completed"},
+                        {"status": "completed"},
+                    ]
+                }
+                index_map = [0, 2, 4]
+
+                await _sync_final_results(
+                    "job_1", final_state,
+                    [
+                        "https://jira.example.com/browse/TEST-0",
+                        "https://jira.example.com/browse/TEST-2",
+                        "https://jira.example.com/browse/TEST-4",
+                    ],
+                    bug_index_offset=0,
+                    index_map=index_map,
+                    pre_skipped=2,
                 )
-                assert result is None
 
+                # Overall status should be "completed" (no failed bugs in DB)
+                mock_repo.update_status.assert_called_with("job_1", "completed")
 
-class TestJiraAddFixComment:
-    """Test Jira comment via REST API."""
+                # job_done event should include correct totals
+                job_done_calls = [
+                    c for c in mock_push.call_args_list if c[0][1] == "job_done"
+                ]
+                assert len(job_done_calls) == 1
+                event = job_done_calls[0][0][2]
+                assert event["status"] == "completed"
+                assert event["total"] == 5  # 3 active + 2 pre-skipped
+                assert event["skipped"] == 2  # pre-skipped only
 
-    @pytest.mark.asyncio
-    async def test_jira_comment_success(self):
-        from workflow.temporal.batch_activities import _jira_add_fix_comment
+    @patch("app.database.get_session_ctx")
+    async def test_mixed_results_with_skip(self, mock_ctx):
+        """Some active bugs failed + pre-skipped → overall 'failed'."""
+        from workflow.temporal.batch_activities import _sync_final_results
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
+        mock_session = AsyncMock()
+        mock_repo = AsyncMock()
+        mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
+        bugs = [
+            _make_bug_model(0, "completed"),
+            _make_bug_model(1, "skipped"),    # pre-scan
+            _make_bug_model(2, "failed"),      # active bug failed
+        ]
+        mock_repo.get.return_value = _make_job_model(bugs=bugs)
+        mock_repo.update_bug_status = AsyncMock()
+        mock_repo.update_status = AsyncMock()
 
-        with patch.dict(
-            "os.environ",
-            {
-                "JIRA_URL": "https://jira.example.com",
-                "JIRA_EMAIL": "test@example.com",
-                "JIRA_API_TOKEN": "secret",
-            },
-        ):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await _jira_add_fix_comment(
-                    "https://jira.example.com/browse/XSZS-123",
-                    "https://github.com/org/repo/pull/42",
-                    "job_1",
+        with patch("app.repositories.batch_job.BatchJobRepository", return_value=mock_repo):
+            with patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock):
+                final_state = {
+                    "results": [
+                        {"status": "completed"},
+                        {"status": "failed", "error": "compile error"},
+                    ]
+                }
+                index_map = [0, 2]
+
+                await _sync_final_results(
+                    "job_1", final_state,
+                    [
+                        "https://jira.example.com/browse/TEST-0",
+                        "https://jira.example.com/browse/TEST-2",
+                    ],
+                    bug_index_offset=0,
+                    index_map=index_map,
+                    pre_skipped=1,
                 )
-                assert result is True
-                mock_client.post.assert_called_once()
-                # Verify URL contains the Jira key
-                pos_args, kwargs = mock_client.post.call_args
-                assert "XSZS-123" in pos_args[0]  # URL contains issue key
 
-    @pytest.mark.asyncio
-    async def test_jira_comment_no_credentials(self):
-        from workflow.temporal.batch_activities import _jira_add_fix_comment
-
-        with patch.dict("os.environ", {}, clear=True):
-            result = await _jira_add_fix_comment(
-                "https://jira.example.com/browse/XSZS-123",
-                None,
-                "job_1",
-            )
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_jira_comment_api_failure(self):
-        from workflow.temporal.batch_activities import _jira_add_fix_comment
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.dict(
-            "os.environ",
-            {
-                "JIRA_URL": "https://jira.example.com",
-                "JIRA_EMAIL": "test@example.com",
-                "JIRA_API_TOKEN": "secret",
-            },
-        ):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                result = await _jira_add_fix_comment(
-                    "https://jira.example.com/browse/XSZS-123",
-                    None,
-                    "job_1",
-                )
-                assert result is False
-
-    @pytest.mark.asyncio
-    async def test_jira_comment_includes_pr_url(self):
-        from workflow.temporal.batch_activities import _jira_add_fix_comment
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-
-        mock_client = AsyncMock()
-        mock_client.post = AsyncMock(return_value=mock_resp)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-
-        with patch.dict(
-            "os.environ",
-            {
-                "JIRA_URL": "https://jira.example.com",
-                "JIRA_EMAIL": "test@example.com",
-                "JIRA_API_TOKEN": "secret",
-            },
-        ):
-            with patch("httpx.AsyncClient", return_value=mock_client):
-                await _jira_add_fix_comment(
-                    "https://jira.example.com/browse/XSZS-123",
-                    "https://github.com/org/repo/pull/42",
-                    "job_1",
-                )
-                _, kwargs = mock_client.post.call_args
-                comment_text = kwargs["json"]["body"]["content"][0]["content"][0]["text"]
-                assert "https://github.com/org/repo/pull/42" in comment_text
+                # Overall should be "failed" because bug 2 failed
+                mock_repo.update_status.assert_called_with("job_1", "failed")
 
 
-class TestGitRecoverOriginalBranch:
-    """Test branch recovery helper for exception handlers."""
+# ---------------------------------------------------------------------------
+# 27. T105: Integration — pre-scan in execute_batch_bugfix_activity
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_recover_from_fix_branch(self):
-        from workflow.temporal.batch_activities import _git_recover_original_branch
 
-        call_count = {"n": 0}
+class TestPrescanIntegration:
+    """Test pre-scan integration in execute_batch_bugfix_activity."""
 
-        async def mock_git_run(cwd, *args):
-            call_count["n"] += 1
-            cmd = " ".join(args)
-            if "rev-parse --abbrev-ref HEAD" in cmd:
-                return (0, "fix/xszs-123")
-            if "rev-parse --abbrev-ref fix/xszs-123@{upstream}" in cmd:
-                return (1, "")  # No upstream
-            if "rev-parse --verify main" in cmd:
-                return (0, "abc123")
-            if "status --porcelain" in cmd:
-                return (0, "")  # No changes
-            if "checkout main" in cmd:
-                return (0, "")
-            if "branch -D fix/xszs-123" in cmd:
-                return (0, "")
-            return (0, "")
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_job_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._preflight_check", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._prescan_closed_bugs", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities.activity")
+    async def test_all_bugs_closed_returns_early(
+        self, mock_activity, mock_prescan, mock_preflight,
+        mock_update_job, mock_update_bug, mock_push,
+    ):
+        """When all bugs are resolved, activity should return early with success."""
+        from workflow.temporal.batch_activities import execute_batch_bugfix_activity
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            side_effect=mock_git_run,
-        ):
-            await _git_recover_original_branch("/tmp/repo", "job_1")
-            assert call_count["n"] >= 3  # At least: get branch, check base, switch
+        mock_preflight.return_value = (True, [])
+        mock_prescan.return_value = {0, 1, 2}  # All 3 bugs closed
+        mock_activity.info.return_value.attempt = 1
+        mock_update_job.return_value = True
+        mock_update_bug.return_value = True
 
-    @pytest.mark.asyncio
-    async def test_no_recovery_needed_on_main(self):
-        from workflow.temporal.batch_activities import _git_recover_original_branch
+        params = {
+            "job_id": "job_all_skip",
+            "jira_urls": [
+                "https://jira.example.com/browse/TEST-1",
+                "https://jira.example.com/browse/TEST-2",
+                "https://jira.example.com/browse/TEST-3",
+            ],
+            "cwd": "/tmp/test",
+            "config": {},
+        }
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, "main"),
-        ) as mock_run:
-            await _git_recover_original_branch("/tmp/repo", "job_1")
-            # Only called once (get current branch) — no recovery needed
-            assert mock_run.call_count == 1
+        result = await execute_batch_bugfix_activity(params)
 
-    @pytest.mark.asyncio
-    async def test_no_recovery_on_non_fix_branch(self):
-        from workflow.temporal.batch_activities import _git_recover_original_branch
+        assert result["success"] is True
+        assert result.get("all_skipped") is True
 
-        with patch(
-            "workflow.temporal.batch_activities._git_run",
-            new_callable=AsyncMock,
-            return_value=(0, "feature/my-feature"),
-        ) as mock_run:
-            await _git_recover_original_branch("/tmp/repo", "job_1")
-            assert mock_run.call_count == 1
+        # Should have pushed bug_skipped events for all 3 bugs
+        bug_skipped_calls = [
+            c for c in mock_push.call_args_list if c[0][1] == "bug_skipped"
+        ]
+        assert len(bug_skipped_calls) == 3
+
+        # Should have pushed job_done with all skipped
+        job_done_calls = [
+            c for c in mock_push.call_args_list if c[0][1] == "job_done"
+        ]
+        assert len(job_done_calls) == 1
+        assert job_done_calls[0][0][2]["skipped"] == 3
+        assert job_done_calls[0][0][2]["status"] == "completed"
+
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_job_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._preflight_check", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._prescan_closed_bugs", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._execute_workflow", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._sync_final_results", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities.activity")
+    async def test_some_bugs_closed_passes_index_map(
+        self, mock_activity, mock_final_sync, mock_execute,
+        mock_prescan, mock_preflight, mock_update_job,
+        mock_update_bug, mock_push,
+    ):
+        """When some bugs are closed, index_map is built and passed correctly."""
+        from workflow.temporal.batch_activities import execute_batch_bugfix_activity
+
+        mock_preflight.return_value = (True, [])
+        mock_prescan.return_value = {1}  # Bug 1 closed
+        mock_activity.info.return_value.attempt = 1
+        mock_activity.heartbeat = MagicMock()
+        mock_update_job.return_value = True
+        mock_update_bug.return_value = True
+        mock_execute.return_value = {"results": [{"status": "completed"}, {"status": "completed"}]}
+
+        params = {
+            "job_id": "job_partial_skip",
+            "jira_urls": [
+                "https://jira.example.com/browse/TEST-0",
+                "https://jira.example.com/browse/TEST-1",  # closed
+                "https://jira.example.com/browse/TEST-2",
+            ],
+            "cwd": "/tmp/test",
+            "config": {},
+        }
+
+        result = await execute_batch_bugfix_activity(params)
+
+        assert result["success"] is True
+
+        # _execute_workflow should receive only active URLs
+        execute_call = mock_execute.call_args
+        active_urls = execute_call[0][1]  # second positional arg
+        assert len(active_urls) == 2
+        assert "TEST-1" not in str(active_urls)
+
+        # index_map should be [0, 2] (skip bug 1)
+        index_map = execute_call[0][5]  # sixth positional arg
+        assert index_map == [0, 2]
+
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_job_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._preflight_check", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._prescan_closed_bugs", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._execute_workflow", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._sync_final_results", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities.activity")
+    async def test_no_bugs_closed_no_index_map(
+        self, mock_activity, mock_final_sync, mock_execute,
+        mock_prescan, mock_preflight, mock_update_job,
+        mock_update_bug, mock_push,
+    ):
+        """When no bugs are closed, index_map is None and all URLs pass through."""
+        from workflow.temporal.batch_activities import execute_batch_bugfix_activity
+
+        mock_preflight.return_value = (True, [])
+        mock_prescan.return_value = set()  # No bugs closed
+        mock_activity.info.return_value.attempt = 1
+        mock_activity.heartbeat = MagicMock()
+        mock_update_job.return_value = True
+        mock_update_bug.return_value = True
+        mock_execute.return_value = {"results": [{"status": "completed"}]}
+
+        params = {
+            "job_id": "job_no_skip",
+            "jira_urls": ["https://jira.example.com/browse/TEST-0"],
+            "cwd": "/tmp/test",
+            "config": {},
+        }
+
+        result = await execute_batch_bugfix_activity(params)
+        assert result["success"] is True
+
+        # _execute_workflow should receive original URLs and None index_map
+        execute_call = mock_execute.call_args
+        active_urls = execute_call[0][1]
+        assert len(active_urls) == 1
+        index_map = execute_call[0][5]
+        assert index_map is None
+
+    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._update_job_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._preflight_check", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities._prescan_closed_bugs", new_callable=AsyncMock)
+    @patch("workflow.temporal.batch_activities.activity")
+    async def test_skipped_bugs_marked_in_db(
+        self, mock_activity, mock_prescan, mock_preflight,
+        mock_update_job, mock_update_bug, mock_push,
+    ):
+        """Pre-scan skipped bugs should be marked as 'skipped' in DB."""
+        from workflow.temporal.batch_activities import execute_batch_bugfix_activity
+
+        mock_preflight.return_value = (True, [])
+        mock_prescan.return_value = {0, 1, 2}  # All closed
+        mock_activity.info.return_value.attempt = 1
+        mock_update_job.return_value = True
+        mock_update_bug.return_value = True
+
+        params = {
+            "job_id": "job_db_skip",
+            "jira_urls": [
+                "https://jira.example.com/browse/TEST-1",
+                "https://jira.example.com/browse/TEST-2",
+                "https://jira.example.com/browse/TEST-3",
+            ],
+            "cwd": "/tmp/test",
+            "config": {},
+        }
+
+        await execute_batch_bugfix_activity(params)
+
+        # DB should have been called with "skipped" for all 3 bugs
+        skip_calls = [
+            c for c in mock_update_bug.call_args_list
+            if len(c[0]) >= 3 and c[0][2] == "skipped"
+        ]
+        assert len(skip_calls) == 3
+        # Verify indices 0, 1, 2
+        skip_indices = sorted(c[0][1] for c in skip_calls)
+        assert skip_indices == [0, 1, 2]

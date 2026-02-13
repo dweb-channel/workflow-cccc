@@ -257,6 +257,26 @@ export interface BatchBugFixRequest {
     failure_policy?: "stop" | "skip" | "retry";
     max_retries?: number;
   };
+  dry_run?: boolean;
+}
+
+export interface DryRunBugPreview {
+  url: string;
+  jira_key: string;
+  expected_steps: string[];
+}
+
+export interface DryRunResponse {
+  dry_run: true;
+  total_bugs: number;
+  cwd: string;
+  config: {
+    validation_level: string;
+    failure_policy: string;
+    max_retries: number;
+  };
+  bugs: DryRunBugPreview[];
+  expected_steps_per_bug: string[];
 }
 
 export interface BatchBugFixResponse {
@@ -328,6 +348,15 @@ export async function submitBatchBugFix(payload: BatchBugFixRequest): Promise<Ba
     body: JSON.stringify(payload),
   });
   return handleResponse<BatchBugFixResponse>(response);
+}
+
+export async function submitDryRun(payload: BatchBugFixRequest): Promise<DryRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, dry_run: true }),
+  });
+  return handleResponse<DryRunResponse>(response);
 }
 
 export async function getBatchJobStatus(jobId: string): Promise<BatchJobStatusResponse> {

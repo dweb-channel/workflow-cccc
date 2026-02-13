@@ -111,6 +111,14 @@ export interface AIThinkingStats {
   cost: number;
 }
 
+// ============ DB Sync Warnings ============
+
+export interface DbSyncWarning {
+  bug_index: number;
+  message: string;
+  timestamp: string;
+}
+
 // ============ Metrics Types ============
 
 export interface StepMetrics {

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 # Database imports
@@ -58,6 +58,10 @@ class BatchBugFixRequest(BaseModel):
         description="Working directory for Claude CLI (defaults to current directory)",
     )
     config: Optional[BatchBugFixConfig] = None
+    dry_run: bool = Field(
+        default=False,
+        description="If true, return a preview without starting Temporal workflow",
+    )
 
     @field_validator("jira_urls")
     @classmethod
@@ -129,6 +133,27 @@ class BatchBugFixResponse(BaseModel):
     created_at: str
 
 
+class DryRunBugPreview(BaseModel):
+    """Preview of a single bug in dry-run mode."""
+    url: str
+    jira_key: str
+    expected_steps: List[str] = Field(
+        description="Ordered list of visible pipeline steps",
+    )
+
+
+class DryRunResponse(BaseModel):
+    """Response for POST /api/v2/batch/bug-fix with dry_run=true."""
+    dry_run: Literal[True] = True
+    total_bugs: int
+    cwd: str
+    config: BatchBugFixConfig
+    bugs: List[DryRunBugPreview]
+    expected_steps_per_bug: List[str] = Field(
+        description="Canonical step labels for each bug",
+    )
+
+
 class BatchJobStatusResponse(BaseModel):
     """Response for GET /api/v2/batch/bug-fix/{job_id}."""
     job_id: str
@@ -166,20 +191,56 @@ class BatchJobListResponse(BaseModel):
 # --- Batch Bug Fix Endpoints ---
 
 
-@router.post("/bug-fix", response_model=BatchBugFixResponse, status_code=201)
-async def create_batch_bug_fix(payload: BatchBugFixRequest):
-    """Start a batch bug fix job.
+def _extract_jira_key_from_url(url: str) -> str:
+    """Extract Jira issue key from URL (e.g. XSZS-15463)."""
+    match = re.search(r"([A-Z][A-Z0-9]+-\d+)", url)
+    return match.group(1) if match else url.rsplit("/", 1)[-1]
 
-    Dispatches bug fix tasks to Temporal Worker via BatchBugFixWorkflow.
-    Returns a job_id for tracking progress.
+
+# Canonical visible pipeline steps (matches NODE_TO_STEP in batch_activities)
+_DRY_RUN_STEPS = [
+    "获取 Bug 信息",
+    "修复 Bug",
+    "验证修复结果",
+    "修复完成 / 修复失败",
+]
+
+
+@router.post("/bug-fix", status_code=201)
+async def create_batch_bug_fix(payload: BatchBugFixRequest):
+    """Start a batch bug fix job, or return a dry-run preview.
+
+    If dry_run=true, returns a preview of what would happen without
+    creating a DB record or starting a Temporal workflow.
+    Otherwise dispatches bug fix tasks to Temporal Worker.
     """
-    # Generate job ID
+    cwd = payload.cwd or "."
+    config = payload.config or BatchBugFixConfig()
+
+    # --- Dry-run mode: preview only, no side effects ---
+    if payload.dry_run:
+        bugs_preview = [
+            DryRunBugPreview(
+                url=url.strip(),
+                jira_key=_extract_jira_key_from_url(url.strip()),
+                expected_steps=_DRY_RUN_STEPS,
+            )
+            for url in payload.jira_urls
+        ]
+        return JSONResponse(
+            status_code=200,
+            content=DryRunResponse(
+                total_bugs=len(bugs_preview),
+                cwd=cwd,
+                config=config,
+                bugs=bugs_preview,
+                expected_steps_per_bug=_DRY_RUN_STEPS,
+            ).model_dump(),
+        )
+
+    # --- Normal mode: create job + start workflow ---
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
-    cwd = payload.cwd or "."
-
-    # Create job record
-    config = payload.config or BatchBugFixConfig()
 
     # Save to database (include cwd in config for retry support)
     config_to_store = config.model_dump()
