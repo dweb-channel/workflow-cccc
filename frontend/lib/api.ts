@@ -416,3 +416,97 @@ export async function getActiveJob(): Promise<BatchJobStatusResponse | null> {
 export function getBatchJobStreamUrl(jobId: string): string {
   return `${API_BASE}/api/v2/batch/bug-fix/${jobId}/stream`;
 }
+
+// ============ Metrics API ============
+
+// Backend nested response structure
+interface MetricsRawJobsSection {
+  total: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+  success_rate: number;
+}
+
+interface MetricsRawBugsSection {
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  success_rate: number;
+}
+
+interface MetricsRawTimingSection {
+  avg_bug_ms: number;
+  avg_job_ms: number;
+}
+
+interface MetricsRawStepData {
+  step_name: string;
+  label: string;
+  avg_duration_ms: number;
+  success_rate: number;
+  total_executions: number;
+}
+
+interface MetricsRawResponse {
+  jobs: MetricsRawJobsSection;
+  bugs: MetricsRawBugsSection;
+  timing: MetricsRawTimingSection;
+  most_failed_steps: MetricsRawStepData[];
+  recent_jobs: MetricsJobSummary[];
+}
+
+// Frontend-friendly flat types (mapped from backend)
+export interface MetricsStepData {
+  step_name: string;
+  label: string;
+  avg_duration_ms: number;
+  success_rate: number;
+  total_executions: number;
+}
+
+export interface MetricsJobSummary {
+  job_id: string;
+  status: string;
+  total_bugs: number;
+  completed: number;
+  failed: number;
+  success_rate: number;
+  avg_bug_duration_ms: number;
+  total_duration_ms: number;
+  created_at: string;
+}
+
+export interface GlobalMetricsResponse {
+  total_jobs: number;
+  total_bugs: number;
+  overall_success_rate: number;
+  avg_bug_duration_ms: number;
+  avg_job_duration_ms: number;
+  step_metrics: MetricsStepData[];
+  recent_jobs: MetricsJobSummary[];
+}
+
+function mapRawMetrics(raw: MetricsRawResponse): GlobalMetricsResponse {
+  return {
+    total_jobs: raw.jobs.total,
+    total_bugs: raw.bugs.total,
+    overall_success_rate: raw.bugs.success_rate,
+    avg_bug_duration_ms: raw.timing.avg_bug_ms,
+    avg_job_duration_ms: raw.timing.avg_job_ms,
+    step_metrics: raw.most_failed_steps ?? [],
+    recent_jobs: raw.recent_jobs ?? [],
+  };
+}
+
+export async function getGlobalMetrics(): Promise<GlobalMetricsResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/batch/metrics/global`);
+  const raw = await handleResponse<MetricsRawResponse>(response);
+  return mapRawMetrics(raw);
+}
+
+export async function getJobMetrics(jobId: string): Promise<MetricsJobSummary> {
+  const response = await fetch(`${API_BASE}/api/v2/batch/metrics/job/${jobId}`);
+  return handleResponse<MetricsJobSummary>(response);
+}

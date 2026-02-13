@@ -568,6 +568,40 @@ async def batch_delete_jobs(request: BatchDeleteRequest):
     )
 
 
+# --- Metrics Endpoints ---
+
+
+@router.get("/metrics/job/{job_id}")
+async def get_job_metrics(job_id: str):
+    """Get detailed metrics for a single batch job.
+
+    Returns timing stats (avg/min/max per bug), success rate,
+    retry statistics, and step-level performance breakdown.
+    """
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        metrics = await repo.get_job_metrics(job_id)
+
+    if metrics is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    return metrics
+
+
+@router.get("/metrics/global")
+async def get_global_metrics():
+    """Get aggregated metrics across all completed batch jobs.
+
+    Returns total job/bug counts, overall success rate,
+    average timing, and most-failed steps ranking.
+    """
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        metrics = await repo.get_global_metrics()
+
+    return metrics
+
+
 # --- Jira Integration Endpoints ---
 
 jira_router = APIRouter(prefix="/api/v2/jira", tags=["jira"])

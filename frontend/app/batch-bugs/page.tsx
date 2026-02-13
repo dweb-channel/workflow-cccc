@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { FileEdit, Play } from "lucide-react";
+import { FileEdit, Play, BarChart3 } from "lucide-react";
 
 import type { ValidationLevel, FailurePolicy } from "./types";
 import { useBatchJob } from "./hooks/useBatchJob";
@@ -17,6 +17,7 @@ import { OverviewTab } from "./components/OverviewTab";
 import { HistoryCard } from "./components/HistoryCard";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { PipelineBar } from "./components/PipelineBar";
+import { MetricsTab } from "./components/MetricsTab";
 
 /* ================================================================
    BatchBugsPage — Two-tab layout:
@@ -148,6 +149,15 @@ export default function BatchBugsPage() {
             >
               <span className="inline-flex items-center gap-1.5">
                 <Play className="h-3.5 w-3.5" /> 执行{executionTabSuffix}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger
+              value="metrics"
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
+              data-testid="tab-metrics"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <BarChart3 className="h-3.5 w-3.5" /> 度量
               </span>
             </TabsTrigger>
           </TabsList>
@@ -315,6 +325,14 @@ export default function BatchBugsPage() {
                 </div>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Metrics Tab — loaded on demand, no forceMount needed */}
+          <TabsContent
+            value="metrics"
+            className="flex-1 overflow-hidden"
+          >
+            <MetricsTab />
           </TabsContent>
         </Tabs>
     </div>

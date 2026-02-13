@@ -110,3 +110,35 @@ export interface AIThinkingStats {
   tokens_out: number;
   cost: number;
 }
+
+// ============ Metrics Types ============
+
+export interface StepMetrics {
+  step_name: string;
+  label: string;
+  avg_duration_ms: number;
+  success_rate: number;
+  total_executions: number;
+}
+
+export interface JobMetricsSummary {
+  job_id: string;
+  status: string;
+  total_bugs: number;
+  completed: number;
+  failed: number;
+  success_rate: number;
+  avg_bug_duration_ms: number;
+  total_duration_ms: number;
+  created_at: string;
+}
+
+export interface GlobalMetrics {
+  total_jobs: number;
+  total_bugs: number;
+  overall_success_rate: number;
+  avg_bug_duration_ms: number;
+  avg_job_duration_ms: number;
+  step_metrics: StepMetrics[];
+  recent_jobs: JobMetricsSummary[];
+}
