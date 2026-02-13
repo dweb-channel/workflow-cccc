@@ -1,16 +1,13 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import type { BatchJob, BatchJobStats } from "../types";
 
 interface OverviewTabProps {
   currentJob: BatchJob | null;
   stats: BatchJobStats;
-  onCancel: () => void;
 }
 
-export function OverviewTab({ currentJob, stats, onCancel }: OverviewTabProps) {
+export function OverviewTab({ currentJob, stats }: OverviewTabProps) {
   if (!currentJob) {
     return (
       <div
@@ -39,54 +36,38 @@ export function OverviewTab({ currentJob, stats, onCancel }: OverviewTabProps) {
           ? "已取消"
           : "修复中";
 
-  const dotColor =
-    currentJob.job_status === "completed"
-      ? "bg-green-500"
-      : currentJob.job_status === "failed" || currentJob.job_status === "cancelled"
-        ? "bg-red-500"
-        : "bg-blue-500 animate-pulse";
+  const statusStyle: Record<string, { bg: string; text: string; dot: string }> = {
+    running:   { bg: "bg-blue-50",   text: "text-blue-800",  dot: "bg-blue-500 animate-pulse" },
+    completed: { bg: "bg-green-50",  text: "text-green-800", dot: "bg-green-500" },
+    failed:    { bg: "bg-red-50",    text: "text-red-800",   dot: "bg-red-500" },
+    cancelled: { bg: "bg-amber-50",  text: "text-amber-800", dot: "bg-amber-500" },
+  };
+  const style = statusStyle[currentJob.job_status] ?? statusStyle.running;
 
   return (
     <div className="space-y-4" data-testid="tab-overview">
       {/* Current task status */}
-      <div className="rounded-lg bg-green-50 p-3">
+      <div className={`rounded-lg p-3 ${style.bg}`}>
         <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-          <span className="text-sm font-medium text-green-800">
+          <span className={`h-2 w-2 rounded-full ${style.dot}`} />
+          <span className={`text-sm font-medium ${style.text}`}>
             {statusLabel}
           </span>
         </div>
         <p className="mt-1 text-xs text-slate-500">
-          {stats.completed}/{total} 完成
+          {stats.completed}/{total} 完成 · {progressPct}%
         </p>
-      </div>
-
-      {/* Header with progress */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Badge className="border-slate-200 bg-slate-50 text-slate-700">
-            {stats.completed}/{total} 完成
-          </Badge>
-          <span className="text-xs text-slate-400">{progressPct}%</span>
-        </div>
-        {currentJob.job_status !== "completed" &&
-          currentJob.job_status !== "failed" &&
-          currentJob.job_status !== "cancelled" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-              onClick={onCancel}
-            >
-              取消
-            </Button>
-          )}
       </div>
 
       {/* Progress bar */}
       <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
         <div
-          className="h-full rounded-full bg-green-500 transition-all duration-500"
+          className={`h-full rounded-full transition-all duration-500 ${
+            currentJob.job_status === "failed" ? "bg-red-500"
+            : currentJob.job_status === "cancelled" ? "bg-amber-500"
+            : currentJob.job_status === "completed" ? "bg-green-500"
+            : "bg-blue-500"
+          }`}
           style={{ width: `${progressPct}%` }}
         />
       </div>

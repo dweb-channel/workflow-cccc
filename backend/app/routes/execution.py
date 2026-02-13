@@ -9,8 +9,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_session
-from ..repository import WorkflowRepository
-from ..schemas import DynamicRunRequest, DynamicRunResponse
+from ..repositories.workflow import WorkflowRepository
+from ..models.schemas import DynamicRunRequest, DynamicRunResponse
 from ..sse import sse_event_generator
 from ..temporal_adapter import start_dynamic_workflow
 from .workflows import _build_workflow_definition, validate_workflow_graph

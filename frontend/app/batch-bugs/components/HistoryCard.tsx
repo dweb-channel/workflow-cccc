@@ -1,6 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { BatchJob, BatchJobHistoryItem } from "../types";
 
 interface HistoryCardProps {
@@ -28,6 +39,8 @@ export function HistoryCard({
   onToggleDetails,
   onDelete,
 }: HistoryCardProps) {
+  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
+
   return (
     <div>
       <div className="flex items-center justify-between pb-3">
@@ -81,7 +94,7 @@ export function HistoryCard({
                       title="删除"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onDelete(job.job_id);
+                        setDeleteJobId(job.job_id);
                       }}
                     >
                       ✕
@@ -143,6 +156,32 @@ export function HistoryCard({
           </div>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!deleteJobId} onOpenChange={(open) => !open && setDeleteJobId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>确认删除？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定要删除任务 <span className="font-mono">{deleteJobId}</span> 吗？此操作无法撤销。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => {
+                if (deleteJobId && onDelete) {
+                  onDelete(deleteJobId);
+                }
+                setDeleteJobId(null);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

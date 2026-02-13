@@ -94,7 +94,7 @@ export function MetricsTab() {
         <SummaryCard
           icon={<CheckCircle className="h-4 w-4 text-green-500" />}
           label="整体成功率"
-          value={`${metrics.overall_success_rate.toFixed(1)}%`}
+          value={`${(metrics.overall_success_rate ?? 0).toFixed(1)}%`}
           bg="bg-green-50"
         />
         <SummaryCard
@@ -191,10 +191,11 @@ function SummaryCard({
 }
 
 function StepRow({ step }: { step: StepMetrics }) {
-  const successPct = step.success_rate.toFixed(0);
+  const rate = step.success_rate ?? 0;
+  const successPct = rate.toFixed(0);
   const barColor =
-    step.success_rate >= 0.8 ? "bg-green-500" :
-    step.success_rate >= 0.5 ? "bg-amber-500" : "bg-red-500";
+    rate >= 0.8 ? "bg-green-500" :
+    rate >= 0.5 ? "bg-amber-500" : "bg-red-500";
 
   return (
     <tr className="border-b last:border-0">
@@ -228,7 +229,7 @@ function RecentJobRow({ job }: { job: JobMetricsSummary }) {
     running: { color: "text-blue-600", label: "运行中" },
   };
   const sc = statusConfig[job.status] ?? { color: "text-slate-600", label: job.status };
-  const successPct = job.success_rate.toFixed(0);
+  const successPct = (job.success_rate ?? 0).toFixed(0);
 
   return (
     <div className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-slate-50 transition-colors">
@@ -253,6 +254,7 @@ function RecentJobRow({ job }: { job: JobMetricsSummary }) {
 /* ---- Helpers ---- */
 
 function formatDuration(ms: number): string {
+  if (ms == null || isNaN(ms)) return "-";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   const mins = Math.floor(ms / 60000);

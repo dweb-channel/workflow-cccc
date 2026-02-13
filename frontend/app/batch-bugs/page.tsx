@@ -5,6 +5,16 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { FileEdit, Play, BarChart3, Eye, X } from "lucide-react";
 
 import type { DryRunResponse } from "@/lib/api";
@@ -28,10 +38,17 @@ import { MetricsTab } from "./components/MetricsTab";
    Both tabs stay mounted (forceMount) to preserve SSE + scroll.
    ================================================================ */
 
+const LS_KEY_CWD = "batch-bugs-target-cwd";
+
 export default function BatchBugsPage() {
   // Form inputs
   const [jiraUrls, setJiraUrls] = useState("");
-  const [targetCwd, setTargetCwd] = useState("");
+  const [targetCwd, setTargetCwd] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem(LS_KEY_CWD) ?? "";
+    }
+    return "";
+  });
   const [validationLevel, setValidationLevel] =
     useState<ValidationLevel>("standard");
   const [failurePolicy, setFailurePolicy] =
@@ -41,6 +58,16 @@ export default function BatchBugsPage() {
   const [activeTab, setActiveTab] = useState<string>("config");
   const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+
+  // Persist targetCwd to localStorage
+  useEffect(() => {
+    if (targetCwd) {
+      localStorage.setItem(LS_KEY_CWD, targetCwd);
+    } else {
+      localStorage.removeItem(LS_KEY_CWD);
+    }
+  }, [targetCwd]);
 
   // Hooks
   const { currentJob, submitting, stats, submit, cancel, retryBug, sseConnected, aiThinkingEvents, aiThinkingStats, dbSyncWarnings } = useBatchJob();
@@ -202,19 +229,6 @@ export default function BatchBugsPage() {
             <div className="flex flex-1 h-full gap-6 overflow-hidden">
               {/* Left: Input form */}
               <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2">
-                <BugInput
-                  jiraUrls={jiraUrls}
-                  onJiraUrlsChange={setJiraUrls}
-                  parseJiraUrls={parseJiraUrls}
-                />
-
-                <ConfigOptions
-                  validationLevel={validationLevel}
-                  failurePolicy={failurePolicy}
-                  onValidationLevelChange={setValidationLevel}
-                  onFailurePolicyChange={setFailurePolicy}
-                />
-
                 <Card>
                   <CardContent className="pt-4 pb-3 space-y-2">
                     <Label className="text-xs">目标代码库路径</Label>
@@ -228,6 +242,19 @@ export default function BatchBugsPage() {
                   </CardContent>
                 </Card>
 
+                <BugInput
+                  jiraUrls={jiraUrls}
+                  onJiraUrlsChange={setJiraUrls}
+                  parseJiraUrls={parseJiraUrls}
+                />
+
+                <ConfigOptions
+                  validationLevel={validationLevel}
+                  failurePolicy={failurePolicy}
+                  onValidationLevelChange={setValidationLevel}
+                  onFailurePolicyChange={setFailurePolicy}
+                />
+
                 <div className="flex gap-3">
                   <Button
                     variant="outline"
@@ -238,9 +265,11 @@ export default function BatchBugsPage() {
                     {dryRunLoading ? "预览中..." : "预览"}
                   </Button>
                   <Button
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
                     onClick={handleSubmit}
                     disabled={submitting || parseJiraUrls().length === 0}
                   >
+                    <Play className="mr-1.5 h-3.5 w-3.5" />
                     {submitting ? "提交中..." : "开始修复"}
                   </Button>
                 </div>
@@ -257,7 +286,7 @@ export default function BatchBugsPage() {
               </div>
 
               {/* Right: History */}
-              <div className="w-[380px] shrink-0 overflow-y-auto">
+              <div className="w-[360px] shrink-0 overflow-y-auto">
                 <Card>
                   <CardContent className="p-4">
                     <HistoryCard
@@ -307,7 +336,7 @@ export default function BatchBugsPage() {
                 </div>
 
                 {/* Right: Overview / History panel (320px) */}
-                <div className="w-[320px] shrink-0 overflow-hidden">
+                <div className="w-[360px] shrink-0 overflow-hidden">
                   <Card className="h-full flex flex-col">
                     <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
                       <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
@@ -331,7 +360,6 @@ export default function BatchBugsPage() {
                             <OverviewTab
                               currentJob={currentJob}
                               stats={stats}
-                              onCancel={cancel}
                             />
                             {/* Action buttons */}
                             <div className="mt-4 flex gap-2">
@@ -340,7 +368,7 @@ export default function BatchBugsPage() {
                                   variant="outline"
                                   size="sm"
                                   className="flex-1 text-red-600 border-red-200 hover:bg-red-50"
-                                  onClick={cancel}
+                                  onClick={() => setShowCancelConfirm(true)}
                                 >
                                   取消任务
                                 </Button>
@@ -387,6 +415,30 @@ export default function BatchBugsPage() {
             <MetricsTab />
           </TabsContent>
         </Tabs>
+
+        {/* Cancel task confirmation dialog */}
+        <AlertDialog open={showCancelConfirm} onOpenChange={setShowCancelConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>确认取消？</AlertDialogTitle>
+              <AlertDialogDescription>
+                当前任务进度 {stats.completed}/{currentJob?.bugs.length ?? 0} 完成。取消后正在执行的 Bug 修复将被中断，已完成的不受影响。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>继续执行</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => {
+                  cancel();
+                  setShowCancelConfirm(false);
+                }}
+              >
+                确认取消
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
     </div>
   );
 }

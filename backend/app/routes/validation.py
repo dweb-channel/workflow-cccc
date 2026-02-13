@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from workflow.nodes.registry import list_node_types
 
 from ..database import get_session
-from ..repository import WorkflowRepository
-from ..schemas import (
+from ..repositories.workflow import WorkflowRepository
+from ..models.schemas import (
     GraphDefinitionRequest,
     NodeTypeResponse,
     ValidationErrorResponse,
