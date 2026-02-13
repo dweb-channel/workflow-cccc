@@ -181,7 +181,10 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
     # Create job record
     config = payload.config or BatchBugFixConfig()
 
-    # Save to database
+    # Save to database (include cwd in config for retry support)
+    config_to_store = config.model_dump()
+    config_to_store["cwd"] = cwd
+
     async with get_session_ctx() as session:
         repo = BatchJobRepository(session)
         await repo.create(
@@ -190,7 +193,7 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
             jira_urls=payload.jira_urls,
             fixer_peer_id="",
             verifier_peer_id="",
-            config=config.model_dump(),
+            config=config_to_store,
         )
         logger.info(f"Job {job_id}: Saved to database")
 
@@ -498,6 +501,108 @@ async def cancel_batch_job(job_id: str):
         job_id=job_id,
         status="cancelled",
         message="Job cancelled successfully",
+    )
+
+
+@router.post("/bug-fix/{job_id}/retry/{bug_index}", response_model=JobControlResponse)
+async def retry_single_bug(job_id: str, bug_index: int):
+    """Retry a single failed bug in a batch job.
+
+    Resets the bug's status to pending, starts a new Temporal workflow
+    for just this one bug, and returns control response.
+    """
+    # 1. Validate job exists
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        db_job = await repo.get(job_id)
+
+    if not db_job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    # 2. Validate bug exists
+    target_bug = None
+    for b in db_job.bugs:
+        if b.bug_index == bug_index:
+            target_bug = b
+            break
+
+    if not target_bug:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bug at index {bug_index} not found in job '{job_id}'",
+        )
+
+    # 3. Validate bug is in a retryable state
+    if target_bug.status not in ("failed", "skipped"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bug at index {bug_index} has status '{target_bug.status}', "
+            f"can only retry failed/skipped bugs",
+        )
+
+    # 4. Reset bug status in DB
+    async with get_session_ctx() as session:
+        repo = BatchJobRepository(session)
+        bug = await repo.get_bug(job_id, bug_index)
+        if bug:
+            bug.status = "pending"
+            bug.error = None
+            bug.started_at = None
+            bug.completed_at = None
+            bug.steps = None
+            await session.flush()
+        await repo.update_status(job_id, "running")
+
+    # 5. Recover config and cwd from stored job config
+    stored_config = db_job.config or {}
+    cwd = stored_config.pop("cwd", ".")
+    # Remaining keys are the workflow config (validation_level, etc.)
+    workflow_config = {
+        k: v for k, v in stored_config.items()
+        if k in ("validation_level", "failure_policy", "max_retries")
+    }
+
+    # 6. Start new Temporal workflow for this single bug
+    retry_workflow_id = f"batch-{job_id}-retry-{bug_index}-{uuid.uuid4().hex[:8]}"
+    workflow_params = {
+        "job_id": job_id,
+        "jira_urls": [target_bug.url],
+        "cwd": cwd,
+        "config": workflow_config,
+        "bug_index_offset": bug_index,
+    }
+
+    try:
+        client = await get_client()
+        await client.start_workflow(
+            "BatchBugFixWorkflow",
+            workflow_params,
+            id=retry_workflow_id,
+            task_queue=TASK_QUEUE,
+        )
+        logger.info(
+            f"Job {job_id}: Retry workflow started for bug {bug_index} "
+            f"(workflow_id={retry_workflow_id})"
+        )
+    except Exception as e:
+        logger.error(f"Job {job_id}: Failed to start retry workflow: {e}")
+        # Revert status on failure
+        try:
+            async with get_session_ctx() as session:
+                repo = BatchJobRepository(session)
+                await repo.update_bug_status(job_id, bug_index, "failed", error=str(e))
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to start retry workflow: {e}. Is Temporal running?",
+        )
+
+    return JobControlResponse(
+        success=True,
+        job_id=job_id,
+        status="running",
+        message=f"Retry started for bug {bug_index}",
     )
 
 

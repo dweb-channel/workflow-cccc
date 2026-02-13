@@ -25,6 +25,7 @@ interface ActivityFeedProps {
   aiStats: AIThinkingStats;
   activeBugIndex: number | null;
   onBugSelect: (index: number | null) => void;
+  onRetryBug?: (bugIndex: number) => void;
 }
 
 // ---- Node label mapping ----
@@ -148,6 +149,7 @@ export function ActivityFeed({
   aiStats,
   activeBugIndex,
   onBugSelect,
+  onRetryBug,
 }: ActivityFeedProps) {
   const [expandedBugs, setExpandedBugs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -239,6 +241,7 @@ export function ActivityFeed({
               bugIndex={idx}
               events={bugEvents}
               onCollapse={() => toggleBug(idx)}
+              onRetry={onRetryBug ? () => onRetryBug(idx) : undefined}
             />
           ) : (
             <CollapsedBugRow
@@ -247,6 +250,7 @@ export function ActivityFeed({
               bugIndex={idx}
               events={bugEvents}
               onExpand={() => toggleBug(idx)}
+              onRetry={onRetryBug ? () => onRetryBug(idx) : undefined}
             />
           );
         })}
@@ -288,11 +292,13 @@ function CollapsedBugRow({
   bugIndex,
   events,
   onExpand,
+  onRetry,
 }: {
   bug: BugStatus;
   bugIndex: number;
   events: AIThinkingEvent[];
   onExpand: () => void;
+  onRetry?: () => void;
 }) {
   const bgColor = bug.status === "completed" ? "#f0fdf4"
     : bug.status === "failed" || bug.status === "skipped" ? "#fef2f2"
@@ -309,10 +315,10 @@ function CollapsedBugRow({
     : "\u23F3";
 
   return (
-    <button
-      onClick={onExpand}
-      className="flex w-full items-center gap-2.5 border-b border-[#e2e8f0] px-4 py-3 text-left transition-colors hover:bg-[#f8fafc]"
+    <div
+      className="flex w-full items-center gap-2.5 border-b border-[#e2e8f0] px-4 py-3 text-left transition-colors hover:bg-[#f8fafc] cursor-pointer"
       style={{ backgroundColor: bgColor }}
+      onClick={onExpand}
     >
       <span className="text-sm">{statusIcon}</span>
       <span className="font-mono text-[13px] font-semibold" style={{ color: iconColor }}>
@@ -321,8 +327,16 @@ function CollapsedBugRow({
       <span className="flex-1 truncate text-xs" style={{ color: iconColor }}>
         {getBugSummaryText(bug, events)}
       </span>
+      {bug.status === "failed" && onRetry && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRetry(); }}
+          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-[#2563eb] bg-[#dbeafe] hover:bg-[#bfdbfe] transition-colors"
+        >
+          重试
+        </button>
+      )}
       <span className="text-[11px] text-[#94a3b8]">展开 ▾</span>
-    </button>
+    </div>
   );
 }
 
@@ -335,28 +349,38 @@ function ExpandedBugSection({
   bugIndex,
   events,
   onCollapse,
+  onRetry,
 }: {
   bug: BugStatus;
   bugIndex: number;
   events: AIThinkingEvent[];
   onCollapse: () => void;
+  onRetry?: () => void;
 }) {
   const feedItems = useMemo(() => buildFeedItems(events), [events]);
 
   return (
     <div className="border-b border-[#e2e8f0]">
       {bug.status !== "in_progress" && (
-        <button
+        <div
           onClick={onCollapse}
-          className="flex w-full items-center gap-2.5 bg-[#f8fafc] px-4 py-2 text-left border-b border-[#f1f5f9] hover:bg-[#f1f5f9] transition-colors"
+          className="flex w-full items-center gap-2.5 bg-[#f8fafc] px-4 py-2 text-left border-b border-[#f1f5f9] hover:bg-[#f1f5f9] transition-colors cursor-pointer"
         >
           <span className="text-sm">
             {bug.status === "completed" ? "\u2705" : bug.status === "failed" ? "\u274C" : "\u23F3"}
           </span>
           <span className="font-mono text-[13px] font-semibold text-[#0f172a]">{bug.bug_id}</span>
           <div className="flex-1" />
+          {bug.status === "failed" && onRetry && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRetry(); }}
+              className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-[#2563eb] bg-[#dbeafe] hover:bg-[#bfdbfe] transition-colors"
+            >
+              重试
+            </button>
+          )}
           <span className="text-[11px] text-[#94a3b8]">收起 ▴</span>
-        </button>
+        </div>
       )}
 
       <div className="space-y-0">

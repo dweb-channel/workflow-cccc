@@ -4,6 +4,7 @@ import {
   getBatchJobStreamUrl,
   getBatchJobStatus,
   cancelBatchJob,
+  retryBug as retryBugApi,
   getActiveJob,
   type BatchBugFixRequest,
 } from "@/lib/api";
@@ -410,6 +411,39 @@ export function useBatchJob() {
     }
   }, [currentJob, toast]);
 
+  // Retry a single failed bug
+  const retryBug = useCallback(async (bugIndex: number) => {
+    if (!currentJob) return;
+    try {
+      await retryBugApi(currentJob.job_id, bugIndex);
+      // Reset local bug state and mark job as running to reconnect SSE
+      setCurrentJob((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          job_status: "running",
+          bugs: prev.bugs.map((bug, idx) =>
+            idx === bugIndex
+              ? { ...bug, status: "pending" as const, error: undefined, steps: [] }
+              : bug
+          ),
+        };
+      });
+      // Clear AI thinking events for the retried bug
+      setAiThinkingEvents((prev) => prev.filter((e) => e.bug_index !== bugIndex));
+      toast({
+        title: "重试已启动",
+        description: `Bug ${bugIndex + 1} 正在重新修复`,
+      });
+    } catch (err) {
+      toast({
+        title: "重试失败",
+        description: err instanceof Error ? err.message : "未知错误",
+        variant: "destructive",
+      });
+    }
+  }, [currentJob, toast]);
+
   // Calculate stats
   const stats: BatchJobStats = currentJob
     ? {
@@ -429,6 +463,7 @@ export function useBatchJob() {
     stats,
     submit,
     cancel,
+    retryBug,
     aiThinkingEvents,
     aiThinkingStats,
   };

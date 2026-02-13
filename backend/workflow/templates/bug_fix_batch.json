@@ -97,7 +97,7 @@
       "config": {
         "name": "检查重试",
         "description": "检查是否可以重试（retry_count < max_retries）",
-        "condition": "retry_count < 3",
+        "condition": "retry_count < config.max_retries",
         "true_branch": "increment_retry",
         "false_branch": "update_failure"
       }

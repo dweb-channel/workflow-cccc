@@ -349,6 +349,16 @@ export async function deleteBatchJob(jobId: string): Promise<{ success: boolean;
   return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
 }
 
+export async function retryBug(
+  jobId: string,
+  bugIndex: number
+): Promise<{ success: boolean; job_id: string; status: string; message: string }> {
+  const response = await fetch(`${API_BASE}/api/v2/batch/bug-fix/${jobId}/retry/${bugIndex}`, {
+    method: "POST",
+  });
+  return handleResponse<{ success: boolean; job_id: string; status: string; message: string }>(response);
+}
+
 // --- Jira JQL Query API ---
 
 export interface JiraBug {
