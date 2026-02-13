@@ -39,7 +39,7 @@ export default function BatchBugsPage() {
   const [activeTab, setActiveTab] = useState<string>("config");
 
   // Hooks
-  const { currentJob, submitting, stats, submit, cancel, retryBug, aiThinkingEvents, aiThinkingStats } = useBatchJob();
+  const { currentJob, submitting, stats, submit, cancel, retryBug, sseConnected, aiThinkingEvents, aiThinkingStats } = useBatchJob();
   const history = useJobHistory();
 
   // Auto-switch to execution tab when job starts running
@@ -252,6 +252,7 @@ export default function BatchBugsPage() {
                     activeBugIndex={activeBugIndex}
                     onBugSelect={setActiveBugIndex}
                     onRetryBug={retryBug}
+                    sseConnected={sseConnected}
                   />
                 </div>
 

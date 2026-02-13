@@ -26,6 +26,7 @@ interface ActivityFeedProps {
   activeBugIndex: number | null;
   onBugSelect: (index: number | null) => void;
   onRetryBug?: (bugIndex: number) => void;
+  sseConnected?: boolean;
 }
 
 // ---- Node label mapping ----
@@ -150,6 +151,7 @@ export function ActivityFeed({
   activeBugIndex,
   onBugSelect,
   onRetryBug,
+  sseConnected = true,
 }: ActivityFeedProps) {
   const [expandedBugs, setExpandedBugs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -227,6 +229,16 @@ export function ActivityFeed({
           </span>
         )}
       </div>
+
+      {/* ---- SSE Disconnect Banner ---- */}
+      {!sseConnected && (
+        <div className="flex items-center gap-2 bg-[#fef2f2] border-b border-[#fecaca] px-4 py-2">
+          <span className="h-2 w-2 rounded-full bg-[#ef4444] animate-pulse" />
+          <span className="text-xs font-medium text-[#dc2626]">
+            连接已断开，正在重连... 数据可能不是最新的
+          </span>
+        </div>
+      )}
 
       {/* ---- Feed Body ---- */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto">

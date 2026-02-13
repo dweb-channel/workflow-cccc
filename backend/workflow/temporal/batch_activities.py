@@ -137,6 +137,288 @@ async def _git_revert_changes(cwd: str, job_id: str, jira_key: str) -> bool:
     return success
 
 
+async def _git_change_summary(cwd: str, job_id: str) -> Optional[Dict[str, Any]]:
+    """Collect code change summary before commit.
+
+    Runs git diff --stat (tracked) and counts untracked files.
+    Returns None if no changes.
+    """
+    if not await _git_has_changes(cwd):
+        return None
+
+    # Tracked file changes
+    code, stat_output = await _git_run(cwd, "diff", "--stat")
+
+    # Untracked (new) files
+    code2, untracked_output = await _git_run(
+        cwd, "ls-files", "--others", "--exclude-standard",
+    )
+
+    tracked_lines = (
+        stat_output.strip().split("\n") if stat_output.strip() else []
+    )
+    untracked_files = [
+        f for f in untracked_output.strip().split("\n") if f.strip()
+    ] if untracked_output.strip() else []
+
+    # Parse tracked file list from stat output (all lines except summary)
+    tracked_files: List[str] = []
+    insertions = 0
+    deletions = 0
+
+    if len(tracked_lines) > 1:
+        for line in tracked_lines[:-1]:
+            fname = line.strip().split("|")[0].strip()
+            if fname:
+                tracked_files.append(fname)
+
+        summary_line = tracked_lines[-1]
+        ins_match = re.search(r"(\d+) insertion", summary_line)
+        del_match = re.search(r"(\d+) deletion", summary_line)
+        if ins_match:
+            insertions = int(ins_match.group(1))
+        if del_match:
+            deletions = int(del_match.group(1))
+
+    all_files = tracked_files + untracked_files
+    if not all_files:
+        return None
+
+    return {
+        "files_changed": len(all_files),
+        "insertions": insertions,
+        "deletions": deletions,
+        "new_files": len(untracked_files),
+        "file_list": all_files[:10],
+    }
+
+
+# --- PR & Jira Helpers ---
+
+
+async def _git_get_current_branch(cwd: str) -> Optional[str]:
+    """Get the current branch name."""
+    code, output = await _git_run(cwd, "rev-parse", "--abbrev-ref", "HEAD")
+    return output if code == 0 and output else None
+
+
+async def _git_create_fix_branch(
+    cwd: str, jira_url: str, job_id: str,
+) -> Optional[str]:
+    """Create and checkout a fix branch for a specific bug.
+
+    Branch name: fix/{jira-key-lowercase}
+    Returns branch name or None on failure.
+    """
+    jira_key = _extract_jira_key(jira_url)
+    branch_name = f"fix/{jira_key.lower()}"
+
+    code, output = await _git_run(cwd, "checkout", "-b", branch_name)
+    if code != 0:
+        logger.warning(
+            f"Job {job_id}: Failed to create branch {branch_name}: {output}"
+        )
+        return None
+
+    logger.info(f"Job {job_id}: Created fix branch {branch_name}")
+    return branch_name
+
+
+async def _git_switch_branch(cwd: str, branch_name: str, job_id: str) -> bool:
+    """Switch to an existing branch."""
+    code, output = await _git_run(cwd, "checkout", branch_name)
+    if code != 0:
+        logger.warning(
+            f"Job {job_id}: Failed to switch to {branch_name}: {output}"
+        )
+        return False
+    return True
+
+
+async def _git_delete_branch(cwd: str, branch_name: str, job_id: str) -> bool:
+    """Delete a local branch (force)."""
+    code, output = await _git_run(cwd, "branch", "-D", branch_name)
+    if code != 0:
+        logger.warning(
+            f"Job {job_id}: Failed to delete branch {branch_name}: {output}"
+        )
+        return False
+    logger.info(f"Job {job_id}: Deleted branch {branch_name}")
+    return True
+
+
+async def _git_recover_original_branch(cwd: str, job_id: str) -> None:
+    """Recover from a fix/* branch back to the original branch.
+
+    Best-effort: if we're on a fix/* branch after an error, switch back
+    to the base branch and clean up. Used by outer exception handlers.
+    """
+    current = await _git_get_current_branch(cwd)
+    if not current or not current.startswith("fix/"):
+        return  # Not on a fix branch, nothing to recover
+
+    # Find the base branch by checking what fix/* branched from
+    code, base = await _git_run(
+        cwd, "rev-parse", "--abbrev-ref", f"{current}@{{upstream}}"
+    )
+    if code != 0:
+        # No upstream, try common defaults
+        for candidate in ("main", "master", "develop"):
+            code2, _ = await _git_run(cwd, "rev-parse", "--verify", candidate)
+            if code2 == 0:
+                base = candidate
+                break
+        else:
+            logger.warning(
+                f"Job {job_id}: Cannot determine base branch, staying on {current}"
+            )
+            return
+
+    logger.info(f"Job {job_id}: Recovering from {current} to {base}")
+    if await _git_has_changes(cwd):
+        await _git_revert_changes(cwd, job_id, "recovery")
+    await _git_switch_branch(cwd, base, job_id)
+    await _git_delete_branch(cwd, current, job_id)
+
+
+async def _git_push_and_create_pr(
+    cwd: str,
+    branch_name: str,
+    base_branch: str,
+    jira_url: str,
+    job_id: str,
+) -> Optional[str]:
+    """Push fix branch and create a PR via gh CLI.
+
+    Returns PR URL or None on failure. Best-effort: never fails the workflow.
+    """
+    jira_key = _extract_jira_key(jira_url)
+
+    # Push branch to remote
+    code, output = await _git_run(cwd, "push", "-u", "origin", branch_name)
+    if code != 0:
+        logger.warning(
+            f"Job {job_id}: git push failed for {branch_name}: {output}"
+        )
+        return None
+
+    # Create PR via gh CLI
+    title = f"fix: {jira_key}"
+    body = (
+        f"Automated fix for [{jira_key}]({jira_url})\n\n"
+        f"Job: `{job_id}`\n"
+        f"Generated by batch-bug-fix workflow"
+    )
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+            "--base", base_branch,
+            "--head", branch_name,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        pr_output = stdout.decode("utf-8", errors="replace").strip()
+
+        if proc.returncode == 0:
+            pr_url = pr_output.strip().split("\n")[-1]
+            logger.info(f"Job {job_id}: Created PR for {jira_key}: {pr_url}")
+            return pr_url
+        else:
+            logger.warning(
+                f"Job {job_id}: gh pr create failed: {pr_output}"
+            )
+            return None
+
+    except asyncio.TimeoutError:
+        logger.warning(f"Job {job_id}: gh pr create timed out for {jira_key}")
+        return None
+    except FileNotFoundError:
+        logger.warning(
+            f"Job {job_id}: gh CLI not found, skipping PR creation"
+        )
+        return None
+    except Exception as e:
+        logger.warning(f"Job {job_id}: PR creation failed: {e}")
+        return None
+
+
+async def _jira_add_fix_comment(
+    jira_url: str, pr_url: Optional[str], job_id: str,
+) -> bool:
+    """Add a fix comment to a Jira ticket. Best-effort.
+
+    Requires env vars: JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN.
+    Returns True if comment was added successfully.
+    """
+    import os
+
+    jira_base = os.environ.get("JIRA_URL", "")
+    email = os.environ.get("JIRA_EMAIL", "")
+    token = os.environ.get("JIRA_API_TOKEN", "")
+
+    if not all([jira_base, email, token]):
+        logger.info(
+            f"Job {job_id}: Jira credentials not configured, skipping comment"
+        )
+        return False
+
+    jira_key = _extract_jira_key(jira_url)
+
+    comment_text = (
+        f"Automated fix applied by batch-bug-fix workflow (Job: {job_id})."
+    )
+    if pr_url:
+        comment_text += f"\n\nPR: {pr_url}"
+
+    try:
+        import httpx
+        import base64
+
+        auth = base64.b64encode(f"{email}:{token}".encode()).decode()
+        url = f"{jira_base.rstrip('/')}/rest/api/3/issue/{jira_key}/comment"
+        headers = {
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "body": {
+                "type": "doc",
+                "version": 1,
+                "content": [{
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": comment_text},
+                    ],
+                }],
+            }
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            if resp.status_code in (200, 201):
+                logger.info(
+                    f"Job {job_id}: Added Jira comment to {jira_key}"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"Job {job_id}: Jira comment failed for {jira_key}: "
+                    f"{resp.status_code}"
+                )
+                return False
+
+    except Exception as e:
+        logger.warning(
+            f"Job {job_id}: Jira comment failed for {jira_key}: {e}"
+        )
+        return False
+
+
 # --- SSE Push Helpers ---
 
 
@@ -269,10 +551,12 @@ async def execute_batch_bugfix_activity(params: dict) -> dict:
 
     except asyncio.CancelledError:
         logger.info(f"Job {job_id}: Activity cancelled")
-        # Revert uncommitted changes on cancellation
-        if await _git_is_repo(cwd) and await _git_has_changes(cwd):
-            logger.info(f"Job {job_id}: Reverting uncommitted changes after cancel")
-            await _git_revert_changes(cwd, job_id, "cancelled")
+        # Recover from fix branch + revert uncommitted changes
+        if await _git_is_repo(cwd):
+            await _git_recover_original_branch(cwd, job_id)
+            if await _git_has_changes(cwd):
+                logger.info(f"Job {job_id}: Reverting uncommitted changes after cancel")
+                await _git_revert_changes(cwd, job_id, "cancelled")
         await _update_job_status(job_id, "cancelled")
         await _push_event(job_id, "job_done", {
             "status": "cancelled",
@@ -283,10 +567,12 @@ async def execute_batch_bugfix_activity(params: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Job {job_id}: Activity failed: {e}")
-        # Revert uncommitted changes on crash
-        if await _git_is_repo(cwd) and await _git_has_changes(cwd):
-            logger.info(f"Job {job_id}: Reverting uncommitted changes after error")
-            await _git_revert_changes(cwd, job_id, "error")
+        # Recover from fix branch + revert uncommitted changes
+        if await _git_is_repo(cwd):
+            await _git_recover_original_branch(cwd, job_id)
+            if await _git_has_changes(cwd):
+                logger.info(f"Job {job_id}: Reverting uncommitted changes after error")
+                await _git_revert_changes(cwd, job_id, "error")
         await _update_job_status(job_id, "failed", error=str(e))
         await _push_event(job_id, "job_done", {
             "status": "failed",
@@ -380,6 +666,12 @@ async def _execute_workflow(
         logger.warning(
             f"Job {job_id}: Git isolation disabled — {cwd} is not a git repo"
         )
+
+    # PR/Jira integration: track branches for per-bug PRs
+    original_branch: Optional[str] = None
+    current_fix_branch: Optional[str] = None
+    if git_enabled:
+        original_branch = await _git_get_current_branch(cwd)
 
     logger.info(
         f"Job {job_id}: Executing workflow with {len(jira_urls)} bugs, "
@@ -543,9 +835,45 @@ async def _execute_workflow(
                             job_id, last_synced_index + bug_index_offset, steps,
                         )
 
+            # --- Per-bug fix branch creation ---
+            if git_enabled and node_id == "get_current_bug" and original_branch:
+                fix_bug_url = jira_urls[bug_index] if bug_index < len(jira_urls) else ""
+                if fix_bug_url:
+                    current_fix_branch = await _git_create_fix_branch(
+                        cwd, fix_bug_url, job_id,
+                    )
+
             # --- Git isolation: commit or revert after each bug ---
             if git_enabled and node_id == "update_success":
                 bug_url = jira_urls[bug_index] if bug_index < len(jira_urls) else ""
+
+                # Collect code change summary before commit
+                change_summary = await _git_change_summary(cwd, job_id)
+                if change_summary:
+                    preview = (
+                        f"{change_summary['files_changed']} 文件变更 "
+                        f"(+{change_summary['insertions']} "
+                        f"-{change_summary['deletions']})"
+                    )
+                    if change_summary.get("new_files", 0) > 0:
+                        preview += f", {change_summary['new_files']} 新文件"
+                    files = change_summary["file_list"]
+                    if files:
+                        preview += "\n" + "\n".join(
+                            f"  {f}" for f in files[:5]
+                        )
+                        if len(files) > 5:
+                            preview += f"\n  ... 等 {len(files) - 5} 个文件"
+                    await _push_event(job_id, "bug_step_completed", {
+                        "bug_index": db_bug_index,
+                        "step": "code_summary",
+                        "label": "代码变更摘要",
+                        "node_label": "代码变更摘要",
+                        "status": "completed",
+                        "output_preview": preview,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+
                 committed = await _git_commit_bug_fix(cwd, bug_url, job_id)
                 if committed:
                     await _push_event(job_id, "bug_step_completed", {
@@ -557,6 +885,42 @@ async def _execute_workflow(
                         "output_preview": f"fix: {_extract_jira_key(bug_url)}",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
+
+                    # --- PR creation (best-effort) ---
+                    pr_url = None
+                    if current_fix_branch and original_branch:
+                        pr_url = await _git_push_and_create_pr(
+                            cwd, current_fix_branch, original_branch,
+                            bug_url, job_id,
+                        )
+                        if pr_url:
+                            await _push_event(job_id, "bug_step_completed", {
+                                "bug_index": db_bug_index,
+                                "step": "pr_created",
+                                "label": "创建 PR",
+                                "node_label": "创建 PR",
+                                "status": "completed",
+                                "output_preview": pr_url,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+
+                    # --- Jira comment (best-effort) ---
+                    jira_ok = await _jira_add_fix_comment(bug_url, pr_url, job_id)
+                    if jira_ok:
+                        await _push_event(job_id, "bug_step_completed", {
+                            "bug_index": db_bug_index,
+                            "step": "jira_comment",
+                            "label": "Jira 更新",
+                            "node_label": "Jira 更新",
+                            "status": "completed",
+                            "output_preview": f"已添加评论到 {_extract_jira_key(bug_url)}",
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+
+                    # Switch back to original branch for next bug
+                    if current_fix_branch and original_branch:
+                        await _git_switch_branch(cwd, original_branch, job_id)
+                    current_fix_branch = None
 
             elif git_enabled and node_id == "update_failure":
                 bug_url = jira_urls[bug_index] if bug_index < len(jira_urls) else ""
@@ -572,6 +936,21 @@ async def _execute_workflow(
                         "output_preview": f"已还原 {jira_key} 的失败修改",
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
+
+                # Clean up fix branch after failure
+                if current_fix_branch and original_branch:
+                    await _git_switch_branch(cwd, original_branch, job_id)
+                    await _git_delete_branch(cwd, current_fix_branch, job_id)
+                current_fix_branch = None
+
+    # Final safety net: clean up leftover fix branch
+    if git_enabled and current_fix_branch and original_branch:
+        current = await _git_get_current_branch(cwd)
+        if current and current != original_branch:
+            if await _git_has_changes(cwd):
+                await _git_revert_changes(cwd, job_id, "cleanup")
+            await _git_switch_branch(cwd, original_branch, job_id)
+        await _git_delete_branch(cwd, current_fix_branch, job_id)
 
     # Final safety net: revert any uncommitted changes left over
     if git_enabled and await _git_has_changes(cwd):
@@ -643,8 +1022,8 @@ async def _update_job_status(
     job_id: str,
     status: str,
     error: Optional[str] = None,
-) -> None:
-    """Update job status in database."""
+) -> bool:
+    """Update job status in database. Returns True on success."""
     try:
         from app.database import get_session_ctx
         from app.repositories.batch_job import BatchJobRepository
@@ -653,8 +1032,14 @@ async def _update_job_status(
             repo = BatchJobRepository(session)
             await repo.update_status(job_id, status, error=error)
         logger.info(f"Job {job_id}: DB status -> {status}")
+        return True
     except Exception as e:
         logger.error(f"Job {job_id}: Failed to update status in DB: {e}")
+        await _push_event(job_id, "db_sync_warning", {
+            "message": f"数据库状态更新失败: {status}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        return False
 
 
 async def _reset_stale_bugs(job_id: str, total_bugs: int) -> None:
@@ -693,8 +1078,8 @@ async def _update_bug_status_db(
     error: Optional[str] = None,
     started_at: Optional[datetime] = None,
     completed_at: Optional[datetime] = None,
-) -> None:
-    """Update a single bug's status in database."""
+) -> bool:
+    """Update a single bug's status in database. Returns True on success."""
     try:
         from app.database import get_session_ctx
         from app.repositories.batch_job import BatchJobRepository
@@ -709,18 +1094,20 @@ async def _update_bug_status_db(
                 started_at=started_at,
                 completed_at=completed_at,
             )
+        return True
     except Exception as e:
         logger.error(
             f"Job {job_id}: Failed to update bug {bug_index} status: {e}"
         )
+        return False
 
 
 async def _persist_bug_steps(
     job_id: str,
     bug_index: int,
     steps: List[Dict[str, Any]],
-) -> None:
-    """Persist step records for a completed bug to the database."""
+) -> bool:
+    """Persist step records for a completed bug to the database. Returns True on success."""
     try:
         from app.database import get_session_ctx
         from app.repositories.batch_job import BatchJobRepository
@@ -735,10 +1122,12 @@ async def _persist_bug_steps(
         logger.info(
             f"Job {job_id}: Persisted {len(steps)} steps for bug {bug_index}"
         )
+        return True
     except Exception as e:
         logger.error(
             f"Job {job_id}: Failed to persist steps for bug {bug_index}: {e}"
         )
+        return False
 
 
 async def _sync_incremental_results(
@@ -793,11 +1182,17 @@ async def _sync_incremental_results(
             })
 
         # Update bug in DB
-        await _update_bug_status_db(
+        db_ok = await _update_bug_status_db(
             job_id, db_i, result_status,
             error=error_msg,
             completed_at=now,
         )
+        if not db_ok:
+            await _push_event(job_id, "db_sync_warning", {
+                "bug_index": db_i,
+                "message": f"Bug {db_i} 状态同步失败，刷新页面后状态可能不准确",
+                "timestamp": now_iso,
+            })
 
     # Mark next pending bug as in_progress
     next_index = len(results)
@@ -833,45 +1228,56 @@ async def _sync_final_results(
     skipped = sum(1 for r in results if r.get("status") == "skipped")
 
     overall = "completed" if failed == 0 and skipped == 0 else "failed"
+    db_sync_ok = False
 
-    try:
-        from app.database import get_session_ctx
-        from app.repositories.batch_job import BatchJobRepository
+    for attempt in range(2):  # 1 retry for transient DB failures
+        try:
+            from app.database import get_session_ctx
+            from app.repositories.batch_job import BatchJobRepository
 
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            for i, result in enumerate(results):
-                await repo.update_bug_status(
-                    job_id=job_id,
-                    bug_index=i + bug_index_offset,
-                    status=result.get("status", "failed"),
-                    error=result.get("error"),
-                    completed_at=now,
-                )
-
-            # For retry runs, recompute overall status from ALL bugs in DB
-            if bug_index_offset > 0:
-                db_job = await repo.get(job_id)
-                if db_job:
-                    all_failed = sum(
-                        1 for b in db_job.bugs
-                        if b.status in ("failed", "skipped")
+            async with get_session_ctx() as session:
+                repo = BatchJobRepository(session)
+                for i, result in enumerate(results):
+                    await repo.update_bug_status(
+                        job_id=job_id,
+                        bug_index=i + bug_index_offset,
+                        status=result.get("status", "failed"),
+                        error=result.get("error"),
+                        completed_at=now,
                     )
-                    overall = "completed" if all_failed == 0 else "failed"
 
-            await repo.update_status(job_id, overall)
-        logger.info(
-            f"Job {job_id}: Final sync — {overall} "
-            f"(completed={completed}, failed={failed}, skipped={skipped})"
-        )
-    except Exception as e:
-        logger.error(f"Job {job_id}: Final DB sync failed: {e}")
+                # For retry runs, recompute overall status from ALL bugs in DB
+                if bug_index_offset > 0:
+                    db_job = await repo.get(job_id)
+                    if db_job:
+                        all_failed = sum(
+                            1 for b in db_job.bugs
+                            if b.status in ("failed", "skipped")
+                        )
+                        overall = "completed" if all_failed == 0 else "failed"
 
-    await _push_event(job_id, "job_done", {
+                await repo.update_status(job_id, overall)
+            logger.info(
+                f"Job {job_id}: Final sync — {overall} "
+                f"(completed={completed}, failed={failed}, skipped={skipped})"
+            )
+            db_sync_ok = True
+            break
+        except Exception as e:
+            logger.error(f"Job {job_id}: Final DB sync failed (attempt {attempt + 1}): {e}")
+            if attempt == 0:
+                await asyncio.sleep(1)  # Brief delay before retry
+
+    event_data: Dict[str, Any] = {
         "status": overall,
         "completed": completed,
         "failed": failed,
         "skipped": skipped,
         "total": len(jira_urls),
         "timestamp": now.isoformat(),
-    })
+    }
+    if not db_sync_ok:
+        event_data["db_sync_failed"] = True
+        event_data["db_sync_message"] = "数据库同步失败，刷新页面后状态可能不准确"
+
+    await _push_event(job_id, "job_done", event_data)

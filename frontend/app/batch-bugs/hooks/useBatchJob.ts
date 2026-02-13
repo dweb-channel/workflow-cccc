@@ -33,6 +33,7 @@ export function useBatchJob() {
   const [submitting, setSubmitting] = useState(false);
   const sseRetryCount = useRef(0);
   const sseErrorToastShown = useRef(false);
+  const [sseConnected, setSseConnected] = useState(true);
 
   // AI Thinking state
   const [aiThinkingEvents, setAiThinkingEvents] = useState<AIThinkingEvent[]>([]);
@@ -286,6 +287,7 @@ export function useBatchJob() {
     // SSE error handler with backoff awareness
     eventSource.onerror = () => {
       sseRetryCount.current += 1;
+      setSseConnected(false);
       const backoff = getBackoffMs(sseRetryCount.current);
       console.warn(
         `SSE connection error (retry #${sseRetryCount.current}, next in ~${backoff / 1000}s)`
@@ -302,6 +304,7 @@ export function useBatchJob() {
     };
 
     eventSource.onopen = () => {
+      setSseConnected(true);
       // Connection restored — reset retry state
       if (sseRetryCount.current > 0) {
         sseRetryCount.current = 0;
@@ -464,6 +467,7 @@ export function useBatchJob() {
     submit,
     cancel,
     retryBug,
+    sseConnected,
     aiThinkingEvents,
     aiThinkingStats,
   };

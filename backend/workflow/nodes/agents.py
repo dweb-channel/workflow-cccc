@@ -318,6 +318,58 @@ def _accumulate_verify_context(
     return ctx
 
 
+def _parse_verify_verdict(response: str) -> bool:
+    """Parse verification verdict from Claude's response.
+
+    Uses a priority-based approach:
+    1. Structured verdict line (e.g., "VERDICT: VERIFIED", "结论: 通过")
+    2. Word-boundary keyword matching (avoids "UNVERIFIED" matching "VERIFIED")
+    3. Explicit failure always wins over implicit pass
+
+    Returns True if verified, False otherwise.
+    """
+    response_upper = response.upper()
+
+    # --- Priority 1: Structured verdict lines ---
+    # Match patterns like "VERDICT: VERIFIED", "## 结论: 通过", "Result: FAILED"
+    verdict_patterns = [
+        r"(?:VERDICT|RESULT|CONCLUSION)\s*[:：]\s*(VERIFIED|PASSED|FAILED|REJECTED)",
+        r"(?:结论|结果|判定)\s*[:：]\s*(通过|验证通过|失败|未通过|验证失败)",
+    ]
+    for pattern in verdict_patterns:
+        m = re.search(pattern, response, re.IGNORECASE)
+        if m:
+            verdict = m.group(1).upper()
+            if verdict in ("VERIFIED", "PASSED"):
+                return True
+            if verdict in ("FAILED", "REJECTED"):
+                return False
+            # Chinese verdicts
+            verdict_raw = m.group(1)
+            if verdict_raw in ("通过", "验证通过"):
+                return True
+            if verdict_raw in ("失败", "未通过", "验证失败"):
+                return False
+
+    # --- Priority 2: Word-boundary keyword matching ---
+    # Use \b to avoid "UNVERIFIED" matching "VERIFIED"
+    has_verified = bool(re.search(r"\bVERIFIED\b", response_upper))
+    has_passed = "通过" in response and "未通过" not in response
+
+    has_failed = bool(re.search(r"\bFAILED\b", response_upper))
+    has_cn_failed = "失败" in response or "未通过" in response
+
+    # Explicit failure always wins
+    if has_failed or has_cn_failed:
+        return False
+
+    if has_verified or has_passed:
+        return True
+
+    # Default: ambiguous response treated as failure (safe default)
+    return False
+
+
 def _render_template(template: str, context: Dict[str, Any]) -> str:
     """Render a prompt template with variable substitution.
 
@@ -421,13 +473,26 @@ class LLMAgentNode(BaseNodeImpl):
             # Only check within ## 根因分析 and ## 修改摘要 sections to avoid
             # false positives from legitimate content like "修改了不可达的代码路径".
             if success:
-                _FAILURE_INDICATORS = ("无修改", "无法获取", "不可达", "无法访问")
+                _FAILURE_INDICATORS = (
+                    # Chinese
+                    "无修改", "无法获取", "不可达", "无法访问",
+                    # English
+                    "no modifications", "no changes made", "unable to fetch",
+                    "unreachable", "unable to access", "inaccessible",
+                    "could not access", "failed to retrieve", "no fix applied",
+                )
                 summary_text = _extract_fix_summary(result, max_len=1000)
-                if summary_text and any(ind in summary_text for ind in _FAILURE_INDICATORS):
-                    success = False
-                    logger.warning(
-                        f"LLMAgentNode {self.node_id}: Summary contains failure indicator: {summary_text[:200]}"
+                if summary_text:
+                    summary_lower = summary_text.lower()
+                    matched = any(
+                        ind in (summary_text if not ind.isascii() else summary_lower)
+                        for ind in _FAILURE_INDICATORS
                     )
+                    if matched:
+                        success = False
+                        logger.warning(
+                            f"LLMAgentNode {self.node_id}: Summary contains failure indicator: {summary_text[:200]}"
+                        )
             if not success:
                 logger.error(f"LLMAgentNode {self.node_id}: Claude CLI error: {result[:200]}")
 
@@ -620,12 +685,7 @@ class VerifyNode(BaseNodeImpl):
                 }
 
             # Parse verification result from response
-            response_upper = response.upper()
-            verified = "VERIFIED" in response_upper or "通过" in response
-
-            # Also check for explicit failure indicators
-            if "FAILED" in response_upper or "失败" in response or "未通过" in response:
-                verified = False
+            verified = _parse_verify_verdict(response)
 
             message = response[:500] if len(response) > 500 else response
             output: Dict[str, Any] = {
