@@ -32,8 +32,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from app.database import Base, get_session_ctx
-from app.batch_job_repository import BatchJobRepository
-from app.db_models import BatchJobModel, BugResultModel
+from app.repositories.batch_job import BatchJobRepository
+from app.models.db import BatchJobModel, BugResultModel
 from app.sse import push_node_event, _active_streams
 from workflow.temporal.batch_activities import NODE_TO_STEP
 

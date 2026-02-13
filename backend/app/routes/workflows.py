@@ -15,8 +15,8 @@ from workflow.engine.graph_builder import (
 )
 
 from ..database import get_session
-from ..repository import WorkflowRepository
-from ..schemas import (
+from app.repositories.workflow import WorkflowRepository
+from app.models.schemas import (
     CreateWorkflowRequest,
     GraphDefinitionRequest,
     PagedWorkflowsResponse,

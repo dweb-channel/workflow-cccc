@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .db_models import WorkflowModel
+from app.models.db import WorkflowModel
 
 
 class WorkflowRepository:

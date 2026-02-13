@@ -8,15 +8,15 @@ frontend/.next
 frontend/test-results
 
 # Python
-backend_fastapi/.venv
-backend_fastapi/__pycache__
-backend_fastapi/**/__pycache__
-backend_fastapi/*.egg-info
-backend_fastapi/workflow_backend.egg-info
-backend_fastapi/.pytest_cache
-backend_fastapi/workflow.db
-backend_fastapi/tests
-backend_fastapi/logs
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+backend/*.egg-info
+backend/workflow_backend.egg-info
+backend/.pytest_cache
+backend/workflow.db
+backend/tests
+backend/logs
 
 # IDE
 .vscode
@@ -38,7 +38,7 @@ docs/
 design/
 *.pen
 *.md
-!backend_fastapi/README.md
+!backend/README.md
 
 # Logs
 logs/

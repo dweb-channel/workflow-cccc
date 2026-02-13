@@ -12,7 +12,7 @@ from sqlalchemy import select, func, update, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from .db_models import BatchJobModel, BugResultModel
+from app.models.db import BatchJobModel, BugResultModel
 
 
 def _utcnow() -> datetime:

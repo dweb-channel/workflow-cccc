@@ -34,7 +34,7 @@ A visual workflow orchestration platform powered by **LangGraph** + **Temporal**
 
 ```bash
 # 1. Backend (Temporal + Worker + FastAPI, all-in-one)
-cd backend_fastapi
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -51,14 +51,14 @@ Open http://localhost:3000 to access the workflow editor.
 To stop all backend services:
 
 ```bash
-cd backend_fastapi
+cd backend
 make stop
 ```
 
 ### Project Structure
 
 ```
-backend_fastapi/     # FastAPI backend + workflow engine
+backend/     # FastAPI backend + workflow engine
   app/               # FastAPI application (routes, models, DB)
   workflow/           # Workflow engine core
     engine/           # Graph builder, executor, expression evaluator
@@ -113,7 +113,7 @@ frontend/            # Next.js workflow editor UI
 
 ```bash
 # 1. 后端（Temporal + Worker + FastAPI 一键启动）
-cd backend_fastapi
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -130,14 +130,14 @@ npm run dev
 停止所有后端服务：
 
 ```bash
-cd backend_fastapi
+cd backend
 make stop
 ```
 
 ### 项目结构
 
 ```
-backend_fastapi/     # FastAPI 后端 + 工作流引擎
+backend/     # FastAPI 后端 + 工作流引擎
   app/               # FastAPI 应用（路由、模型、数据库）
   workflow/           # 工作流引擎核心
     engine/           # 图构建器、执行器、表达式求值

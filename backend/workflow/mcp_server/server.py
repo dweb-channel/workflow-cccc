@@ -14,7 +14,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 # Import Temporal adapter for workflow execution
-# Note: These imports will work when running from the backend_fastapi context
+# Note: These imports will work when running from the backend context
 try:
     from ...app.temporal_adapter import (
         init_temporal_client,

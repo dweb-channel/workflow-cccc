@@ -213,7 +213,7 @@ async def _execute_workflow(
         build_graph_from_config,
         detect_loops,
     )
-    from app.templates import load_template, template_to_workflow_definition
+    from workflow.templates import load_template, template_to_workflow_definition
 
     # Load workflow template
     template = load_template("bug_fix_batch")
@@ -485,7 +485,7 @@ async def _update_job_status(
     """Update job status in database."""
     try:
         from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
+        from app.repositories.batch_job import BatchJobRepository
 
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)
@@ -503,7 +503,7 @@ async def _reset_stale_bugs(job_id: str, total_bugs: int) -> None:
     """
     try:
         from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
+        from app.repositories.batch_job import BatchJobRepository
 
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)
@@ -535,7 +535,7 @@ async def _update_bug_status_db(
     """Update a single bug's status in database."""
     try:
         from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
+        from app.repositories.batch_job import BatchJobRepository
 
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)
@@ -561,7 +561,7 @@ async def _persist_bug_steps(
     """Persist step records for a completed bug to the database."""
     try:
         from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
+        from app.repositories.batch_job import BatchJobRepository
 
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)
@@ -664,7 +664,7 @@ async def _sync_final_results(
 
     try:
         from app.database import get_session_ctx
-        from app.batch_job_repository import BatchJobRepository
+        from app.repositories.batch_job import BatchJobRepository
 
         async with get_session_ctx() as session:
             repo = BatchJobRepository(session)

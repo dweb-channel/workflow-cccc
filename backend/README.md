@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-cd backend_fastapi
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .

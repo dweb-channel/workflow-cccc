@@ -28,7 +28,7 @@ services:
       - "8000:8000"
     volumes:
       - backend-data:/data
-      - ./backend_fastapi/app/templates:/app/app/templates:ro
+      - ./backend/workflow/templates:/app/workflow/templates:ro
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////data/workflow.db
       - TEMPORAL_ADDRESS=temporal:7233

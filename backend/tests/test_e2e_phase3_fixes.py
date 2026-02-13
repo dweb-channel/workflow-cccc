@@ -31,8 +31,8 @@ async def run_tests():
     from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
     from app.database import Base, get_session_ctx
-    from app.batch_job_repository import BatchJobRepository
-    from app.db_models import BatchJobModel, BugResultModel
+    from app.repositories.batch_job import BatchJobRepository
+    from app.models.db import BatchJobModel, BugResultModel
     from workflow.temporal.batch_activities import NODE_TO_STEP
 
     # --- Test DB isolation: use in-memory SQLite ---

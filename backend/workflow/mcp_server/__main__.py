@@ -2,7 +2,7 @@
 Workflow MCP Server entrypoint.
 
 Usage:
-    python -m backend_fastapi.workflow.mcp_server
+    python -m backend.workflow.mcp_server
 """
 
 from .main import main

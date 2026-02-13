@@ -22,8 +22,8 @@ from pydantic import BaseModel, Field, field_validator
 
 # Database imports
 from app.database import get_session_ctx
-from app.batch_job_repository import BatchJobRepository
-from app.db_models import BatchJobModel, BugResultModel
+from app.repositories.batch_job import BatchJobRepository
+from app.models.db import BatchJobModel, BugResultModel
 
 # SSE infrastructure (shared with generic workflow execution)
 from app.sse import sse_event_generator, push_node_event

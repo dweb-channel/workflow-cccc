@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend_fastapi/pyproject.toml ./
+COPY backend/pyproject.toml ./
 RUN pip install --no-cache-dir wheel && \
     pip wheel --no-cache-dir --wheel-dir /wheels . && \
     pip wheel --no-cache-dir --wheel-dir /wheels pyyaml
@@ -29,11 +29,11 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 
 # Copy application code (no tests)
-COPY backend_fastapi/app ./app
-COPY backend_fastapi/workflow ./workflow
-COPY backend_fastapi/alembic ./alembic
-COPY backend_fastapi/alembic.ini ./
-COPY backend_fastapi/pyproject.toml ./
+COPY backend/app ./app
+COPY backend/workflow ./workflow
+COPY backend/alembic ./alembic
+COPY backend/alembic.ini ./
+COPY backend/pyproject.toml ./
 
 # Install the project itself (non-editable)
 RUN pip install --no-cache-dir --no-deps .

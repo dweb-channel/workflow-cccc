@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.database import DATABASE_URL, Base
-from app.db_models import (  # noqa: F401 - import to register models
+from app.models.db import (  # noqa: F401 - import to register models
     ExecutionLogModel,
     NodeExecutionModel,
     WorkflowModel,

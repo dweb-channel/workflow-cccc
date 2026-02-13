@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/templates", tags=["templates"])
 
-# Template directory path (relative to backend_fastapi)
+# Template directory path (relative to backend/)
 TEMPLATES_DIR = Path(__file__).parent.parent.parent / "workflow" / "templates"
 
 
