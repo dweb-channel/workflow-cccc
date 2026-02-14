@@ -334,7 +334,7 @@ function ScreenCard({
   onToggle: () => void;
   associatedSpecs: ScanFrameItem[];
 }) {
-  const TypeIcon = TYPE_ICONS[item.type] || Monitor;
+  const TypeIcon = TYPE_ICONS[item.device_type || "other"] || Monitor;
 
   return (
     <button
@@ -377,7 +377,7 @@ function ScreenCard({
         <div className="flex items-center gap-1.5">
           <span className="inline-flex items-center gap-1 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
             <TypeIcon className="h-2.5 w-2.5" />
-            {TYPE_LABELS[item.type]}
+            {TYPE_LABELS[item.device_type || "other"]}
           </span>
           <span className="text-[10px] text-slate-500">{item.size}</span>
         </div>

@@ -638,7 +638,7 @@ export interface ScanFrameItem {
   node_id: string;
   name: string;
   size: string;
-  type: "mobile" | "tablet" | "desktop" | "other";
+  device_type?: "mobile" | "tablet" | "desktop" | null;
   classification: FrameClassification;
   confidence: number;
   thumbnail_url?: string;
