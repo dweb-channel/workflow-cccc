@@ -19,3 +19,6 @@ CLAUDE_SKIP_PERMISSIONS = os.getenv("CLAUDE_SKIP_PERMISSIONS", "true").lower() i
 
 # Claude CLI MCP config — path to MCP server config JSON file (e.g., for Jira access)
 CLAUDE_MCP_CONFIG = os.getenv("CLAUDE_MCP_CONFIG", "")
+
+# Figma REST API — Personal Access Token for design file access
+FIGMA_TOKEN = os.getenv("FIGMA_TOKEN", "")
