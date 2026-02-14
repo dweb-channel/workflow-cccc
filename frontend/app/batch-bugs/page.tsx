@@ -246,41 +246,41 @@ function BatchBugsContent() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Main content area — full width */}
-      <div className="flex flex-1 flex-col overflow-hidden p-6">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {/* ---- Header ---- */}
-        <div className="mb-4 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h1 className="text-xl font-bold text-slate-900">批量 Bug 修复</h1>
-              {currentJob && (
-                <>
-                  <span className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 font-mono text-xs text-[#2563eb]">
-                    {currentJob.job_id}
-                  </span>
-                  <JobStatusBadge status={currentJob.job_status} />
-                </>
-              )}
+        <div className="shrink-0 bg-[#1e293b] px-6 pt-5 pb-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-lg font-semibold text-white">批量 Bug 修复</h1>
+            {/* Workspace pills — same line as title */}
+            <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+              <WorkspaceTabs
+                workspaces={workspaces}
+                activeWorkspaceId={activeWsId}
+                loading={wsLoading}
+                error={wsError}
+                onSelect={handleWsSelect}
+                onCreate={handleWsCreate}
+                onUpdate={handleWsUpdate}
+                onDelete={handleWsDelete}
+                onRetryLoad={wsReload}
+              />
             </div>
-            {activeWorkspace && (
-              <code className="bg-slate-100 px-2 py-1 rounded text-xs text-slate-500">{activeWorkspace.repo_path}</code>
+            {currentJob && (
+              <div className="ml-auto flex items-center gap-2">
+                <span className="rounded-full bg-white/10 px-2.5 py-0.5 font-mono text-xs text-blue-300">
+                  {currentJob.job_id}
+                </span>
+                <JobStatusBadge status={currentJob.job_status} />
+              </div>
             )}
           </div>
-
-          {/* Workspace tabs */}
-          <div className="mt-3 border-b border-slate-200">
-            <WorkspaceTabs
-              workspaces={workspaces}
-              activeWorkspaceId={activeWsId}
-              loading={wsLoading}
-              error={wsError}
-              onSelect={handleWsSelect}
-              onCreate={handleWsCreate}
-              onUpdate={handleWsUpdate}
-              onDelete={handleWsDelete}
-              onRetryLoad={wsReload}
-            />
-          </div>
+          {activeWorkspace && (
+            <code className="mt-1.5 block text-xs text-slate-400">{activeWorkspace.repo_path}</code>
+          )}
         </div>
+
+        {/* ---- Content with padding ---- */}
+        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-slate-50/50">
 
         {/* ---- Two Big Tabs ---- */}
         <Tabs
@@ -540,6 +540,7 @@ function BatchBugsContent() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
     </div>
   );
