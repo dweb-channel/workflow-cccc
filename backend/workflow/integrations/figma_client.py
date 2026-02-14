@@ -42,7 +42,7 @@ class FigmaClient:
     def __init__(
         self,
         token: Optional[str] = None,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
     ):
         self._token = token or os.getenv("FIGMA_TOKEN", "")
         if not self._token:
@@ -245,7 +245,7 @@ class FigmaClient:
 
             try:
                 # Download the image (URL is on Figma CDN, not api.figma.com)
-                async with httpx.AsyncClient(timeout=30.0) as dl_client:
+                async with httpx.AsyncClient(timeout=60.0) as dl_client:
                     img_resp = await dl_client.get(url)
                 if img_resp.status_code == 200:
                     with open(filepath, "wb") as f:
@@ -724,7 +724,7 @@ class FigmaClient:
                     rel_path = f"interaction_screenshots/{filename}"
 
                     try:
-                        async with httpx.AsyncClient(timeout=30.0) as dl_client:
+                        async with httpx.AsyncClient(timeout=60.0) as dl_client:
                             img_resp = await dl_client.get(url)
                         if img_resp.status_code == 200:
                             with open(filepath, "wb") as f:
@@ -990,6 +990,88 @@ class FigmaClient:
                     "name": best_screen["name"],
                 }
 
+    async def resolve_to_page(
+        self,
+        file_key: str,
+        node_id: str,
+        node_doc: Dict,
+    ) -> Optional[Dict[str, str]]:
+        """Resolve a small/nested node to its parent page for scanning.
+
+        Fetches the file structure at depth=2, then finds which page
+        contains the given node by checking spatial containment of
+        top-level frames' bounding boxes.
+
+        Args:
+            file_key: Figma file key.
+            node_id: The target node ID.
+            node_doc: The node's document dict (from get_file_nodes).
+
+        Returns:
+            Dict with {page_id, page_name} if resolved, or None if
+            the node is already a page or resolution failed.
+        """
+        node_type = node_doc.get("type", "")
+        if node_type in ("PAGE", "CANVAS"):
+            return None  # Already a page
+
+        bbox = node_doc.get("absoluteBoundingBox", {})
+        target_w = bbox.get("width", 0)
+        target_h = bbox.get("height", 0)
+
+        if target_w >= 300 and target_h >= 600:
+            return None  # Large enough to scan directly
+
+        target_x = bbox.get("x", 0)
+        target_y = bbox.get("y", 0)
+
+        # Fetch file structure: Document → Pages → Top-level frames
+        try:
+            file_data = await self._get(
+                f"/v1/files/{file_key}", params={"depth": "2"}
+            )
+        except FigmaClientError as e:
+            logger.warning(f"resolve_to_page: failed to fetch file structure: {e}")
+            return None
+
+        document = file_data.get("document", {})
+        pages = document.get("children", [])
+
+        if not pages:
+            return None
+
+        # Search: find the page whose top-level frame spatially contains our node
+        for page in pages:
+            for frame in page.get("children", []):
+                frame_bbox = frame.get("absoluteBoundingBox", {})
+                if not frame_bbox:
+                    continue
+                fx = frame_bbox.get("x", 0)
+                fy = frame_bbox.get("y", 0)
+                fw = frame_bbox.get("width", 0)
+                fh = frame_bbox.get("height", 0)
+
+                if (fx <= target_x <= fx + fw and
+                        fy <= target_y <= fy + fh):
+                    page_id = page.get("id", "")
+                    page_name = page.get("name", "")
+                    logger.info(
+                        f"resolve_to_page: {node_id} ({int(target_w)}×{int(target_h)}) "
+                        f"→ page '{page_name}' ({page_id})"
+                    )
+                    return {"page_id": page_id, "page_name": page_name}
+
+        # Fallback: single-page file
+        if len(pages) == 1:
+            page_id = pages[0].get("id", "")
+            page_name = pages[0].get("name", "")
+            logger.info(
+                f"resolve_to_page: single-page fallback → '{page_name}' ({page_id})"
+            )
+            return {"page_id": page_id, "page_name": page_name}
+
+        return None
+
     async def scan_and_classify_frames(
         self,
         file_key: str,
@@ -1028,6 +1110,22 @@ class FigmaClient:
         page_name = page_doc.get("name", "")
 
         children = page_doc.get("children", [])
+
+        # Check if target node is too small to be a page/screen
+        warnings: List[str] = []
+        target_bbox = page_doc.get("absoluteBoundingBox", {})
+        target_w = target_bbox.get("width", 0)
+        target_h = target_bbox.get("height", 0)
+        target_type = page_doc.get("type", "")
+        if target_type not in ("PAGE", "CANVAS") and (target_w < 300 or target_h < 600):
+            warnings.append(
+                f"当前节点 \"{page_name}\" 尺寸为 {int(target_w)}×{int(target_h)}，"
+                f"可能不是完整的 UI 页面。建议选择更大的 frame 或使用页面级 URL（不带 node-id）。"
+            )
+            logger.warning(
+                f"scan_and_classify_frames: target node {page_node_id} is small "
+                f"({int(target_w)}×{int(target_h)}), may not be a page"
+            )
 
         # Collect all top-level frames (recurse into SECTIONs)
         all_frames = []
@@ -1119,6 +1217,7 @@ class FigmaClient:
             "design_system": design_system,
             "excluded": excluded,
             "unknown": unknown,
+            "warnings": warnings,
         }
 
     @staticmethod

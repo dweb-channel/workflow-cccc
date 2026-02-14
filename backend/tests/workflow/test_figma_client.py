@@ -1157,3 +1157,196 @@ class TestScanAndClassifyFrames:
 
         assert len(result["unknown"]) == 1
         assert result["unknown"][0]["name"] == "神秘内容"
+
+    @pytest.mark.asyncio
+    async def test_small_node_warning(self, client):
+        """Scanning a small component node produces a warning."""
+        page_response = {
+            "nodes": {
+                "comp:1": {
+                    "document": {
+                        "id": "comp:1",
+                        "name": "Status Bar - iPhone",
+                        "type": "FRAME",
+                        "absoluteBoundingBox": {"x": 0, "y": 0, "width": 138, "height": 54},
+                        "children": [
+                            {
+                                "id": "c:1", "name": "Time", "type": "TEXT",
+                                "visible": True, "characters": "9:41",
+                                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 138, "height": 54},
+                                "children": [],
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+
+        with patch.object(client, "get_file_nodes", new_callable=AsyncMock) as mock_nodes:
+            mock_nodes.return_value = page_response
+            result = await client.scan_and_classify_frames("fk", "comp:1")
+
+        assert len(result["candidates"]) == 0
+        assert len(result["warnings"]) == 1
+        assert "138×54" in result["warnings"][0]
+        assert "完整的 UI 页面" in result["warnings"][0]
+
+    @pytest.mark.asyncio
+    async def test_page_node_no_warning(self, client):
+        """Scanning a PAGE node does not produce a small-node warning."""
+        page_response = {
+            "nodes": {
+                "page:1": {
+                    "document": {
+                        "id": "page:1",
+                        "name": "设计稿",
+                        "type": "PAGE",
+                        "children": [],
+                    },
+                },
+            },
+        }
+
+        with patch.object(client, "get_file_nodes", new_callable=AsyncMock) as mock_nodes:
+            mock_nodes.return_value = page_response
+            result = await client.scan_and_classify_frames("fk", "page:1")
+
+        assert result["warnings"] == []
+
+
+class TestResolveToPage:
+    """Tests for resolve_to_page() auto-parent-page resolution."""
+
+    @pytest.mark.asyncio
+    async def test_page_node_returns_none(self, client):
+        """PAGE type node → no resolution needed."""
+        doc = {"type": "PAGE", "absoluteBoundingBox": {}}
+        result = await client.resolve_to_page("fk", "page:1", doc)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_large_frame_returns_none(self, client):
+        """Frame large enough → no resolution needed."""
+        doc = {
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
+        }
+        result = await client.resolve_to_page("fk", "f:1", doc)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_small_node_resolves_to_containing_page(self, client):
+        """Small node spatially inside a frame → resolves to that page."""
+        # Target: Status Bar at (100, 318), 138×54 — inside a 393×852 frame at (80, 318)
+        doc = {
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 100, "y": 318, "width": 138, "height": 54},
+        }
+        file_structure = {
+            "document": {
+                "children": [
+                    {
+                        "id": "0:1",
+                        "name": "Page 1",
+                        "type": "CANVAS",
+                        "children": [
+                            {
+                                "id": "f:1",
+                                "type": "FRAME",
+                                "absoluteBoundingBox": {"x": 80, "y": 318, "width": 393, "height": 852},
+                            },
+                            {
+                                "id": "f:2",
+                                "type": "FRAME",
+                                "absoluteBoundingBox": {"x": 600, "y": 318, "width": 393, "height": 852},
+                            },
+                        ],
+                    },
+                ],
+            },
+        }
+
+        with patch.object(client, "_get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = file_structure
+            result = await client.resolve_to_page("fk", "5574:3322", doc)
+
+        assert result is not None
+        assert result["page_id"] == "0:1"
+        assert result["page_name"] == "Page 1"
+
+    @pytest.mark.asyncio
+    async def test_single_page_fallback(self, client):
+        """Small node not spatially matched but single-page file → use that page."""
+        doc = {
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 9999, "y": 9999, "width": 50, "height": 50},
+        }
+        file_structure = {
+            "document": {
+                "children": [
+                    {
+                        "id": "0:1",
+                        "name": "唯一页面",
+                        "type": "CANVAS",
+                        "children": [
+                            {
+                                "id": "f:1",
+                                "type": "FRAME",
+                                "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
+                            },
+                        ],
+                    },
+                ],
+            },
+        }
+
+        with patch.object(client, "_get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = file_structure
+            result = await client.resolve_to_page("fk", "c:1", doc)
+
+        assert result is not None
+        assert result["page_id"] == "0:1"
+
+    @pytest.mark.asyncio
+    async def test_multi_page_no_match_returns_none(self, client):
+        """Small node not inside any frame in multi-page file → None."""
+        doc = {
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 9999, "y": 9999, "width": 50, "height": 50},
+        }
+        file_structure = {
+            "document": {
+                "children": [
+                    {"id": "0:1", "name": "Page A", "type": "CANVAS", "children": [
+                        {"id": "f:1", "type": "FRAME",
+                         "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852}},
+                    ]},
+                    {"id": "0:2", "name": "Page B", "type": "CANVAS", "children": [
+                        {"id": "f:2", "type": "FRAME",
+                         "absoluteBoundingBox": {"x": 500, "y": 0, "width": 393, "height": 852}},
+                    ]},
+                ],
+            },
+        }
+
+        with patch.object(client, "_get", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = file_structure
+            result = await client.resolve_to_page("fk", "c:1", doc)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_api_failure_returns_none(self, client):
+        """Figma API failure → graceful None return."""
+        from workflow.integrations.figma_client import FigmaClientError
+
+        doc = {
+            "type": "FRAME",
+            "absoluteBoundingBox": {"x": 0, "y": 0, "width": 50, "height": 50},
+        }
+
+        with patch.object(client, "_get", new_callable=AsyncMock) as mock_get:
+            mock_get.side_effect = FigmaClientError("API error")
+            result = await client.resolve_to_page("fk", "c:1", doc)
+
+        assert result is None

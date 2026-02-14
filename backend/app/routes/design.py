@@ -150,6 +150,9 @@ class ScanFrameItem(BaseModel):
     section: Optional[str] = Field(
         None, description="Parent section name if nested in a section"
     )
+    device_type: Optional[str] = Field(
+        None, description="mobile | tablet | desktop"
+    )
 
 
 class FigmaScanResponse(BaseModel):
@@ -168,6 +171,9 @@ class FigmaScanResponse(BaseModel):
     )
     excluded: List[ScanFrameItem] = Field(
         default_factory=list, description="Excluded frames with reasons"
+    )
+    warnings: List[str] = Field(
+        default_factory=list, description="Diagnostic warnings (e.g. target node too small)"
     )
 
 
@@ -323,11 +329,37 @@ async def scan_figma_page(payload: FigmaScanRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
+        # P2: Auto-resolve small component → parent page
+        scan_node_id = page_node_id
+        extra_warnings: List[str] = []
+        try:
+            node_data = await client.get_file_nodes(file_key, [page_node_id])
+            node_doc = node_data.get("nodes", {}).get(page_node_id, {}).get("document", {})
+            resolved = await client.resolve_to_page(file_key, page_node_id, node_doc)
+            if resolved:
+                scan_node_id = resolved["page_id"]
+                node_name = node_doc.get("name", page_node_id)
+                extra_warnings.append(
+                    f"URL 中的 node-id 指向 \"{node_name}\"，不是完整页面。"
+                    f"已自动切换到页面 \"{resolved['page_name']}\" 进行扫描。"
+                )
+                logger.info(
+                    f"scan-figma: auto-resolved {page_node_id} → page {resolved['page_id']} "
+                    f"(\"{resolved['page_name']}\")"
+                )
+        except Exception as e:
+            logger.warning(f"scan-figma: resolve_to_page failed, using original node: {e}")
+
         # Phase 1+2: Scan and classify frames (rules + LLM)
         scan_result = await client.scan_and_classify_frames(
             file_key=file_key,
-            page_node_id=page_node_id,
+            page_node_id=scan_node_id,
         )
+
+        # Merge extra warnings from P2 resolve
+        if extra_warnings:
+            scan_warnings = scan_result.get("warnings", [])
+            scan_result["warnings"] = extra_warnings + scan_warnings
 
         # Collect all candidate node_ids for thumbnail generation
         all_node_ids = []
@@ -360,6 +392,10 @@ async def scan_figma_page(payload: FigmaScanRequest):
                 # Ensure required fields have defaults for ScanFrameItem
                 item.setdefault("classification", "other")
                 item.setdefault("size", "0×0")
+                # Normalize related_to: D1 may return a dict {node_id, name}
+                rt = item.get("related_to")
+                if isinstance(rt, dict):
+                    item["related_to"] = rt.get("node_id")
                 result.append(ScanFrameItem(**{
                     k: v for k, v in item.items()
                     if k in ScanFrameItem.model_fields
@@ -379,6 +415,7 @@ async def scan_figma_page(payload: FigmaScanRequest):
             interaction_specs=_items_to_models(scan_result.get("interaction_specs", [])),
             design_system=_items_to_models(scan_result.get("design_system", [])),
             excluded=_items_to_models(all_excluded),
+            warnings=scan_result.get("warnings", []),
         )
 
     except FigmaClientError as e:
