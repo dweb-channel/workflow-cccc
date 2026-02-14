@@ -261,7 +261,7 @@ function BatchBugsContent() {
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden p-6">
         {/* ---- Header ---- */}
-        <div className="mb-4 shrink-0 border-b border-slate-200 pb-4">
+        <div className="mb-4 shrink-0">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-bold text-slate-900">
               {activeWorkspace ? activeWorkspace.name : "批量 Bug 修复"}
@@ -388,7 +388,7 @@ function BatchBugsContent() {
 
               {/* Right: History */}
               <div className="w-[360px] shrink-0 overflow-y-auto">
-                <Card className="shadow-sm border">
+                <Card>
                   <CardContent className="p-4">
                     <HistoryCard
                       historyJobs={history.historyJobs}
@@ -438,7 +438,7 @@ function BatchBugsContent() {
 
                 {/* Right: Overview / History panel (320px) */}
                 <div className="w-[360px] shrink-0 overflow-hidden">
-                  <Card className="h-full flex flex-col shadow-sm border">
+                  <Card className="h-full flex flex-col">
                     <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
                       <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
                         <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2 pt-1 shrink-0">
