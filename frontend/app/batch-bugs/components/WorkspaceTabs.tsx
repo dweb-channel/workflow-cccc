@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Plus, FolderGit2, Pencil, Trash2, X } from "lucide-react";
+import { Plus, FolderGit2, Pencil, X } from "lucide-react";
 import type { Workspace } from "@/lib/api";
 import { WorkspaceDialog } from "./WorkspaceDialog";
 
