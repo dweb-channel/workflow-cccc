@@ -56,7 +56,7 @@ export function WorkspaceTabs({
         ) : error ? (
           <span className="px-3 py-1 text-xs text-red-400">
             加载失败{" "}
-            <button className="underline hover:text-red-300" onClick={onRetryLoad}>重试</button>
+            <button className="underline hover:text-red-500" onClick={onRetryLoad}>重试</button>
           </span>
         ) : (
           workspaces.map((ws) => {
@@ -66,31 +66,31 @@ export function WorkspaceTabs({
                 key={ws.id}
                 className={`group relative flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs cursor-pointer transition-all ${
                   isActive
-                    ? "bg-white/15 text-white ring-1 ring-white/20"
-                    : "text-slate-400 hover:bg-white/5 hover:text-slate-200"
+                    ? "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-700"
                 }`}
                 onClick={() => onSelect(ws)}
               >
                 <FolderGit2 className="h-3 w-3 shrink-0" />
                 <span className="max-w-[120px] truncate font-medium">{ws.name}</span>
-                <span className={`text-[10px] ${isActive ? "text-slate-300" : "text-slate-500"}`}>{ws.job_count}</span>
+                <span className={`text-[10px] ${isActive ? "text-indigo-400" : "text-slate-400"}`}>{ws.job_count}</span>
 
                 {/* Edit/Delete on hover */}
                 {isActive && (
                   <div className="ml-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      className="rounded-full p-0.5 hover:bg-white/10"
+                      className="rounded-full p-0.5 hover:bg-indigo-100"
                       onClick={(e) => handleEdit(e, ws)}
                       title="编辑"
                     >
-                      <Pencil className="h-2.5 w-2.5 text-slate-300" />
+                      <Pencil className="h-2.5 w-2.5 text-indigo-400" />
                     </button>
                     <button
-                      className="rounded-full p-0.5 hover:bg-red-500/20"
+                      className="rounded-full p-0.5 hover:bg-red-100"
                       onClick={(e) => handleDelete(e, ws.id)}
                       title="删除"
                     >
-                      <X className="h-2.5 w-2.5 text-slate-300" />
+                      <X className="h-2.5 w-2.5 text-red-400" />
                     </button>
                   </div>
                 )}
@@ -101,7 +101,7 @@ export function WorkspaceTabs({
 
         {/* Create new workspace */}
         <button
-          className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-white/5 hover:text-slate-200"
+          className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
           onClick={handleCreate}
           title="新建项目组"
         >

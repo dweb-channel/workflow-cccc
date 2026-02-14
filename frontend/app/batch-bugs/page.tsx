@@ -248,11 +248,11 @@ function BatchBugsContent() {
       {/* Main content area — full width */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* ---- Header ---- */}
-        <div className="shrink-0 bg-[#1e293b] px-6 pt-5 pb-3">
+        <div className="shrink-0 bg-white px-6 pt-5 pb-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-lg font-semibold text-white">批量 Bug 修复</h1>
+            <h1 className="text-lg font-semibold text-slate-900">批量 Bug 修复</h1>
             {/* Workspace pills — same line as title */}
-            <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
+            <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3">
               <WorkspaceTabs
                 workspaces={workspaces}
                 activeWorkspaceId={activeWsId}
@@ -267,7 +267,7 @@ function BatchBugsContent() {
             </div>
             {currentJob && (
               <div className="ml-auto flex items-center gap-2">
-                <span className="rounded-full bg-white/10 px-2.5 py-0.5 font-mono text-xs text-blue-300">
+                <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 font-mono text-xs text-indigo-600">
                   {currentJob.job_id}
                 </span>
                 <JobStatusBadge status={currentJob.job_status} />
@@ -278,9 +278,11 @@ function BatchBugsContent() {
             <code className="mt-1.5 block text-xs text-slate-400">{activeWorkspace.repo_path}</code>
           )}
         </div>
+        {/* Gradient accent line */}
+        <div className="h-[2px] bg-gradient-to-r from-indigo-500 via-blue-500 to-cyan-400 shrink-0" />
 
         {/* ---- Content with padding ---- */}
-        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-slate-50/50">
+        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-slate-50">
 
         {/* ---- Two Big Tabs ---- */}
         <Tabs
@@ -366,7 +368,7 @@ function BatchBugsContent() {
                     {dryRunLoading ? "预览中..." : "预览"}
                   </Button>
                   <Button
-                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white"
                     onClick={handleSubmit}
                     disabled={submitting || parseJiraUrls().length === 0}
                   >
@@ -444,13 +446,13 @@ function BatchBugsContent() {
                         <TabsList className="w-full justify-start rounded-none border-b bg-transparent px-2 pt-1 shrink-0">
                           <TabsTrigger
                             value="overview"
-                            className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none text-[13px]"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none text-[13px]"
                           >
                             总览
                           </TabsTrigger>
                           <TabsTrigger
                             value="history"
-                            className="data-[state=active]:border-b-2 data-[state=active]:border-blue-500 rounded-none text-[13px]"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-indigo-500 rounded-none text-[13px]"
                           >
                             历史记录
                           </TabsTrigger>
