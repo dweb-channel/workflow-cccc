@@ -1,0 +1,1192 @@
+"""Design-to-Code API endpoints.
+
+Provides endpoints for running design-to-code workflows that convert
+Figma design exports into React + Tailwind code.
+
+Execution is async (background task) with SSE progress streaming.
+No Temporal dependency — uses asyncio for POC validation.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import html
+import json
+import logging
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database import get_session, get_session_ctx
+from app.models.db import DesignJobModel
+from app.repositories.design_job import DesignJobRepository
+from app.sse import push_node_event, sse_event_generator
+
+logger = logging.getLogger("workflow.routes.design")
+
+router = APIRouter(prefix="/api/v2/design", tags=["design"])
+
+
+# --- Schemas ---
+
+
+class DesignRunRequest(BaseModel):
+    """Request for POST /api/v2/design/run."""
+
+    design_file: str = Field(
+        ..., description="Path to design_export.json file"
+    )
+    output_dir: str = Field(
+        ..., description="Target directory for generated code"
+    )
+    cwd: Optional[str] = Field(
+        None, description="Working directory for Claude CLI"
+    )
+    max_retries: int = Field(
+        default=2, ge=0, le=5, description="Max retries per component"
+    )
+
+
+class DesignRunResponse(BaseModel):
+    """Response for POST /api/v2/design/run."""
+
+    job_id: str
+    status: str
+    design_file: str
+    output_dir: str
+    created_at: str
+
+
+class DesignJobStatus(BaseModel):
+    """Response for GET /api/v2/design/{job_id}."""
+
+    job_id: str
+    status: str
+    design_file: str
+    output_dir: str
+    created_at: str
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
+    components_total: int = 0
+    components_completed: int = 0
+    components_failed: int = 0
+    result: Optional[Dict[str, Any]] = None
+
+
+class DesignFileEntry(BaseModel):
+    """Single file entry in the files response."""
+
+    path: str = Field(..., description="Relative path from output_dir")
+    content: str = Field(..., description="File content as text")
+    size: int = Field(..., description="File size in bytes")
+
+
+class FigmaRunRequest(BaseModel):
+    """Request for POST /api/v2/design/run-figma."""
+
+    figma_url: str = Field(
+        ...,
+        description=(
+            "Figma URL, e.g. https://www.figma.com/design/{fileKey}/{name}?node-id={nodeId}"
+        ),
+    )
+    output_dir: str = Field(
+        ..., description="Target directory for generated code"
+    )
+    cwd: Optional[str] = Field(
+        None, description="Working directory for Claude CLI"
+    )
+    max_retries: int = Field(
+        default=2, ge=0, le=5, description="Max retries per component"
+    )
+
+
+class DesignFilesResponse(BaseModel):
+    """Response for GET /api/v2/design/{job_id}/files."""
+
+    job_id: str
+    status: str
+    output_dir: str
+    files: List[DesignFileEntry] = []
+
+
+def _job_to_status(job: DesignJobModel) -> DesignJobStatus:
+    """Convert ORM model to Pydantic response."""
+    return DesignJobStatus(
+        job_id=job.id,
+        status=job.status,
+        design_file=job.design_file,
+        output_dir=job.output_dir,
+        created_at=job.created_at.isoformat() if job.created_at else "",
+        completed_at=job.completed_at.isoformat() if job.completed_at else None,
+        error=job.error,
+        components_total=job.components_total,
+        components_completed=job.components_completed,
+        components_failed=job.components_failed,
+        result=job.result,
+    )
+
+
+def _job_to_dict(job: DesignJobModel) -> Dict[str, Any]:
+    """Convert ORM model to dict for SSE JSON serialization."""
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "design_file": job.design_file,
+        "output_dir": job.output_dir,
+        "cwd": job.cwd,
+        "max_retries": job.max_retries,
+        "created_at": job.created_at.isoformat() if job.created_at else "",
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "error": job.error,
+        "components_total": job.components_total,
+        "components_completed": job.components_completed,
+        "components_failed": job.components_failed,
+        "result": job.result,
+    }
+
+
+# --- Endpoints ---
+
+
+@router.post("/run", response_model=DesignRunResponse, status_code=201)
+async def run_design_to_code(
+    payload: DesignRunRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Start a design-to-code workflow.
+
+    Takes a design_export.json file path and output directory,
+    runs the full pipeline (analyze → skeleton → component loop → assemble),
+    and streams progress via SSE.
+
+    Usage:
+        POST /api/v2/design/run
+        {
+            "design_file": "data/design_export/design_export.json",
+            "output_dir": "output/generated",
+            "max_retries": 2
+        }
+    """
+    # Validate design file exists
+    design_path = os.path.abspath(payload.design_file)
+    if not os.path.isfile(design_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Design file not found: {design_path}",
+        )
+
+    # Validate it's valid JSON
+    try:
+        with open(design_path, "r", encoding="utf-8") as f:
+            design_data = json.load(f)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid JSON in design file: {e}",
+        )
+
+    # Create output directory if needed
+    output_dir = os.path.abspath(payload.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create job in DB
+    job_id = f"design_{uuid.uuid4().hex[:12]}"
+    repo = DesignJobRepository(session)
+    job = await repo.create(
+        job_id=job_id,
+        design_file=design_path,
+        output_dir=output_dir,
+        cwd=payload.cwd or os.getcwd(),
+        max_retries=payload.max_retries,
+    )
+
+    logger.info(f"Job {job_id}: Created design-to-code job, design={design_path}")
+
+    # Start async execution in background with error tracking
+    task = asyncio.create_task(_execute_design_pipeline(job_id))
+    task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
+
+    return DesignRunResponse(
+        job_id=job_id,
+        status="started",
+        design_file=design_path,
+        output_dir=output_dir,
+        created_at=job.created_at.isoformat(),
+    )
+
+
+@router.post("/run-figma", response_model=DesignRunResponse, status_code=201)
+async def run_figma_to_code(
+    payload: FigmaRunRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Start a design-to-code workflow from a Figma URL.
+
+    Fetches the design tree and screenshots from Figma REST API,
+    generates a design_export.json, then runs the standard pipeline.
+
+    Requires FIGMA_TOKEN environment variable.
+
+    Usage:
+        POST /api/v2/design/run-figma
+        {
+            "figma_url": "https://www.figma.com/design/6kGd851.../PixelCheese?node-id=16650-538",
+            "output_dir": "output/generated",
+            "max_retries": 2
+        }
+    """
+    # Fail fast if FIGMA_TOKEN is not configured
+    from workflow.config import FIGMA_TOKEN
+    if not FIGMA_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Figma integration not configured. "
+                "Set FIGMA_TOKEN environment variable with a valid Figma Personal Access Token. "
+                "See: https://www.figma.com/developers/api#access-tokens"
+            ),
+        )
+
+    # Parse Figma URL → file_key + node_id
+    file_key, node_id = _parse_figma_url(payload.figma_url)
+
+    # Create output directory
+    output_dir = os.path.abspath(payload.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create job in DB (design_file will be set after Figma fetch)
+    job_id = f"design_{uuid.uuid4().hex[:12]}"
+    design_export_path = os.path.join(output_dir, "design_export.json")
+    repo = DesignJobRepository(session)
+    job = await repo.create(
+        job_id=job_id,
+        design_file=design_export_path,
+        output_dir=output_dir,
+        cwd=payload.cwd or os.getcwd(),
+        max_retries=payload.max_retries,
+    )
+
+    logger.info(
+        f"Job {job_id}: Created Figma design-to-code job, "
+        f"file_key={file_key}, node_id={node_id}"
+    )
+
+    # Start async execution: Figma fetch → pipeline
+    task = asyncio.create_task(
+        _execute_figma_pipeline(job_id, file_key, node_id)
+    )
+    task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
+
+    return DesignRunResponse(
+        job_id=job_id,
+        status="started",
+        design_file=design_export_path,
+        output_dir=output_dir,
+        created_at=job.created_at.isoformat(),
+    )
+
+
+@router.get("/{job_id}", response_model=DesignJobStatus)
+async def get_design_job_status(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get the current status of a design-to-code job."""
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    return _job_to_status(job)
+
+
+@router.get("/{job_id}/stream")
+async def stream_design_job_progress(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Stream real-time progress updates for a design-to-code job via SSE.
+
+    Events:
+    - job_state: Initial job state when connected
+    - workflow_start: Pipeline started
+    - node_started / node_completed: Per-node progress
+    - component_started / component_completed / component_failed: Per-component
+    - loop_iteration: Component loop progress
+    - workflow_complete: Pipeline finished
+    - workflow_error: Pipeline failed
+    - job_done: Final event (always sent)
+
+    Usage:
+        const sse = new EventSource('/api/v2/design/{job_id}/stream');
+        sse.addEventListener('component_completed', (e) => console.log(JSON.parse(e.data)));
+    """
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    # Snapshot job state for initial SSE event (session closes after handler returns)
+    initial_state = _job_to_dict(job)
+
+    return StreamingResponse(
+        _design_sse_generator(job_id, initial_state),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("", response_model=List[DesignJobStatus])
+async def list_design_jobs(
+    session: AsyncSession = Depends(get_session),
+):
+    """List all design-to-code jobs."""
+    repo = DesignJobRepository(session)
+    jobs, _ = await repo.list()
+    return [_job_to_status(job) for job in jobs]
+
+
+@router.post("/{job_id}/cancel")
+async def cancel_design_job(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Cancel a running design-to-code job."""
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    if job.status in ("completed", "failed", "cancelled"):
+        return {"success": False, "job_id": job_id, "status": job.status,
+                "message": f"Job already {job.status}"}
+
+    await repo.update_status(
+        job_id, "cancelled",
+        completed_at=datetime.now(timezone.utc),
+    )
+
+    # Push job_done event so SSE clients close
+    push_node_event(job_id, "job_done", {
+        "status": "cancelled",
+        "components_total": job.components_total,
+        "components_completed": job.components_completed,
+        "components_failed": job.components_failed,
+    })
+
+    return {"success": True, "job_id": job_id, "status": "cancelled"}
+
+
+# Allowed file extensions for the files endpoint
+_CODE_EXTENSIONS = {".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".html"}
+
+
+@router.get("/{job_id}/files", response_model=DesignFilesResponse)
+async def get_design_job_files(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Get the generated code files for a completed design-to-code job.
+
+    Recursively scans the job's output_dir for code files (.tsx, .ts, .css, etc.)
+    and returns their paths and contents.
+
+    If the job is still running, returns an empty file list with status.
+
+    Usage:
+        GET /api/v2/design/{job_id}/files
+        → { job_id, status, output_dir, files: [{ path, content, size }] }
+    """
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    output_dir = job.output_dir
+    files: List[DesignFileEntry] = []
+
+    # Only scan files if job is completed (or failed — partial results may exist)
+    if job.status in ("completed", "failed") and os.path.isdir(output_dir):
+        for dirpath, _, filenames in os.walk(output_dir):
+            for filename in sorted(filenames):
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in _CODE_EXTENSIONS:
+                    continue
+                abs_path = os.path.join(dirpath, filename)
+                rel_path = os.path.relpath(abs_path, output_dir)
+                try:
+                    with open(abs_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    files.append(DesignFileEntry(
+                        path=rel_path,
+                        content=content,
+                        size=os.path.getsize(abs_path),
+                    ))
+                except (OSError, UnicodeDecodeError) as e:
+                    logger.warning(f"Job {job_id}: Skipping file {rel_path}: {e}")
+
+    # Sort by path for consistent ordering
+    files.sort(key=lambda f: f.path)
+
+    return DesignFilesResponse(
+        job_id=job_id,
+        status=job.status,
+        output_dir=output_dir,
+        files=files,
+    )
+
+
+@router.get("/{job_id}/preview")
+async def preview_design_job(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Render generated code as a self-contained HTML preview page.
+
+    Returns an HTML page that uses React CDN + Babel standalone + Tailwind CDN
+    to render the generated components in-browser. Can be loaded directly or
+    embedded in an iframe.
+
+    Usage:
+        GET /api/v2/design/{job_id}/preview
+        → text/html page with live-rendered components
+    """
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    output_dir = job.output_dir
+
+    if not os.path.isdir(output_dir):
+        raise HTTPException(status_code=404, detail="Output directory not found")
+
+    # Collect generated files
+    css_content = ""
+    component_sources = []  # (name, code) — components first, Page last
+    page_source = ""
+
+    for dirpath, _, filenames in os.walk(output_dir):
+        for filename in sorted(filenames):
+            abs_path = os.path.join(dirpath, filename)
+            rel_path = os.path.relpath(abs_path, output_dir)
+            try:
+                with open(abs_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            if filename.endswith(".css"):
+                css_content += content + "\n"
+            elif filename.endswith((".tsx", ".ts", ".jsx", ".js")):
+                cleaned = _strip_imports_exports(content)
+                if rel_path == "Page.tsx" or rel_path.endswith("/Page.tsx"):
+                    page_source = cleaned
+                else:
+                    component_sources.append((filename, cleaned))
+
+    # Build all JS code: components first, then Page, then render
+    all_js = "\n\n".join(code for _, code in component_sources)
+    if page_source:
+        all_js += "\n\n" + page_source
+    all_js += "\n\nReactDOM.createRoot(document.getElementById('root')).render(React.createElement(Page));"
+
+    html_page = _build_preview_html(css_content, all_js, job_id)
+    return HTMLResponse(content=html_page)
+
+
+def _strip_imports_exports(code: str) -> str:
+    """Strip import/export statements from TSX code for browser execution.
+
+    - Removes `import ... from '...'` lines
+    - Converts `export default function X` → `function X`
+    - Converts `export function X` → `function X`
+    - Converts `export interface X` → `interface X` (Babel TS preset removes these)
+    - Converts `export type X` → `type X`
+    """
+    lines = []
+    for line in code.split("\n"):
+        stripped = line.strip()
+        # Skip import lines
+        if stripped.startswith("import ") and (" from " in stripped or stripped.endswith(";")):
+            continue
+        # Strip export keywords
+        line = re.sub(r"^(\s*)export\s+default\s+function\b", r"\1function", line)
+        line = re.sub(r"^(\s*)export\s+function\b", r"\1function", line)
+        line = re.sub(r"^(\s*)export\s+interface\b", r"\1interface", line)
+        line = re.sub(r"^(\s*)export\s+type\b", r"\1type", line)
+        line = re.sub(r"^(\s*)export\s+const\b", r"\1const", line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _build_tailwind_fallbacks(js_code: str) -> str:
+    """Generate CSS fallback rules for non-standard Tailwind classes.
+
+    Figma MCP's get_design_context generates code with classes that may not
+    exist in Tailwind v3 CDN. This function scans the JS code and emits
+    matching CSS rules as fallbacks.
+
+    Covers:
+    - content-stretch → align-content: stretch
+    - bg-top-left → background-position: top left
+    - bg-size-[...] → background-size: ...
+    - size-full → width: 100%; height: 100%
+    - size-[Xpx] → width: X; height: X
+    - col-1 / row-1 → grid-column / grid-row
+    - overflow-clip → overflow: clip
+    """
+    rules = []
+
+    if "content-stretch" in js_code:
+        rules.append(".content-stretch { align-content: stretch; }")
+
+    if "bg-top-left" in js_code:
+        rules.append(".bg-top-left { background-position: top left; }")
+
+    if "overflow-clip" in js_code:
+        rules.append(".overflow-clip { overflow: clip; }")
+
+    if "size-full" in js_code:
+        rules.append(".size-full { width: 100%; height: 100%; }")
+
+    if "col-1" in js_code:
+        rules.append(".col-1 { grid-column: 1; }")
+
+    if "row-1" in js_code:
+        rules.append(".row-1 { grid-row: 1; }")
+
+    # bg-size-[WxH] — arbitrary background-size values
+    seen_bg_sizes: set = set()
+    for m in re.finditer(r'bg-size-\[([^\]]+)\]', js_code):
+        raw = m.group(1)
+        if raw in seen_bg_sizes:
+            continue
+        seen_bg_sizes.add(raw)
+        val = raw.replace("_", " ")
+        cls = f"bg-size-\\[{re.escape(raw)}\\]"
+        rules.append(f'.{cls} {{ background-size: {val}; }}')
+
+    # size-[Xpx] — arbitrary width+height values (fallback if CDN doesn't handle)
+    # Use negative lookbehind to avoid matching bg-size-[...]
+    seen_sizes: set = set()
+    for m in re.finditer(r'(?<!bg-)size-\[([^\]]+)\]', js_code):
+        val = m.group(1)
+        if val in seen_sizes:
+            continue
+        seen_sizes.add(val)
+        cls = f"size-\\[{re.escape(val)}\\]"
+        rules.append(f'.{cls} {{ width: {val}; height: {val}; }}')
+
+    return "\n        ".join(rules)
+
+
+def _build_preview_html(css: str, js_code: str, job_id: str) -> str:
+    """Build a self-contained HTML page for preview rendering."""
+    # Script content must NOT be HTML-escaped — only guard against </script> in code
+    safe_js = js_code.replace("</script>", "<\\/script>")
+
+    # Generate CSS fallbacks for non-standard Tailwind classes
+    tw_fallbacks = _build_tailwind_fallbacks(js_code)
+
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preview — {html.escape(job_id)}</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ display: flex; justify-content: center; background: #f0f0f0; min-height: 100vh; padding: 16px 0; }}
+        #root {{ background: #fff; }}
+        /* Tailwind fallbacks for Figma MCP generated classes */
+        {tw_fallbacks}
+        {css}
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel" data-presets="typescript,react">
+{safe_js}
+    </script>
+</body>
+</html>"""
+
+
+# --- SSE Generator ---
+
+
+async def _design_sse_generator(job_id: str, initial_state: Dict[str, Any]):
+    """SSE generator for design job progress.
+
+    Sends initial job state, then streams real-time events.
+
+    Args:
+        job_id: Job identifier for SSE event subscription
+        initial_state: Snapshot of job state for the first SSE event
+    """
+    yield f"event: job_state\ndata: {json.dumps(initial_state, default=str)}\n\n"
+
+    # Stream from shared SSE infrastructure
+    async for event_str in sse_event_generator(job_id):
+        yield event_str
+        if event_str.startswith("event: job_done\n"):
+            break
+
+
+# --- Figma URL Parsing ---
+
+
+def _parse_figma_url(url: str) -> tuple:
+    """Parse a Figma URL into (file_key, node_id).
+
+    Supports:
+        https://www.figma.com/design/{fileKey}/{name}?node-id={nodeId}
+        https://www.figma.com/file/{fileKey}/{name}?node-id={nodeId}
+        https://www.figma.com/design/{fileKey}?node-id={nodeId}
+
+    Node ID format: URL uses '16650-538', API uses '16650:538'.
+
+    Returns:
+        (file_key, node_id) tuple
+
+    Raises:
+        HTTPException if URL format is invalid
+    """
+    # Match file key from path: /design/{key}/ or /file/{key}/
+    path_match = re.search(r"figma\.com/(?:design|file)/([a-zA-Z0-9]+)", url)
+    if not path_match:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid Figma URL. Expected format: "
+                "https://www.figma.com/design/{fileKey}/...?node-id={nodeId}"
+            ),
+        )
+    file_key = path_match.group(1)
+
+    # Extract node-id from query params
+    node_match = re.search(r"[?&]node-id=([^&#]+)", url)
+    if not node_match:
+        raise HTTPException(
+            status_code=400,
+            detail="Figma URL must include a node-id parameter.",
+        )
+
+    # Decode percent-encoding (e.g. %3A → :) then convert dashes to colons
+    raw_node_id = unquote(node_match.group(1))
+    node_id = raw_node_id.replace("-", ":")
+
+    return file_key, node_id
+
+
+# --- Pipeline Execution ---
+
+
+def _on_pipeline_task_done(task: asyncio.Task, job_id: str) -> None:
+    """Callback for pipeline background tasks — logs unhandled exceptions."""
+    if task.cancelled():
+        logger.warning(f"Job {job_id}: Pipeline task was cancelled")
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(
+            f"Job {job_id}: Pipeline task raised unhandled exception: {exc}",
+            exc_info=exc,
+        )
+
+
+async def _execute_design_pipeline(job_id: str):
+    """Execute the design-to-code pipeline as a background task.
+
+    Loads the design_to_code template, builds the LangGraph,
+    and runs it with SSE event streaming.
+
+    Uses get_session_ctx() for DB access since this runs outside
+    FastAPI's request lifecycle.
+    """
+    # Read job from DB
+    async with get_session_ctx() as session:
+        repo = DesignJobRepository(session)
+        job = await repo.get(job_id)
+        if not job:
+            logger.error(f"Job {job_id}: Not found in DB")
+            return
+        # Snapshot needed fields before session closes
+        design_file = job.design_file
+        output_dir = job.output_dir
+        cwd = job.cwd
+        max_retries = job.max_retries
+
+    # Track final state for job_done event
+    final_status = "failed"
+    final_error: Optional[str] = None
+    components_total = 0
+    components_completed = 0
+    components_failed = 0
+
+    try:
+        # Update status to running
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(job_id, "running")
+        push_node_event(job_id, "job_status", {"status": "running"})
+
+        # Load template and build workflow
+        from workflow.templates import load_template, template_to_workflow_definition
+        from workflow.engine.graph_builder import WorkflowDefinition
+        from workflow.engine.executor import execute_dynamic_workflow
+
+        template = load_template("design_to_code")
+        workflow_dict = template_to_workflow_definition(template)
+        workflow_def = WorkflowDefinition(**workflow_dict)
+
+        # Read design file and extract components
+        with open(design_file, "r", encoding="utf-8") as f:
+            design_data = json.load(f)
+
+        components = design_data.get("components", [])
+        design_tokens = design_data.get("design_tokens", {})
+
+        # Build summary strings for LLM prompts
+        components_summary = "\n".join(
+            f"- {c['name']} ({c.get('type', 'unknown')}): "
+            f"{c.get('bounds', {}).get('width', '?')}x{c.get('bounds', {}).get('height', '?')}px"
+            f" — {c.get('notes', '')}"
+            for c in components
+        )
+        design_tokens_summary = json.dumps(design_tokens, ensure_ascii=False, indent=2)
+
+        # Update job with component count
+        components_total = len(components)
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_component_counts(job_id, total=components_total)
+
+        # Enrich each component dict with a properties_summary field
+        # so the template can reference {current_component.properties_summary}
+        for c in components:
+            props = []
+            if c.get("bounds"):
+                b = c["bounds"]
+                props.append(f"位置: ({b.get('x', 0)}, {b.get('y', 0)})")
+                props.append(f"尺寸: {b.get('width', '?')}x{b.get('height', '?')}px")
+            if c.get("children_summary"):
+                children_str = ", ".join(
+                    f"{ch.get('name', '?')}({ch.get('type', '?')})"
+                    for ch in c["children_summary"]
+                )
+                props.append(f"子元素: {children_str}")
+            if c.get("text_content"):
+                props.append(f"文字: {c['text_content']}")
+            if c.get("notes"):
+                props.append(f"备注: {c['notes']}")
+            c["properties_summary"] = "\n".join(props) if props else "无详细属性"
+
+        # Build initial state from design file
+        # NOTE: All fields referenced in template prompts MUST exist here,
+        # because graph_builder only merges node outputs for keys already in state.
+        initial_state = {
+            "design_file": design_file,
+            "output_dir": output_dir,
+            "cwd": cwd,
+            "max_retries": max_retries,
+            "job_id": job_id,
+            # Design data
+            "components": components,
+            "components_count": len(components),
+            "design_tokens": design_tokens,
+            "components_summary": components_summary,
+            "design_tokens_summary": design_tokens_summary,
+            # CSS variable names for LLM prompt injection — ensures generated
+            # components reference canonical variable names instead of inventing
+            # their own (e.g. --color-brand-primary, not --brand-primary).
+            "variables_css_content": _generate_variables_css(design_tokens),
+            # Template variable placeholders — needed for state merge propagation
+            "skeleton_code": "",
+            "component_registry_summary": "暂无已完成组件",
+            "neighbor_code": "暂无相邻组件代码",
+            "failed_components": "暂无",
+            # Initial state for the pipeline
+            "component_registry": {"components": []},
+            "current_index": 0,
+            "retry_count": 0,
+            "context": {},
+            "results": [],
+            "config": {
+                "css_framework": "tailwind",
+                "max_retries": max_retries,
+                "smoke_test_count": 3,
+            },
+        }
+
+        logger.info(f"Job {job_id}: Starting pipeline execution")
+
+        # Execute the workflow with SSE tracking
+        result = await execute_dynamic_workflow(
+            workflow_def=workflow_def,
+            initial_state=initial_state,
+            run_id=job_id,
+        )
+
+        # Determine final status
+        final_status = "completed" if result.get("success") else "failed"
+        final_error = result.get("error")
+        result_summary = _extract_result_summary(result)
+
+        # Extract component counts from result.
+        # The accumulated registry is inside output_node (LangGraph internal state),
+        # not at the top level of the executor's result dict.
+        output_node = result.get("output_node", {})
+        registry = (
+            output_node.get("component_registry")
+            or result.get("component_registry")
+            or {}
+        )
+        if isinstance(registry, dict):
+            reg_components = registry.get("components", [])
+            if reg_components:
+                components_total = len(reg_components)
+                components_completed = sum(
+                    1 for c in reg_components if c.get("status") == "completed"
+                )
+                components_failed = sum(
+                    1 for c in reg_components if c.get("status") == "failed"
+                )
+
+        # Persist final state to DB
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update(
+                job_id,
+                status=final_status,
+                completed_at=datetime.now(timezone.utc),
+                error=final_error,
+                result=result_summary,
+                components_total=components_total,
+                components_completed=components_completed,
+                components_failed=components_failed,
+            )
+
+        # Write generated code to disk
+        _write_generated_code(result, output_dir, job_id)
+
+        logger.info(
+            f"Job {job_id}: Pipeline {final_status} — "
+            f"{components_completed}/{components_total} components"
+        )
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: Pipeline execution failed: {e}", exc_info=True)
+        final_status = "failed"
+        final_error = str(e)
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(
+                job_id, "failed",
+                error=str(e),
+                completed_at=datetime.now(timezone.utc),
+            )
+
+    # Always push final job_done event
+    push_node_event(job_id, "job_done", {
+        "status": final_status,
+        "components_total": components_total,
+        "components_completed": components_completed,
+        "components_failed": components_failed,
+        "error": final_error,
+    })
+
+
+async def _execute_figma_pipeline(
+    job_id: str,
+    file_key: str,
+    node_id: str,
+):
+    """Execute the Figma → design-to-code pipeline.
+
+    Phase 1: Fetch design data from Figma REST API (node tree + screenshots)
+    Phase 2: Run the standard design-to-code pipeline on the generated export
+
+    Uses get_session_ctx() for DB access since this runs outside
+    FastAPI's request lifecycle.
+    """
+    # Read job from DB
+    async with get_session_ctx() as session:
+        repo = DesignJobRepository(session)
+        job = await repo.get(job_id)
+        if not job:
+            logger.error(f"Job {job_id}: Not found in DB")
+            return
+        output_dir = job.output_dir
+
+    final_status = "failed"
+    final_error: Optional[str] = None
+    components_total = 0
+    components_completed = 0
+    components_failed = 0
+
+    try:
+        # Phase 1: Fetch from Figma
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(job_id, "running")
+        push_node_event(job_id, "job_status", {"status": "running"})
+        push_node_event(job_id, "figma_fetch_start", {
+            "file_key": file_key,
+            "node_id": node_id,
+        })
+
+        from workflow.integrations.figma_client import FigmaClient, FigmaClientError
+
+        try:
+            client = FigmaClient()
+        except FigmaClientError as e:
+            # Missing/invalid token — fail the job with a clear error
+            error_msg = (
+                "Figma API not configured. Set FIGMA_TOKEN environment variable "
+                "with a valid Figma Personal Access Token "
+                "(https://www.figma.com/developers/api#access-tokens)."
+            )
+            logger.error(f"Job {job_id}: {error_msg}")
+            async with get_session_ctx() as session:
+                repo = DesignJobRepository(session)
+                await repo.update_status(
+                    job_id, "failed",
+                    error=error_msg,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            push_node_event(job_id, "job_done", {
+                "status": "failed",
+                "error": error_msg,
+                "components_total": 0,
+                "components_completed": 0,
+                "components_failed": 0,
+            })
+            return
+
+        try:
+            export = await client.generate_design_export(
+                file_key=file_key,
+                page_node_id=node_id,
+                output_dir=output_dir,
+            )
+        finally:
+            await client.close()
+
+        design_export_path = os.path.join(output_dir, "design_export.json")
+        logger.info(
+            f"Job {job_id}: Figma fetch complete — "
+            f"{len(export.get('components', []))} components, "
+            f"export written to {design_export_path}"
+        )
+
+        push_node_event(job_id, "figma_fetch_complete", {
+            "components_count": len(export.get("components", [])),
+            "design_export_path": design_export_path,
+        })
+
+        # Update design_file in DB to point to the generated export
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update(job_id, design_file=design_export_path)
+
+        # Phase 2: Run the standard pipeline (reuse _execute_design_pipeline logic)
+        # The design_export.json is now on disk, so we run the normal pipeline
+        await _execute_design_pipeline(job_id)
+        return  # _execute_design_pipeline handles its own DB updates + job_done event
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: Figma pipeline failed: {e}", exc_info=True)
+        final_status = "failed"
+        final_error = str(e)
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(
+                job_id, "failed",
+                error=str(e),
+                completed_at=datetime.now(timezone.utc),
+            )
+
+        # Push final job_done event (only if we didn't get to _execute_design_pipeline)
+        push_node_event(job_id, "job_done", {
+            "status": final_status,
+            "components_total": components_total,
+            "components_completed": components_completed,
+            "components_failed": components_failed,
+            "error": final_error,
+        })
+
+
+def _extract_result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract a summary from the full workflow result for API response."""
+    summary = {}
+
+    # Output node result
+    output = result.get("output_node", {})
+    if isinstance(output, dict):
+        summary["output"] = {
+            k: v for k, v in output.items()
+            if k in ("job_id", "results", "components_count", "output_dir")
+        }
+
+    # Component registry — prefer output_node's accumulated version
+    output_registry = output.get("component_registry") if isinstance(output, dict) else None
+    registry = output_registry or result.get("component_registry", {})
+    if isinstance(registry, dict):
+        summary["component_registry"] = registry
+
+    # Execution stats
+    summary["node_execution_counts"] = result.get("node_execution_counts", {})
+    summary["success"] = result.get("success", False)
+
+    return summary
+
+
+def _generate_variables_css(design_tokens: Dict[str, Any]) -> str:
+    """Generate a CSS file with custom properties from design tokens.
+
+    Converts the design_tokens structure from design_export.json into
+    CSS custom properties under :root, so generated components using
+    var(--color-brand-primary) etc. render correctly in Sandpack preview.
+
+    Also emits short-name aliases (e.g. --brand-primary) because LLM-generated
+    components sometimes omit the category prefix.
+    """
+    lines = [":root {"]
+
+    # Colors — canonical names + short aliases
+    colors = design_tokens.get("colors", {})
+    for name, value in colors.items():
+        lines.append(f"  --color-{name}: {value};")
+    # Short aliases so var(--brand-primary) also resolves
+    for name, value in colors.items():
+        lines.append(f"  --{name}: {value};")
+
+    # Fonts
+    fonts = design_tokens.get("fonts", {})
+    if fonts.get("family"):
+        lines.append(f"  --font-family: {fonts['family']}, -apple-system, sans-serif;")
+    for weight_name, weight_value in fonts.get("weights", {}).items():
+        lines.append(f"  --font-weight-{weight_name}: {weight_value};")
+
+    # Spacing
+    for name, value in design_tokens.get("spacing", {}).items():
+        lines.append(f"  --spacing-{name}: {value};")
+
+    # Border radius
+    for name, value in design_tokens.get("radius", {}).items():
+        lines.append(f"  --radius-{name}: {value};")
+
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def _write_generated_code(result: Dict[str, Any], output_dir: str, job_id: str):
+    """Extract generated code from pipeline result and write to disk.
+
+    Parses LLM agent outputs for code blocks and writes them as files.
+    - variables.css → CSS custom properties from design tokens
+    - skeleton code → layout/PageSkeleton.tsx
+    - component code → components/{Name}.tsx
+    - assembled page → Page.tsx
+    """
+    written_files = []
+
+    # 0. Write variables.css from design tokens
+    design_tokens = result.get("design_tokens", {})
+    if isinstance(design_tokens, dict) and design_tokens:
+        css_content = _generate_variables_css(design_tokens)
+        css_path = os.path.join(output_dir, "variables.css")
+        with open(css_path, "w", encoding="utf-8") as f:
+            f.write(css_content)
+        written_files.append(css_path)
+        logger.info(f"Job {job_id}: Wrote design tokens → {css_path}")
+
+    # 1. Write skeleton code (prefer output_node's accumulated version)
+    output_node = result.get("output_node", {})
+    skeleton_code = (
+        (output_node.get("skeleton_code") if isinstance(output_node, dict) else None)
+        or result.get("skeleton_code")
+        or ""
+    )
+    if skeleton_code and isinstance(skeleton_code, str) and len(skeleton_code) > 50:
+        skeleton_content = _extract_code_block(skeleton_code)
+        if skeleton_content:
+            skeleton_path = os.path.join(output_dir, "layout", "PageSkeleton.tsx")
+            os.makedirs(os.path.dirname(skeleton_path), exist_ok=True)
+            with open(skeleton_path, "w", encoding="utf-8") as f:
+                f.write(skeleton_content)
+            written_files.append(skeleton_path)
+            logger.info(f"Job {job_id}: Wrote skeleton → {skeleton_path}")
+
+    # 2. Write component code from registry (prefer output_node's accumulated version)
+    registry = (
+        (output_node.get("component_registry") if isinstance(output_node, dict) else None)
+        or result.get("component_registry")
+        or {}
+    )
+    if isinstance(registry, dict):
+        for comp in registry.get("components", []):
+            name = comp.get("name", "Unknown")
+            code = comp.get("code", "")
+            if code and isinstance(code, str) and len(code) > 20:
+                comp_content = _extract_code_block(code)
+                if comp_content:
+                    comp_path = os.path.join(output_dir, "components", f"{name}.tsx")
+                    os.makedirs(os.path.dirname(comp_path), exist_ok=True)
+                    with open(comp_path, "w", encoding="utf-8") as f:
+                        f.write(comp_content)
+                    written_files.append(comp_path)
+                    logger.info(f"Job {job_id}: Wrote component → {comp_path}")
+
+    # 3. Write assembled page
+    assemble_output = result.get("assemble_page", {})
+    if isinstance(assemble_output, dict):
+        page_code = assemble_output.get("result", "")
+    elif isinstance(assemble_output, str):
+        page_code = assemble_output
+    else:
+        page_code = ""
+
+    if page_code and isinstance(page_code, str) and len(page_code) > 50:
+        page_content = _extract_code_block(page_code)
+        if page_content:
+            page_path = os.path.join(output_dir, "Page.tsx")
+            with open(page_path, "w", encoding="utf-8") as f:
+                f.write(page_content)
+            written_files.append(page_path)
+            logger.info(f"Job {job_id}: Wrote page → {page_path}")
+
+    if written_files:
+        logger.info(f"Job {job_id}: Wrote {len(written_files)} files to {output_dir}")
+    else:
+        logger.warning(f"Job {job_id}: No code files written — LLM output may be empty")
+
+
+def _extract_code_block(text: str) -> str:
+    """Extract the first code block from LLM output, or return raw text."""
+    # Try to extract ```tsx or ```typescript code block
+    pattern = r"```(?:tsx|typescript|jsx|ts|js)?\s*\n(.*?)```"
+    match = re.search(pattern, text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    # If no code block found, return the text itself (might be raw code)
+    return text.strip()

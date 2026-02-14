@@ -5,6 +5,7 @@ Configures the app, lifespan, CORS, and includes all route modules.
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -18,12 +19,23 @@ from .temporal_adapter import close_temporal_client, init_temporal_client
 import workflow.nodes.base  # noqa: F401
 import workflow.nodes.agents  # noqa: F401
 
+logger = logging.getLogger("workflow.app")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage Temporal client and database lifecycle."""
     await init_db()
     await init_temporal_client()
+
+    # Warn about optional integrations
+    from workflow.config import FIGMA_TOKEN
+    if not FIGMA_TOKEN:
+        logger.warning(
+            "FIGMA_TOKEN not set — /api/v2/design/run-figma endpoint will be unavailable. "
+            "Set FIGMA_TOKEN in .env or environment to enable Figma integration."
+        )
+
     yield
     await close_temporal_client()
     await close_db()
@@ -55,6 +67,7 @@ from .routes.batch import router as batch_router  # noqa: E402
 from .routes.batch import jira_router  # noqa: E402
 from .routes.filesystem import router as filesystem_router  # noqa: E402
 from .routes.workspace import router as workspace_router  # noqa: E402
+from .routes.design import router as design_router  # noqa: E402
 
 app.include_router(sse_router)
 app.include_router(workflows_router)
@@ -65,6 +78,7 @@ app.include_router(batch_router)
 app.include_router(jira_router)
 app.include_router(filesystem_router)
 app.include_router(workspace_router)
+app.include_router(design_router)
 
 
 @app.get("/health")

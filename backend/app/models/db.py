@@ -383,3 +383,59 @@ class BugResultModel(Base):
         Index("ix_bug_results_job_id", "job_id"),
         Index("ix_bug_results_status", "status"),
     )
+
+
+# ─── Design-to-Code Job ─────────────────────────────────────────────
+
+
+class DesignJobModel(Base):
+    """Design-to-code pipeline job record.
+
+    Tracks design-to-code conversion jobs including status, component
+    progress counters, and pipeline result summary.
+    """
+
+    __tablename__ = "design_jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # e.g., design_xxx
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="started",
+        comment="started | running | completed | failed | cancelled",
+    )
+    design_file: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Absolute path to design_export.json",
+    )
+    output_dir: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Target directory for generated code",
+    )
+    cwd: Mapped[str] = mapped_column(
+        Text, nullable=False, comment="Working directory for Claude CLI",
+    )
+    max_retries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=2,
+    )
+
+    # Error message if failed
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Component progress counters
+    components_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    components_completed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    components_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Pipeline result summary as JSON
+    result: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="Pipeline result summary",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    __table_args__ = (
+        Index("ix_design_jobs_status", "status"),
+        Index("ix_design_jobs_created_at", "created_at"),
+    )
