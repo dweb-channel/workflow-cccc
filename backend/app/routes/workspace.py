@@ -95,7 +95,7 @@ async def create_workspace(payload: WorkspaceCreate):
         except IntegrityError:
             raise HTTPException(status_code=409, detail=f"该仓库路径已被其他项目组使用: {canonical_path}")
         logger.info(f"Workspace created: {ws.id} ({ws.name}) -> {ws.repo_path}")
-        return _ws_to_response(ws)
+        return _ws_to_response(ws, job_count=0)
 
 
 @router.get("", response_model=WorkspaceListResponse)
@@ -158,10 +158,12 @@ async def update_workspace(workspace_id: str, payload: WorkspaceUpdate):
             repo_path=canonical_path,
             config_defaults=payload.config_defaults,
         )
-    if not ws:
-        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
-    logger.info(f"Workspace updated: {ws.id}")
-    return _ws_to_response(ws)
+        if not ws:
+            raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
+        # Reload with jobs eagerly loaded (avoid MissingGreenlet on lazy load)
+        ws = await repo.get(workspace_id, load_jobs=True)
+        logger.info(f"Workspace updated: {ws.id}")
+        return _ws_to_response(ws)
 
 
 @router.delete("/{workspace_id}", status_code=200)
