@@ -612,3 +612,90 @@ export async function deleteWorkspace(id: string): Promise<void> {
     throw new Error(typeof err.detail === "string" ? err.detail : "删除失败");
   }
 }
+
+// ============ Design-to-Code API ============
+
+export interface DesignRunRequest {
+  design_file: string;
+  output_dir: string;
+  cwd?: string;
+  max_retries?: number;
+}
+
+export interface FigmaRunRequest {
+  figma_url: string;
+  output_dir: string;
+  cwd?: string;
+  max_retries?: number;
+}
+
+export interface DesignRunResponse {
+  job_id: string;
+  status: string;
+  design_file: string;
+  output_dir: string;
+  created_at: string;
+}
+
+export interface DesignJobStatusResponse {
+  job_id: string;
+  status: string;
+  design_file: string;
+  output_dir: string;
+  created_at: string;
+  completed_at?: string;
+  error?: string;
+  components_total: number;
+  components_completed: number;
+  components_failed: number;
+  result?: Record<string, unknown>;
+}
+
+export async function submitDesignRun(payload: DesignRunRequest): Promise<DesignRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/design/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<DesignRunResponse>(response);
+}
+
+export async function submitFigmaRun(payload: FigmaRunRequest): Promise<DesignRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/design/run-figma`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<DesignRunResponse>(response);
+}
+
+export async function getDesignJobStatus(jobId: string): Promise<DesignJobStatusResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/design/${jobId}`);
+  return handleResponse<DesignJobStatusResponse>(response);
+}
+
+export async function cancelDesignJob(jobId: string): Promise<{ success: boolean; job_id: string; status: string }> {
+  const response = await fetch(`${API_BASE}/api/v2/design/${jobId}/cancel`, {
+    method: "POST",
+  });
+  return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
+}
+
+export function getDesignJobStreamUrl(jobId: string): string {
+  return `${API_BASE}/api/v2/design/${jobId}/stream`;
+}
+
+export interface DesignGeneratedFile {
+  path: string;
+  content: string;
+  size: number;
+}
+
+export async function getDesignJobFiles(jobId: string): Promise<{ files: DesignGeneratedFile[] }> {
+  const response = await fetch(`${API_BASE}/api/v2/design/${jobId}/files`);
+  return handleResponse<{ files: DesignGeneratedFile[] }>(response);
+}
+
+export function getDesignJobPreviewUrl(jobId: string): string {
+  return `${API_BASE}/api/v2/design/${jobId}/preview`;
+}
