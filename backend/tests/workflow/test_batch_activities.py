@@ -917,8 +917,8 @@ class TestSyncFinalResultsRetryMode:
     @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
-    async def test_non_retry_ignores_db_requery(self, mock_ctx, mock_repo_cls, mock_push):
-        """Without offset (normal run), should NOT requery DB for overall status."""
+    async def test_non_retry_preserves_incremental_timestamps(self, mock_ctx, mock_repo_cls, mock_push):
+        """Normal run fetches existing bugs to preserve incremental completed_at timestamps."""
         from workflow.temporal.batch_activities import _sync_final_results
 
         mock_repo = AsyncMock()
@@ -927,6 +927,12 @@ class TestSyncFinalResultsRetryMode:
         mock_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
 
+        # Simulate bug 0 already has completed_at from incremental sync
+        mock_bug_0 = MagicMock(bug_index=0, completed_at="2026-02-14T04:00:00")
+        mock_bug_1 = MagicMock(bug_index=1, completed_at=None)
+        mock_db_job = MagicMock(bugs=[mock_bug_0, mock_bug_1])
+        mock_repo.get.return_value = mock_db_job
+
         final_state = {"results": [
             {"status": "completed"},
             {"status": "failed", "error": "oops"},
@@ -934,8 +940,13 @@ class TestSyncFinalResultsRetryMode:
 
         await _sync_final_results("job_1", final_state, ["url1", "url2"], bug_index_offset=0)
 
-        # repo.get should NOT be called (no retry requery)
-        mock_repo.get.assert_not_awaited()
+        # repo.get IS called to fetch existing bugs for timestamp preservation
+        mock_repo.get.assert_awaited_once_with("job_1")
+        # Bug 0: completed_at=None (preserved, already set by incremental sync)
+        # Bug 1: completed_at=<now> (set by final sync since it was None)
+        calls = mock_repo.update_bug_status.call_args_list
+        assert calls[0].kwargs.get("completed_at") is None  # bug 0 preserved
+        assert calls[1].kwargs.get("completed_at") is not None  # bug 1 set
 
     @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")

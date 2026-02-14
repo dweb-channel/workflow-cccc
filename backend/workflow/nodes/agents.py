@@ -6,6 +6,7 @@ These nodes enable dynamic workflows to invoke Claude CLI for AI-powered tasks.
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import re
@@ -18,18 +19,23 @@ logger = logging.getLogger(__name__)
 
 
 # --- Configurable Event Push ---
-# Temporal worker sets this via set_job_event_pusher() to an HTTP-based pusher.
-_job_event_push_fn: Optional[Callable] = None
+# Temporal worker sets this via set_job_event_pusher() per-context to avoid
+# cross-job event leaking when multiple jobs run concurrently.
+_job_event_push_fn: contextvars.ContextVar[Optional[Callable]] = contextvars.ContextVar(
+    "_job_event_push_fn", default=None
+)
 
 
 def set_job_event_pusher(fn: Callable[[str, str, Dict[str, Any]], None]) -> None:
     """Configure the function used to push batch job SSE events.
 
+    Uses contextvars to ensure each concurrent job has its own pusher,
+    preventing SSE events from leaking between jobs.
+
     Args:
         fn: Callable(job_id, event_type, data) — pushes one event.
     """
-    global _job_event_push_fn
-    _job_event_push_fn = fn
+    _job_event_push_fn.set(fn)
 
 
 def _humanize_tool_event(event_dict: Dict[str, Any]) -> Dict[str, Any]:
@@ -140,7 +146,7 @@ def _make_sse_event_callback(inputs: Dict[str, Any], node_id: str):
         return None
 
     # Use configured pusher (set by batch_activities via set_job_event_pusher)
-    push_fn = _job_event_push_fn
+    push_fn = _job_event_push_fn.get(None)
     if push_fn is None:
         return None
 

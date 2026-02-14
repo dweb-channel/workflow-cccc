@@ -1212,13 +1212,21 @@ async def _sync_final_results(
 
             async with get_session_ctx() as session:
                 repo = BatchJobRepository(session)
+                # Fetch existing bugs to preserve incremental completed_at timestamps
+                db_job = await repo.get(job_id)
+                existing_bugs = {b.bug_index: b for b in db_job.bugs} if db_job else {}
+
                 for i, result in enumerate(results):
+                    db_i = _db_index(i, bug_index_offset, index_map)
+                    existing = existing_bugs.get(db_i)
+                    # Only set completed_at if not already set by incremental sync
+                    bug_completed_at = None if (existing and existing.completed_at) else now
                     await repo.update_bug_status(
                         job_id=job_id,
-                        bug_index=_db_index(i, bug_index_offset, index_map),
+                        bug_index=db_i,
                         status=result.get("status", "failed"),
                         error=result.get("error"),
-                        completed_at=now,
+                        completed_at=bug_completed_at,
                     )
 
                 # Recompute overall status from ALL bugs in DB when

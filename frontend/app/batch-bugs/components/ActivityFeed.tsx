@@ -194,6 +194,7 @@ export function ActivityFeed({
   const eventsByBug = useMemo(() => {
     const map = new Map<number, AIThinkingEvent[]>();
     for (const e of allAiEvents) {
+      if (e.bug_index == null) continue;
       const list = map.get(e.bug_index) ?? [];
       list.push(e);
       map.set(e.bug_index, list);

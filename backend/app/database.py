@@ -10,6 +10,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
+import sqlalchemy
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -74,6 +75,11 @@ async def get_session_ctx() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db():
     """Create all tables. Use for development/testing only."""
+    # Enable WAL mode for SQLite to allow concurrent reads/writes
+    if "sqlite" in DATABASE_URL:
+        async with engine.begin() as conn:
+            await conn.execute(sqlalchemy.text("PRAGMA journal_mode=WAL"))
+            await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=5000"))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

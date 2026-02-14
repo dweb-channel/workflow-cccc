@@ -56,7 +56,7 @@ export type AIThinkingEventType = "thinking" | "text" | "read" | "edit" | "bash"
 export interface AIThinkingEventBase {
   type: AIThinkingEventType;
   timestamp: string;
-  bug_index: number;
+  bug_index?: number;
   node_id?: string;
 }
 

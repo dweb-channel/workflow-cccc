@@ -166,6 +166,16 @@ export function useBatchJob() {
       }));
     });
 
+    eventSource.addEventListener("bug_skipped", (e) => {
+      const data = safeParse(e.data) as Record<string, unknown> | null;
+      if (!data || typeof data.bug_index !== "number") return;
+      updateBug(data.bug_index, (bug) => ({
+        ...bug,
+        status: "skipped" as const,
+        error: (data.reason as string) ?? bug.error,
+      }));
+    });
+
     // Step-level SSE events
     eventSource.addEventListener("bug_step_started", (e) => {
       const data = safeParse(e.data) as Record<string, unknown> | null;
@@ -262,7 +272,11 @@ export function useBatchJob() {
       const data = safeParse(e.data) as Record<string, unknown> | null;
       if (!data || !data.type) return;
       const event = data as unknown as AIThinkingEvent;
-      setAiThinkingEvents((prev) => [...prev, event]);
+      setAiThinkingEvents((prev) => {
+        const next = [...prev, event];
+        // Cap at 2000 events to prevent unbounded memory growth; trim to 1500 on overflow
+        return next.length > 2000 ? next.slice(-1500) : next;
+      });
       setAiThinkingStats((prev) => ({ ...prev, streaming: true }));
     });
 
@@ -376,7 +390,7 @@ export function useBatchJob() {
       eventSource.close();
       clearInterval(pollTimer);
     };
-  }, [currentJob?.job_id, currentJob?.job_status, toast]);
+  }, [currentJob?.job_id, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Submit a new batch job — also resets AI thinking state
   const submit = useCallback(
@@ -460,8 +474,8 @@ export function useBatchJob() {
           ),
         };
       });
-      // Clear AI thinking events for the retried bug
-      setAiThinkingEvents((prev) => prev.filter((e) => e.bug_index !== bugIndex));
+      // Clear AI thinking events for the retried bug (keep events with undefined bug_index)
+      setAiThinkingEvents((prev) => prev.filter((e) => e.bug_index === undefined || e.bug_index !== bugIndex));
       toast({
         title: "重试已启动",
         description: `Bug ${bugIndex + 1} 正在重新修复`,

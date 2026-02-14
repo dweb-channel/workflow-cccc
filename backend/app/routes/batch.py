@@ -445,7 +445,7 @@ async def _batch_sse_generator(job_id: str):
     async for event_str in sse_event_generator(job_id):
         yield event_str
         # Check if this is a job_done event (batch-specific stop signal)
-        if "job_done" in event_str and event_str.startswith("event:"):
+        if event_str.startswith("event: job_done\n"):
             break
 
 
@@ -616,7 +616,7 @@ async def retry_single_bug(job_id: str, bug_index: int):
 
     # 5. Recover config and cwd from stored job config
     stored_config = db_job.config or {}
-    cwd = stored_config.pop("cwd", ".")
+    cwd = stored_config.get("cwd", ".")
     # Remaining keys are the workflow config (validation_level, etc.)
     workflow_config = {
         k: v for k, v in stored_config.items()
