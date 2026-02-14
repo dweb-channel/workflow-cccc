@@ -16,12 +16,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileEdit, Play, Palette, Link, FileJson } from "lucide-react";
+import { FileEdit, Play, Palette, Link, FileJson, Search, Loader2 } from "lucide-react";
 
 import { useDesignJob } from "./hooks/useDesignJob";
 import { DesignEventFeed } from "./components/DesignEventFeed";
 import { DesignOverview } from "./components/DesignOverview";
 import { CodePreview } from "./components/CodePreview";
+import { ScanResults } from "./components/ScanResults";
+import { scanFigma, type FigmaScanResponse } from "@/lib/api";
 
 /* ================================================================
    DesignToCodePage — Two-tab layout:
@@ -61,6 +63,11 @@ function DesignToCodeContent() {
   const [activeTab, setActiveTab] = useState<string>("config");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showLog, setShowLog] = useState(false);
+
+  // Scan step state machine: idle → scanning → selecting
+  const [scanStep, setScanStep] = useState<"idle" | "scanning" | "selecting">("idle");
+  const [scanResult, setScanResult] = useState<FigmaScanResponse | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   // Hook
   const {
@@ -145,6 +152,24 @@ function DesignToCodeContent() {
       ? figmaUrl.trim().length > 0
       : designFile.trim().length > 0);
 
+  // --- Scan Figma URL for frame classification ---
+  const handleScan = useCallback(async () => {
+    if (!figmaUrl.trim()) return;
+    setScanStep("scanning");
+    setScanError(null);
+    setScanResult(null);
+    try {
+      const result = await scanFigma(figmaUrl.trim());
+      setScanResult(result);
+      setScanStep("selecting");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "扫描失败";
+      setScanError(msg);
+      setScanStep("idle");
+    }
+  }, [figmaUrl]);
+
+  // --- Submit job (JSON mode direct, Figma mode after scan confirm) ---
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     const request =
@@ -165,8 +190,35 @@ function DesignToCodeContent() {
     }
   }, [canSubmit, inputMode, figmaUrl, designFile, outputDir, maxRetries, submit]);
 
+  // --- Figma scan confirm → submit with selected_screens ---
+  const handleScanConfirm = useCallback(
+    async (selectedScreens: { node_id: string; interaction_note_ids: string[] }[]) => {
+      const request = {
+        figma_url: figmaUrl.trim(),
+        output_dir: outputDir.trim(),
+        max_retries: maxRetries,
+        selected_screens: selectedScreens,
+      };
+      const result = await submit(request);
+      if (result) {
+        setScanStep("idle");
+        setScanResult(null);
+        setActiveTab("execution");
+      }
+    },
+    [figmaUrl, outputDir, maxRetries, submit]
+  );
+
+  const handleScanBack = useCallback(() => {
+    setScanStep("idle");
+    setScanResult(null);
+    setScanError(null);
+  }, []);
+
   const handleNewJob = () => {
     setActiveTab("config");
+    setScanStep("idle");
+    setScanResult(null);
   };
 
   const isFinished =
@@ -227,152 +279,189 @@ function DesignToCodeContent() {
               forceMount
               className="flex-1 overflow-hidden data-[state=inactive]:hidden"
             >
-              <div className="flex flex-1 h-full gap-6 overflow-hidden">
-                {/* Left: Input form */}
-                <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2 max-w-2xl">
-                  <Card>
-                    <CardContent className="pt-4 pb-3 space-y-4">
-                      {/* Input mode toggle */}
-                      <div className="space-y-2">
-                        <Label className="text-xs">输入方式</Label>
-                        <div className="flex gap-1 rounded-lg bg-slate-800 p-1 w-fit">
-                          <button
-                            onClick={() => setInputMode("figma")}
-                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                              inputMode === "figma"
-                                ? "bg-violet-500 text-white shadow-sm"
-                                : "text-slate-400 hover:text-white"
-                            }`}
-                          >
-                            <Link className="h-3 w-3" /> Figma URL
-                          </button>
-                          <button
-                            onClick={() => setInputMode("json")}
-                            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                              inputMode === "json"
-                                ? "bg-violet-500 text-white shadow-sm"
-                                : "text-slate-400 hover:text-white"
-                            }`}
-                          >
-                            <FileJson className="h-3 w-3" /> JSON 文件
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Figma URL input */}
-                      {inputMode === "figma" ? (
+              {/* Scan selecting mode — full-width scan results */}
+              {scanStep === "selecting" && scanResult ? (
+                <div className="flex-1 h-full overflow-hidden">
+                  <ScanResults
+                    pageName={scanResult.page_name}
+                    candidates={scanResult.candidates}
+                    interactionSpecs={scanResult.interaction_specs}
+                    designSystem={scanResult.design_system}
+                    excluded={scanResult.excluded}
+                    onConfirm={handleScanConfirm}
+                    onBack={handleScanBack}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-1 h-full gap-6 overflow-hidden">
+                  {/* Left: Input form */}
+                  <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2 max-w-2xl">
+                    <Card>
+                      <CardContent className="pt-4 pb-3 space-y-4">
+                        {/* Input mode toggle */}
                         <div className="space-y-2">
-                          <Label className="text-xs">Figma 设计稿 URL</Label>
+                          <Label className="text-xs">输入方式</Label>
+                          <div className="flex gap-1 rounded-lg bg-slate-800 p-1 w-fit">
+                            <button
+                              onClick={() => setInputMode("figma")}
+                              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                inputMode === "figma"
+                                  ? "bg-violet-500 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <Link className="h-3 w-3" /> Figma URL
+                            </button>
+                            <button
+                              onClick={() => setInputMode("json")}
+                              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                                inputMode === "json"
+                                  ? "bg-violet-500 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-white"
+                              }`}
+                            >
+                              <FileJson className="h-3 w-3" /> JSON 文件
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Figma URL input */}
+                        {inputMode === "figma" ? (
+                          <div className="space-y-2">
+                            <Label className="text-xs">Figma 设计稿 URL</Label>
+                            <Input
+                              value={figmaUrl}
+                              onChange={(e) => setFigmaUrl(e.target.value)}
+                              placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
+                              className="font-mono text-sm"
+                            />
+                            <p className="text-xs text-slate-400">
+                              粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
+                              格式。可带 node-id 参数指定具体节点。
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <Label className="text-xs">
+                              设计导出文件路径 (design_export.json)
+                            </Label>
+                            <Input
+                              value={designFile}
+                              onChange={(e) => setDesignFile(e.target.value)}
+                              placeholder="data/design_export/design_export.json"
+                              className="font-mono text-sm"
+                            />
+                            <p className="text-xs text-slate-400">
+                              Figma 设计稿导出的 JSON
+                              文件路径，包含组件列表、design tokens 和布局信息
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <Label className="text-xs">输出目录</Label>
                           <Input
-                            value={figmaUrl}
-                            onChange={(e) => setFigmaUrl(e.target.value)}
-                            placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
+                            value={outputDir}
+                            onChange={(e) => setOutputDir(e.target.value)}
+                            placeholder="output/generated"
                             className="font-mono text-sm"
                           />
                           <p className="text-xs text-slate-400">
-                            粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
-                            格式。可带 node-id 参数指定具体节点。
+                            生成的 React + Tailwind 代码将输出到此目录
                           </p>
                         </div>
-                      ) : (
+
                         <div className="space-y-2">
                           <Label className="text-xs">
-                            设计导出文件路径 (design_export.json)
+                            最大重试次数 (每个组件)
                           </Label>
                           <Input
-                            value={designFile}
-                            onChange={(e) => setDesignFile(e.target.value)}
-                            placeholder="data/design_export/design_export.json"
-                            className="font-mono text-sm"
+                            type="number"
+                            min={0}
+                            max={5}
+                            value={maxRetries}
+                            onChange={(e) =>
+                              setMaxRetries(
+                                Math.min(5, Math.max(0, Number(e.target.value)))
+                              )
+                            }
+                            className="w-24 font-mono text-sm"
                           />
                           <p className="text-xs text-slate-400">
-                            Figma 设计稿导出的 JSON
-                            文件路径，包含组件列表、design tokens 和布局信息
+                            组件视觉验证不通过时的最大重试次数（0-5）
                           </p>
                         </div>
-                      )}
+                      </CardContent>
+                    </Card>
 
-                      <div className="space-y-2">
-                        <Label className="text-xs">输出目录</Label>
-                        <Input
-                          value={outputDir}
-                          onChange={(e) => setOutputDir(e.target.value)}
-                          placeholder="output/generated"
-                          className="font-mono text-sm"
-                        />
-                        <p className="text-xs text-slate-400">
-                          生成的 React + Tailwind 代码将输出到此目录
-                        </p>
+                    {(submitError || scanError) && (
+                      <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-2.5">
+                        <p className="text-sm text-red-400">{submitError || scanError}</p>
                       </div>
+                    )}
 
-                      <div className="space-y-2">
-                        <Label className="text-xs">
-                          最大重试次数 (每个组件)
-                        </Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={5}
-                          value={maxRetries}
-                          onChange={(e) =>
-                            setMaxRetries(
-                              Math.min(5, Math.max(0, Number(e.target.value)))
-                            )
-                          }
-                          className="w-24 font-mono text-sm"
-                        />
-                        <p className="text-xs text-slate-400">
-                          组件视觉验证不通过时的最大重试次数（0-5）
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                    {/* Figma mode: Scan button → classify → confirm → submit */}
+                    {/* JSON mode: Direct submit */}
+                    {inputMode === "figma" ? (
+                      <Button
+                        className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
+                        onClick={handleScan}
+                        disabled={scanStep === "scanning" || !figmaUrl.trim() || !outputDir.trim()}
+                      >
+                        {scanStep === "scanning" ? (
+                          <>
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            扫描分析中...
+                          </>
+                        ) : (
+                          <>
+                            <Search className="mr-1.5 h-3.5 w-3.5" />
+                            扫描设计稿
+                          </>
+                        )}
+                      </Button>
+                    ) : (
+                      <Button
+                        className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
+                        onClick={handleSubmit}
+                        disabled={submitting || !canSubmit}
+                      >
+                        <Play className="mr-1.5 h-3.5 w-3.5" />
+                        {submitting ? "提交中..." : "开始生成"}
+                      </Button>
+                    )}
+                  </div>
 
-                  {submitError && (
-                    <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-2.5">
-                      <p className="text-sm text-red-400">{submitError}</p>
-                    </div>
-                  )}
-
-                  <Button
-                    className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
-                    onClick={handleSubmit}
-                    disabled={submitting || !canSubmit}
-                  >
-                    <Play className="mr-1.5 h-3.5 w-3.5" />
-                    {submitting ? "提交中..." : "开始生成"}
-                  </Button>
-                </div>
-
-                {/* Right: Pipeline info card */}
-                <div className="w-[360px] shrink-0 overflow-y-auto">
-                  <Card>
-                    <CardContent className="p-4 space-y-3">
-                      <h3 className="text-sm font-semibold text-slate-300">
-                        Pipeline 流程
-                      </h3>
-                      <div className="space-y-2">
-                        {PIPELINE_STAGES.map((stage, i) => (
-                          <div
-                            key={i}
-                            className="flex items-start gap-2.5 text-xs"
-                          >
-                            <span className="shrink-0 mt-0.5 text-base">
-                              {stage.icon}
-                            </span>
-                            <div>
-                              <p className="font-medium text-slate-300">
-                                {stage.label}
-                              </p>
-                              <p className="text-slate-500">{stage.desc}</p>
+                  {/* Right: Pipeline info card */}
+                  <div className="w-[360px] shrink-0 overflow-y-auto">
+                    <Card>
+                      <CardContent className="p-4 space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-300">
+                          Pipeline 流程
+                        </h3>
+                        <div className="space-y-2">
+                          {PIPELINE_STAGES.map((stage, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-2.5 text-xs"
+                            >
+                              <span className="shrink-0 mt-0.5 text-base">
+                                {stage.icon}
+                              </span>
+                              <div>
+                                <p className="font-medium text-slate-300">
+                                  {stage.label}
+                                </p>
+                                <p className="text-slate-500">{stage.desc}</p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
-              </div>
+              )}
             </TabsContent>
 
             {/* ---- Execution Tab ---- */}

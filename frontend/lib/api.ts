@@ -627,6 +627,43 @@ export interface FigmaRunRequest {
   output_dir: string;
   cwd?: string;
   max_retries?: number;
+  selected_screens?: { node_id: string; interaction_note_ids?: string[] }[];
+}
+
+// --- Figma Scan types ---
+
+export type FrameClassification = "ui_screen" | "interaction_spec" | "design_system" | "excluded";
+
+export interface ScanFrameItem {
+  node_id: string;
+  name: string;
+  size: string;
+  type: "mobile" | "tablet" | "desktop" | "other";
+  classification: FrameClassification;
+  confidence: number;
+  thumbnail_url?: string;
+  text_content?: string;
+  related_to?: string; // node_id of associated UI screen
+  section?: string;
+  exclude_reason?: string;
+}
+
+export interface FigmaScanResponse {
+  file_key: string;
+  page_name: string;
+  candidates: ScanFrameItem[];
+  interaction_specs: ScanFrameItem[];
+  design_system: ScanFrameItem[];
+  excluded: ScanFrameItem[];
+}
+
+export async function scanFigma(figmaUrl: string): Promise<FigmaScanResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/design/scan-figma`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ figma_url: figmaUrl }),
+  });
+  return handleResponse<FigmaScanResponse>(response);
 }
 
 export interface DesignRunResponse {
