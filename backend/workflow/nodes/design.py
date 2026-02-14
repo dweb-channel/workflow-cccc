@@ -84,6 +84,9 @@ Figma Node: {node_id}
 ## Design Screenshot
 {screenshot_instruction}
 
+## Interaction Notes
+{interaction_notes}
+
 ## Constraints
 - React + TypeScript + Tailwind CSS
 - Export a named function component with Props interface
@@ -91,7 +94,7 @@ Figma Node: {node_id}
 - Use the exact text strings listed above
 - Images/icons: use placeholder SVGs or colored divs matching dimensions
 - Component must render independently (no external state dependencies)
-- Visual fidelity only — no interaction logic needed
+- {interaction_constraint}
 - If a design screenshot is provided above, ensure your implementation matches it visually
 
 Output ONLY the complete TSX file content, no explanation.
@@ -1221,6 +1224,48 @@ class ComponentGeneratorNode(BaseNodeImpl):
         else:
             screenshot_instruction = "(无设计截图，请依据上方文字描述还原组件)"
 
+        # Build interaction notes for this component
+        all_notes = inputs.get("interaction_notes", [])
+        component_name = current_component["name"]
+        interaction_lines = []
+        has_interaction = False
+
+        for note in all_notes:
+            related = note.get("related_to", "")
+            # Include notes that match this component or its neighbors
+            neighbors = current_component.get("neighbors", [])
+            if related == component_name or related in neighbors or not related:
+                texts = note.get("text_content", [])
+                if not texts:
+                    continue
+                has_interaction = True
+                source = note.get("name", note.get("source_frame", ""))
+                text_str = "; ".join(texts[:10])
+                interaction_lines.append(f"[{source}]: {text_str}")
+                # If visual annotations exist with screenshot, add reference
+                if note.get("has_visual_annotations") and note.get("screenshot_path"):
+                    note_screenshot = note["screenshot_path"]
+                    if not os.path.isabs(note_screenshot):
+                        note_screenshot = os.path.join(cwd, note_screenshot)
+                    if os.path.isfile(note_screenshot):
+                        interaction_lines.append(
+                            f"  ↳ 请用 Read 工具查看交互标注截图: {note_screenshot}"
+                        )
+
+        if interaction_lines:
+            interaction_notes_str = "\n".join(interaction_lines)
+        else:
+            interaction_notes_str = "(无交互说明)"
+
+        # Adjust constraint based on whether interaction notes are present
+        if has_interaction:
+            interaction_constraint = (
+                "Implement interaction behaviors described in the Interaction Notes above "
+                "(e.g. onClick, hover states, transitions). Use useState/useCallback as needed."
+            )
+        else:
+            interaction_constraint = "Visual fidelity only — no interaction logic needed"
+
         # Render prompt
         prompt = self.config.get("prompt_template", "") or DEFAULT_COMPONENT_PROMPT
         prompt = prompt.replace("{component_name}", current_component["name"])
@@ -1236,6 +1281,8 @@ class ComponentGeneratorNode(BaseNodeImpl):
         prompt = prompt.replace("{interface_summary}", interface_summary)
         prompt = prompt.replace("{neighbor_code}", neighbor_code)
         prompt = prompt.replace("{screenshot_instruction}", screenshot_instruction)
+        prompt = prompt.replace("{interaction_notes}", interaction_notes_str)
+        prompt = prompt.replace("{interaction_constraint}", interaction_constraint)
         prompt = prompt.replace("{framework}", self.config.get("framework", "react-tailwind"))
 
         timeout = self.config.get("timeout", 300)
