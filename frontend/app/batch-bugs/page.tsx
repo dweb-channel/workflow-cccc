@@ -32,7 +32,7 @@ import { HistoryCard } from "./components/HistoryCard";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { PipelineBar } from "./components/PipelineBar";
 import { MetricsTab } from "./components/MetricsTab";
-import { WorkspacePanel } from "./components/WorkspacePanel";
+import { WorkspaceTabs } from "./components/WorkspaceTabs";
 
 /* ================================================================
    BatchBugsPage — Two-tab layout:
@@ -244,42 +244,42 @@ function BatchBugsContent() {
   const isFinished = currentJob && ["completed", "failed", "cancelled"].includes(currentJob.job_status);
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Workspace panel (left sidebar within batch-bugs) */}
-      <WorkspacePanel
-        workspaces={workspaces}
-        activeWorkspaceId={activeWsId}
-        loading={wsLoading}
-        error={wsError}
-        onSelect={handleWsSelect}
-        onCreate={handleWsCreate}
-        onUpdate={handleWsUpdate}
-        onDelete={handleWsDelete}
-        onRetryLoad={wsReload}
-      />
-
-      {/* Main content area */}
+    <div className="flex h-full flex-col overflow-hidden">
+      {/* Main content area — full width */}
       <div className="flex flex-1 flex-col overflow-hidden p-6">
         {/* ---- Header ---- */}
         <div className="mb-4 shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-slate-900">
-              {activeWorkspace ? activeWorkspace.name : "批量 Bug 修复"}
-            </h1>
-            {currentJob && (
-              <>
-                <span className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 font-mono text-xs text-[#2563eb]">
-                  {currentJob.job_id}
-                </span>
-                <JobStatusBadge status={currentJob.job_status} />
-              </>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold text-slate-900">批量 Bug 修复</h1>
+              {currentJob && (
+                <>
+                  <span className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 font-mono text-xs text-[#2563eb]">
+                    {currentJob.job_id}
+                  </span>
+                  <JobStatusBadge status={currentJob.job_status} />
+                </>
+              )}
+            </div>
+            {activeWorkspace && (
+              <code className="bg-slate-100 px-2 py-1 rounded text-xs text-slate-500">{activeWorkspace.repo_path}</code>
             )}
           </div>
-          <p className="mt-1 text-sm text-slate-500">
-            {activeWorkspace
-              ? <><code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs">{activeWorkspace.repo_path}</code></>
-              : "粘贴 Jira Bug 链接，一键启动自动修复流程"}
-          </p>
+
+          {/* Workspace tabs */}
+          <div className="mt-3 border-b border-slate-200">
+            <WorkspaceTabs
+              workspaces={workspaces}
+              activeWorkspaceId={activeWsId}
+              loading={wsLoading}
+              error={wsError}
+              onSelect={handleWsSelect}
+              onCreate={handleWsCreate}
+              onUpdate={handleWsUpdate}
+              onDelete={handleWsDelete}
+              onRetryLoad={wsReload}
+            />
+          </div>
         </div>
 
         {/* ---- Two Big Tabs ---- */}
