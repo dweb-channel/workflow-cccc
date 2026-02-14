@@ -655,6 +655,7 @@ export interface FigmaScanResponse {
   interaction_specs: ScanFrameItem[];
   design_system: ScanFrameItem[];
   excluded: ScanFrameItem[];
+  warnings?: string[];
 }
 
 export async function scanFigma(figmaUrl: string): Promise<FigmaScanResponse> {

@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Link2Off,
   Play,
+  AlertTriangle,
 } from "lucide-react";
 
 /* ================================================================
@@ -29,6 +30,7 @@ interface ScanResultsProps {
   interactionSpecs: ScanFrameItem[];
   designSystem: ScanFrameItem[];
   excluded: ScanFrameItem[];
+  warnings?: string[];
   onConfirm: (
     selectedScreens: { node_id: string; interaction_note_ids: string[] }[]
   ) => void;
@@ -55,6 +57,7 @@ export function ScanResults({
   interactionSpecs,
   designSystem,
   excluded,
+  warnings,
   onConfirm,
   onBack,
 }: ScanResultsProps) {
@@ -121,6 +124,18 @@ export function ScanResults({
           </Button>
         </div>
       </div>
+
+      {/* Warnings */}
+      {warnings && warnings.length > 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-1">
+          {warnings.map((w, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-300">{w}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* UI Screens */}
       <SectionHeader

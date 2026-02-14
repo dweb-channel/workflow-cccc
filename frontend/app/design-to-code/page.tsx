@@ -288,6 +288,7 @@ function DesignToCodeContent() {
                     interactionSpecs={scanResult.interaction_specs}
                     designSystem={scanResult.design_system}
                     excluded={scanResult.excluded}
+                    warnings={scanResult.warnings}
                     onConfirm={handleScanConfirm}
                     onBack={handleScanBack}
                   />
