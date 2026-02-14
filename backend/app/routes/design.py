@@ -90,7 +90,12 @@ class DesignFileEntry(BaseModel):
 
 
 class FigmaRunRequest(BaseModel):
-    """Request for POST /api/v2/design/run-figma."""
+    """Request for POST /api/v2/design/run-figma.
+
+    Two modes:
+    1. Simple: just figma_url (node-id parsed from URL) — Sprint 2 compat
+    2. Selected: figma_url + selected_screens (from /scan-figma confirm) — Sprint 3
+    """
 
     figma_url: str = Field(
         ...,
@@ -106,6 +111,63 @@ class FigmaRunRequest(BaseModel):
     )
     max_retries: int = Field(
         default=2, ge=0, le=5, description="Max retries per component"
+    )
+    selected_screens: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description=(
+            "Screens selected by user after /scan-figma. "
+            "Each item: { node_id: str, interaction_note_ids: [str] }. "
+            "If omitted, falls back to parsing node-id from URL."
+        ),
+    )
+
+
+class FigmaScanRequest(BaseModel):
+    """Request for POST /api/v2/design/scan-figma."""
+
+    figma_url: str = Field(
+        ...,
+        description="Figma page URL to scan for UI screens and interaction specs",
+    )
+
+
+class ScanFrameItem(BaseModel):
+    """Single frame in scan results."""
+
+    node_id: str
+    name: str
+    size: str = Field(..., description="WxH string, e.g. '393×852'")
+    bounds: Dict[str, float] = Field(default_factory=dict)
+    classification: str = Field(
+        ..., description="ui_screen | interaction_spec | design_system | reference | other"
+    )
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    text_content: List[str] = Field(default_factory=list)
+    thumbnail_url: Optional[str] = None
+    related_to: Optional[str] = Field(
+        None, description="node_id of related UI screen (for interaction specs)"
+    )
+    section: Optional[str] = Field(
+        None, description="Parent section name if nested in a section"
+    )
+
+
+class FigmaScanResponse(BaseModel):
+    """Response for POST /api/v2/design/scan-figma."""
+
+    file_key: str
+    page_name: str
+    candidates: List[ScanFrameItem] = Field(
+        default_factory=list, description="UI screen frames"
+    )
+    interaction_specs: List[ScanFrameItem] = Field(
+        default_factory=list, description="Interaction/annotation frames"
+    )
+    design_system: List[ScanFrameItem] = Field(
+        default_factory=list, description="Design system/token frames"
+    )
+    excluded: List[ScanFrameItem] = Field(
+        default_factory=list, description="Excluded frames with reasons"
     )
 
 
@@ -224,6 +286,107 @@ async def run_design_to_code(
     )
 
 
+@router.post("/scan-figma", response_model=FigmaScanResponse)
+async def scan_figma_page(payload: FigmaScanRequest):
+    """Scan a Figma page and classify frames into UI screens, interaction specs, etc.
+
+    Synchronous endpoint — returns classification results for user confirmation
+    before starting the pipeline. Does not create a job.
+
+    Flow: scan-figma → user confirms → run-figma (with selected_screens)
+
+    Requires FIGMA_TOKEN environment variable.
+
+    Usage:
+        POST /api/v2/design/scan-figma
+        { "figma_url": "https://www.figma.com/design/6kGd851.../PixelCheese?node-id=2172-2255" }
+    """
+    from workflow.config import FIGMA_TOKEN
+    if not FIGMA_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Figma integration not configured. "
+                "Set FIGMA_TOKEN environment variable with a valid Figma Personal Access Token. "
+                "See: https://www.figma.com/developers/api#access-tokens"
+            ),
+        )
+
+    # Parse URL for file_key and page node_id
+    file_key, page_node_id = _parse_figma_url(payload.figma_url)
+
+    from workflow.integrations.figma_client import FigmaClient, FigmaClientError
+
+    try:
+        client = FigmaClient()
+    except FigmaClientError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        # Phase 1+2: Scan and classify frames (rules + LLM)
+        scan_result = await client.scan_and_classify_frames(
+            file_key=file_key,
+            page_node_id=page_node_id,
+        )
+
+        # Collect all candidate node_ids for thumbnail generation
+        all_node_ids = []
+        for category in ("candidates", "interaction_specs", "design_system"):
+            for item in scan_result.get(category, []):
+                if item.get("node_id"):
+                    all_node_ids.append(item["node_id"])
+
+        # Fetch thumbnails for candidate frames
+        thumbnail_urls: Dict[str, Optional[str]] = {}
+        if all_node_ids:
+            try:
+                thumbnail_urls = await client.get_node_images(
+                    file_key, all_node_ids, fmt="png", scale=1,
+                )
+            except FigmaClientError as e:
+                logger.warning(f"scan-figma: Failed to get thumbnails: {e}")
+
+        # Attach thumbnail URLs to scan results
+        for category in ("candidates", "interaction_specs", "design_system"):
+            for item in scan_result.get(category, []):
+                nid = item.get("node_id", "")
+                if nid in thumbnail_urls:
+                    item["thumbnail_url"] = thumbnail_urls[nid]
+
+        # Build response — merge 'unknown' into 'excluded' until LLM classifier is wired
+        def _items_to_models(items: List[Dict]) -> List[ScanFrameItem]:
+            result = []
+            for item in items:
+                # Ensure required fields have defaults for ScanFrameItem
+                item.setdefault("classification", "other")
+                item.setdefault("size", "0×0")
+                result.append(ScanFrameItem(**{
+                    k: v for k, v in item.items()
+                    if k in ScanFrameItem.model_fields
+                }))
+            return result
+
+        excluded_items = scan_result.get("excluded", [])
+        unknown_items = scan_result.get("unknown", [])
+        for item in unknown_items:
+            item["classification"] = "other"
+        all_excluded = excluded_items + unknown_items
+
+        return FigmaScanResponse(
+            file_key=file_key,
+            page_name=scan_result.get("page_name", ""),
+            candidates=_items_to_models(scan_result.get("candidates", [])),
+            interaction_specs=_items_to_models(scan_result.get("interaction_specs", [])),
+            design_system=_items_to_models(scan_result.get("design_system", [])),
+            excluded=_items_to_models(all_excluded),
+        )
+
+    except FigmaClientError as e:
+        raise HTTPException(status_code=502, detail=f"Figma API error: {e}")
+    finally:
+        await client.close()
+
+
 @router.post("/run-figma", response_model=DesignRunResponse, status_code=201)
 async def run_figma_to_code(
     payload: FigmaRunRequest,
@@ -231,17 +394,28 @@ async def run_figma_to_code(
 ):
     """Start a design-to-code workflow from a Figma URL.
 
-    Fetches the design tree and screenshots from Figma REST API,
-    generates a design_export.json, then runs the standard pipeline.
+    Two modes:
+    1. Simple (Sprint 2): just figma_url with node-id in URL
+    2. Selected (Sprint 3): figma_url + selected_screens from /scan-figma
 
     Requires FIGMA_TOKEN environment variable.
 
-    Usage:
+    Usage (simple):
         POST /api/v2/design/run-figma
         {
             "figma_url": "https://www.figma.com/design/6kGd851.../PixelCheese?node-id=16650-538",
             "output_dir": "output/generated",
             "max_retries": 2
+        }
+
+    Usage (selected):
+        POST /api/v2/design/run-figma
+        {
+            "figma_url": "https://www.figma.com/design/6kGd851.../PixelCheese",
+            "output_dir": "output/generated",
+            "selected_screens": [
+                { "node_id": "16650:538", "interaction_note_ids": ["16650:600"] }
+            ]
         }
     """
     # Fail fast if FIGMA_TOKEN is not configured
@@ -256,8 +430,22 @@ async def run_figma_to_code(
             ),
         )
 
-    # Parse Figma URL → file_key + node_id
-    file_key, node_id = _parse_figma_url(payload.figma_url)
+    # Extract file_key from URL (always needed)
+    file_key, _ = _parse_figma_url_file_key(payload.figma_url)
+
+    # Determine target node(s)
+    if payload.selected_screens:
+        # Sprint 3 mode: user selected specific screens from /scan-figma
+        node_ids = [s["node_id"] for s in payload.selected_screens]
+        node_id = node_ids[0]  # Primary node for job tracking
+        interaction_note_ids = []
+        for s in payload.selected_screens:
+            interaction_note_ids.extend(s.get("interaction_note_ids", []))
+    else:
+        # Sprint 2 compat: parse node-id from URL
+        _, node_id = _parse_figma_url(payload.figma_url)
+        node_ids = [node_id]
+        interaction_note_ids = []
 
     # Create output directory
     output_dir = os.path.abspath(payload.output_dir)
@@ -277,12 +465,15 @@ async def run_figma_to_code(
 
     logger.info(
         f"Job {job_id}: Created Figma design-to-code job, "
-        f"file_key={file_key}, node_id={node_id}"
+        f"file_key={file_key}, node_ids={node_ids}"
     )
 
     # Start async execution: Figma fetch → pipeline
     task = asyncio.create_task(
-        _execute_figma_pipeline(job_id, file_key, node_id)
+        _execute_figma_pipeline(
+            job_id, file_key, node_id,
+            interaction_note_ids=interaction_note_ids,
+        )
     )
     task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
 
@@ -697,6 +888,36 @@ def _parse_figma_url(url: str) -> tuple:
     return file_key, node_id
 
 
+def _parse_figma_url_file_key(url: str) -> tuple:
+    """Parse a Figma URL into (file_key, node_id_or_none).
+
+    Like _parse_figma_url but does not require node-id parameter.
+    Used when selected_screens provides node IDs explicitly.
+
+    Returns:
+        (file_key, node_id or None)
+    """
+    path_match = re.search(r"figma\.com/(?:design|file)/([a-zA-Z0-9]+)", url)
+    if not path_match:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid Figma URL. Expected format: "
+                "https://www.figma.com/design/{fileKey}/..."
+            ),
+        )
+    file_key = path_match.group(1)
+
+    # node-id is optional in this variant
+    node_match = re.search(r"[?&]node-id=([^&#]+)", url)
+    node_id = None
+    if node_match:
+        raw_node_id = unquote(node_match.group(1))
+        node_id = raw_node_id.replace("-", ":")
+
+    return file_key, node_id
+
+
 # --- Pipeline Execution ---
 
 
@@ -819,6 +1040,13 @@ async def _execute_design_pipeline(job_id: str):
             # components reference canonical variable names instead of inventing
             # their own (e.g. --color-brand-primary, not --brand-primary).
             "variables_css_content": _generate_variables_css(design_tokens),
+            # Interaction notes from /scan-figma (Sprint 3)
+            "interaction_notes": design_data.get("interaction_notes", []),
+            "interaction_notes_summary": _build_interaction_notes_summary(
+                design_data.get("interaction_notes", [])
+            ),
+            # QA checklist from /scan-figma (Sprint 3)
+            "qa_checklist": design_data.get("qa_checklist", []),
             # Template variable placeholders — needed for state merge propagation
             "skeleton_code": "",
             "component_registry_summary": "暂无已完成组件",
@@ -919,10 +1147,12 @@ async def _execute_figma_pipeline(
     job_id: str,
     file_key: str,
     node_id: str,
+    interaction_note_ids: Optional[List[str]] = None,
 ):
     """Execute the Figma → design-to-code pipeline.
 
     Phase 1: Fetch design data from Figma REST API (node tree + screenshots)
+    Phase 1.5: Extract interaction notes (if IDs provided from /scan-figma)
     Phase 2: Run the standard design-to-code pipeline on the generated export
 
     Uses get_session_ctx() for DB access since this runs outside
@@ -1003,6 +1233,33 @@ async def _execute_figma_pipeline(
             "design_export_path": design_export_path,
         })
 
+        # Phase 1.5: Extract interaction notes if IDs provided
+        if interaction_note_ids:
+            try:
+                # Re-open client for interaction note extraction
+                note_client = FigmaClient()
+                try:
+                    interaction_notes = await note_client.extract_interaction_contexts(
+                        file_key=file_key,
+                        node_ids=interaction_note_ids,
+                        output_dir=output_dir,
+                    )
+                finally:
+                    await note_client.close()
+
+                # Inject into the export and re-write
+                export["interaction_notes"] = interaction_notes
+                with open(design_export_path, "w", encoding="utf-8") as f:
+                    json.dump(export, f, ensure_ascii=False, indent=2)
+                logger.info(
+                    f"Job {job_id}: Extracted {len(interaction_notes)} interaction notes"
+                )
+            except Exception as e:
+                # Non-fatal: interaction notes are supplementary
+                logger.warning(
+                    f"Job {job_id}: Failed to extract interaction notes: {e}"
+                )
+
         # Update design_file in DB to point to the generated export
         async with get_session_ctx() as session:
             repo = DesignJobRepository(session)
@@ -1058,6 +1315,33 @@ def _extract_result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
     summary["success"] = result.get("success", False)
 
     return summary
+
+
+def _build_interaction_notes_summary(notes: List[Dict[str, Any]]) -> str:
+    """Build a text summary of interaction notes for LLM prompt injection.
+
+    Formats interaction notes into a readable string that can be
+    referenced in template prompts via {interaction_notes_summary}.
+    """
+    if not notes:
+        return "暂无交互说明"
+
+    lines = []
+    for note in notes:
+        source = note.get("source_frame", note.get("name", "未知"))
+        related = note.get("related_to", "")
+        texts = note.get("text_content", [])
+        if isinstance(texts, list):
+            text_str = "; ".join(texts[:10])  # Cap at 10 items
+        else:
+            text_str = str(texts)
+
+        header = f"[{source}]"
+        if related:
+            header += f" → 关联: {related}"
+        lines.append(f"{header}: {text_str}")
+
+    return "\n".join(lines)
 
 
 def _generate_variables_css(design_tokens: Dict[str, Any]) -> str:
