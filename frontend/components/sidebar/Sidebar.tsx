@@ -17,8 +17,8 @@ function NavItem({ href, icon: Icon, label, isActive }: NavItemProps) {
       href={href}
       className={`flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors ${
         isActive
-          ? "bg-blue-500 text-white"
-          : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+          ? "bg-blue-600 text-white"
+          : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
       }`}
     >
       <Icon className="h-4 w-4" />
@@ -37,10 +37,10 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="flex w-[240px] shrink-0 flex-col border-r border-slate-200 bg-white">
+    <aside className="flex w-[240px] shrink-0 flex-col border-r border-slate-800 bg-slate-900">
       {/* Logo */}
       <div className="px-4 py-4">
-        <h1 className="text-lg font-bold text-slate-800">工作流平台</h1>
+        <h1 className="text-lg font-bold text-white">工作流平台</h1>
       </div>
 
       {/* Navigation — workflow directory */}
