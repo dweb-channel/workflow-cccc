@@ -252,6 +252,7 @@ export async function getNodeTypes(): Promise<NodeTypeInfo[]> {
 export interface BatchBugFixRequest {
   jira_urls: string[];
   cwd?: string;
+  workspace_id?: string;
   config?: {
     validation_level?: "minimal" | "standard" | "thorough";
     failure_policy?: "stop" | "skip" | "retry";
@@ -548,4 +549,66 @@ export async function getGlobalMetrics(): Promise<GlobalMetricsResponse> {
 export async function getJobMetrics(jobId: string): Promise<MetricsJobSummary> {
   const response = await fetch(`${API_BASE}/api/v2/batch/metrics/job/${jobId}`);
   return handleResponse<MetricsJobSummary>(response);
+}
+
+// ============ Workspace Types & API ============
+
+export interface Workspace {
+  id: string;
+  name: string;
+  repo_path: string;
+  config_defaults?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
+  job_count: number;
+}
+
+export interface WorkspaceListResponse {
+  workspaces: Workspace[];
+  total: number;
+}
+
+export interface CreateWorkspaceRequest {
+  name: string;
+  repo_path: string;
+  config_defaults?: Record<string, unknown>;
+}
+
+export interface UpdateWorkspaceRequest {
+  name?: string;
+  config_defaults?: Record<string, unknown>;
+}
+
+export async function listWorkspaces(): Promise<WorkspaceListResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/workspaces`);
+  return handleResponse<WorkspaceListResponse>(response);
+}
+
+export async function createWorkspace(payload: CreateWorkspaceRequest): Promise<Workspace> {
+  const response = await fetch(`${API_BASE}/api/v2/workspaces`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<Workspace>(response);
+}
+
+export async function updateWorkspace(id: string, payload: UpdateWorkspaceRequest): Promise<Workspace> {
+  const response = await fetch(`${API_BASE}/api/v2/workspaces/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<Workspace>(response);
+}
+
+export async function deleteWorkspace(id: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/v2/workspaces/${id}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: "删除失败" }));
+    throw new Error(typeof err.detail === "string" ? err.detail : "删除失败");
+  }
 }

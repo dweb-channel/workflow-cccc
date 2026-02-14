@@ -57,6 +57,10 @@ class BatchBugFixRequest(BaseModel):
         None,
         description="Working directory for Claude CLI (defaults to current directory)",
     )
+    workspace_id: Optional[str] = Field(
+        None,
+        description="Workspace ID to associate this job with (inherits config_defaults)",
+    )
     config: Optional[BatchBugFixConfig] = None
     dry_run: bool = Field(
         default=False,
@@ -213,9 +217,33 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
     If dry_run=true, returns a preview of what would happen without
     creating a DB record or starting a Temporal workflow.
     Otherwise dispatches bug fix tasks to Temporal Worker.
+
+    If workspace_id is provided, inherits config_defaults from the workspace
+    (job-level config overrides workspace defaults).
     """
     cwd = payload.cwd or "."
     config = payload.config or BatchBugFixConfig()
+
+    # --- Resolve workspace config inheritance ---
+    workspace_id = payload.workspace_id
+    if workspace_id:
+        from app.repositories.workspace import WorkspaceRepository
+        async with get_session_ctx() as session:
+            ws_repo = WorkspaceRepository(session)
+            ws = await ws_repo.get(workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
+        # Inherit cwd from workspace repo_path if not explicitly provided
+        if not payload.cwd:
+            cwd = ws.repo_path
+        # Merge config: workspace defaults ← job overrides
+        if ws.config_defaults:
+            merged = {**ws.config_defaults}
+            merged.update(config.model_dump())
+            config = BatchBugFixConfig(**{
+                k: v for k, v in merged.items()
+                if k in BatchBugFixConfig.model_fields
+            })
 
     # --- Dry-run mode: preview only, no side effects ---
     if payload.dry_run:
@@ -255,8 +283,14 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
             fixer_peer_id="",
             verifier_peer_id="",
             config=config_to_store,
+            workspace_id=workspace_id,
         )
-        logger.info(f"Job {job_id}: Saved to database")
+        # Touch workspace last_used_at
+        if workspace_id:
+            from app.repositories.workspace import WorkspaceRepository
+            ws_repo = WorkspaceRepository(session)
+            await ws_repo.touch(workspace_id)
+        logger.info(f"Job {job_id}: Saved to database (workspace={workspace_id})")
 
     # Start Temporal workflow (runs in separate Worker process)
     try:
@@ -380,6 +414,7 @@ async def get_batch_bug_fix_status(job_id: str):
 @router.get("/bug-fix", response_model=BatchJobListResponse)
 async def list_batch_bug_fix_jobs(
     status: Optional[str] = Query(None, description="Filter by job status"),
+    workspace_id: Optional[str] = Query(None, description="Filter by workspace ID"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ):
@@ -388,6 +423,7 @@ async def list_batch_bug_fix_jobs(
         repo = BatchJobRepository(session)
         jobs, total = await repo.list(
             status=status,
+            workspace_id=workspace_id,
             page=page,
             page_size=page_size,
         )

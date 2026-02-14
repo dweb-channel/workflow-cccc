@@ -254,6 +254,43 @@ class ExecutionLogModel(Base):
     )
 
 
+# ─── Workspace ───────────────────────────────────────────────────────
+
+
+class WorkspaceModel(Base):
+    """Workspace groups batch jobs by repository."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=_gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    repo_path: Mapped[str] = mapped_column(String(1024), nullable=False, unique=True)
+    config_defaults: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True,
+        comment="Default config inherited by new jobs: validation_level, failure_policy, max_retries, cwd",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow,
+    )
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+
+    # Relationships (no cascade delete — DB ondelete=SET NULL preserves jobs)
+    jobs: Mapped[List["BatchJobModel"]] = relationship(
+        back_populates="workspace",
+    )
+
+    __table_args__ = (
+        Index("ix_workspaces_name", "name"),
+        Index("ix_workspaces_last_used", "last_used_at"),
+    )
+
+
 # ─── Batch Bug Fix Job ───────────────────────────────────────────────
 
 
@@ -270,6 +307,9 @@ class BatchJobModel(Base):
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default="started",
         comment="started | running | completed | failed",
+    )
+    workspace_id: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True,
     )
     target_group_id: Mapped[str] = mapped_column(String(128), nullable=False)
     fixer_peer_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
@@ -291,6 +331,7 @@ class BatchJobModel(Base):
     )
 
     # Relationships
+    workspace: Mapped[Optional["WorkspaceModel"]] = relationship(back_populates="jobs")
     bugs: Mapped[List["BugResultModel"]] = relationship(
         back_populates="job", cascade="all, delete-orphan",
         order_by="BugResultModel.bug_index",
@@ -300,6 +341,7 @@ class BatchJobModel(Base):
         Index("ix_batch_jobs_status", "status"),
         Index("ix_batch_jobs_target_group", "target_group_id"),
         Index("ix_batch_jobs_created_at", "created_at"),
+        Index("ix_batch_jobs_workspace_id", "workspace_id"),
     )
 
 

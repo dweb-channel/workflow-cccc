@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { Suspense, useState, useCallback, useEffect, useMemo } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,11 +18,12 @@ import {
 } from "@/components/ui/alert-dialog";
 import { FileEdit, Play, BarChart3, Eye, X } from "lucide-react";
 
-import type { DryRunResponse } from "@/lib/api";
+import type { DryRunResponse, Workspace } from "@/lib/api";
 import { submitDryRun } from "@/lib/api";
 import type { ValidationLevel, FailurePolicy } from "./types";
 import { useBatchJob } from "./hooks/useBatchJob";
 import { useJobHistory } from "./hooks/useJobHistory";
+import { useWorkspaces } from "./hooks/useWorkspaces";
 import { BugInput } from "./components/BugInput";
 import { ConfigOptions } from "./components/ConfigOptions";
 import { DirectoryPicker } from "./components/DirectoryPicker";
@@ -30,6 +32,7 @@ import { HistoryCard } from "./components/HistoryCard";
 import { ActivityFeed } from "./components/ActivityFeed";
 import { PipelineBar } from "./components/PipelineBar";
 import { MetricsTab } from "./components/MetricsTab";
+import { WorkspacePanel } from "./components/WorkspacePanel";
 
 /* ================================================================
    BatchBugsPage — Two-tab layout:
@@ -41,6 +44,32 @@ import { MetricsTab } from "./components/MetricsTab";
 const LS_KEY_CWD = "batch-bugs-target-cwd";
 
 export default function BatchBugsPage() {
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">加载中...</div>}>
+      <BatchBugsContent />
+    </Suspense>
+  );
+}
+
+function BatchBugsContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Workspace state
+  const { workspaces, loading: wsLoading, error: wsError, create: wsCreate, update: wsUpdate, remove: wsRemove, reload: wsReload } = useWorkspaces();
+  const activeWsId = searchParams.get("workspace");
+  const activeWorkspace = useMemo(
+    () => workspaces.find((ws) => ws.id === activeWsId) ?? null,
+    [workspaces, activeWsId]
+  );
+
+  // Clear orphan workspace ID from URL (deleted or invalid workspace)
+  useEffect(() => {
+    if (activeWsId && !activeWorkspace && workspaces.length > 0 && !wsLoading) {
+      router.replace("/batch-bugs");
+    }
+  }, [activeWsId, activeWorkspace, workspaces.length, wsLoading, router]);
+
   // Form inputs
   const [jiraUrls, setJiraUrls] = useState("");
   const [targetCwd, setTargetCwd] = useState(() => {
@@ -60,14 +89,60 @@ export default function BatchBugsPage() {
   const [dryRunLoading, setDryRunLoading] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
-  // Persist targetCwd to localStorage
+  // When workspace changes, auto-fill targetCwd from workspace repo_path
   useEffect(() => {
-    if (targetCwd) {
-      localStorage.setItem(LS_KEY_CWD, targetCwd);
-    } else {
-      localStorage.removeItem(LS_KEY_CWD);
+    if (activeWorkspace) {
+      setTargetCwd(activeWorkspace.repo_path);
     }
-  }, [targetCwd]);
+  }, [activeWorkspace]);
+
+  // Persist targetCwd to localStorage (fallback for no-workspace mode)
+  useEffect(() => {
+    if (!activeWorkspace) {
+      if (targetCwd) {
+        localStorage.setItem(LS_KEY_CWD, targetCwd);
+      } else {
+        localStorage.removeItem(LS_KEY_CWD);
+      }
+    }
+  }, [targetCwd, activeWorkspace]);
+
+  // Workspace handlers
+  const handleWsSelect = useCallback(
+    (ws: Workspace) => {
+      router.push(`/batch-bugs?workspace=${ws.id}`);
+    },
+    [router]
+  );
+
+  const handleWsCreate = useCallback(
+    async (name: string, repoPath: string) => {
+      const ws = await wsCreate({ name, repo_path: repoPath });
+      if (ws) {
+        router.push(`/batch-bugs?workspace=${ws.id}`);
+      }
+      return ws;
+    },
+    [wsCreate, router]
+  );
+
+  const handleWsUpdate = useCallback(
+    async (id: string, name: string) => {
+      return wsUpdate(id, { name });
+    },
+    [wsUpdate]
+  );
+
+  const handleWsDelete = useCallback(
+    async (id: string) => {
+      const ok = await wsRemove(id);
+      if (ok && activeWsId === id) {
+        router.push("/batch-bugs");
+      }
+      return ok;
+    },
+    [wsRemove, activeWsId, router]
+  );
 
   // Hooks
   const { currentJob, submitting, stats, submit, cancel, retryBug, sseConnected, aiThinkingEvents, aiThinkingStats, dbSyncWarnings } = useBatchJob();
@@ -109,7 +184,8 @@ export default function BatchBugsPage() {
 
     const result = await submit({
       jira_urls: urls,
-      cwd: targetCwd.trim() || undefined,
+      cwd: activeWorkspace ? undefined : (targetCwd.trim() || undefined),
+      workspace_id: activeWorkspace?.id,
       config: {
         validation_level: validationLevel,
         failure_policy: failurePolicy,
@@ -119,14 +195,17 @@ export default function BatchBugsPage() {
     if (result) {
       setActiveTab("execution");
       history.loadHistory();
+      wsReload();
     }
   }, [
     parseJiraUrls,
     targetCwd,
+    activeWorkspace,
     validationLevel,
     failurePolicy,
     submit,
     history,
+    wsReload,
   ]);
 
   const handleNewJob = () => {
@@ -142,7 +221,8 @@ export default function BatchBugsPage() {
     try {
       const result = await submitDryRun({
         jira_urls: urls,
-        cwd: targetCwd.trim() || undefined,
+        cwd: activeWorkspace ? undefined : (targetCwd.trim() || undefined),
+        workspace_id: activeWorkspace?.id,
         config: {
           validation_level: validationLevel,
           failure_policy: failurePolicy,
@@ -154,7 +234,7 @@ export default function BatchBugsPage() {
     } finally {
       setDryRunLoading(false);
     }
-  }, [parseJiraUrls, targetCwd, validationLevel, failurePolicy]);
+  }, [parseJiraUrls, targetCwd, activeWorkspace, validationLevel, failurePolicy]);
 
   const handleConfirmExecute = useCallback(async () => {
     setDryRunResult(null);
@@ -164,11 +244,28 @@ export default function BatchBugsPage() {
   const isFinished = currentJob && ["completed", "failed", "cancelled"].includes(currentJob.job_status);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden p-6">
+    <div className="flex h-full overflow-hidden">
+      {/* Workspace panel (left sidebar within batch-bugs) */}
+      <WorkspacePanel
+        workspaces={workspaces}
+        activeWorkspaceId={activeWsId}
+        loading={wsLoading}
+        error={wsError}
+        onSelect={handleWsSelect}
+        onCreate={handleWsCreate}
+        onUpdate={handleWsUpdate}
+        onDelete={handleWsDelete}
+        onRetryLoad={wsReload}
+      />
+
+      {/* Main content area */}
+      <div className="flex flex-1 flex-col overflow-hidden p-6">
         {/* ---- Header ---- */}
         <div className="mb-4 shrink-0">
           <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-slate-900">批量 Bug 修复</h1>
+            <h1 className="text-xl font-bold text-slate-900">
+              {activeWorkspace ? activeWorkspace.name : "批量 Bug 修复"}
+            </h1>
             {currentJob && (
               <>
                 <span className="rounded-full bg-[#dbeafe] px-2.5 py-0.5 font-mono text-xs text-[#2563eb]">
@@ -179,7 +276,9 @@ export default function BatchBugsPage() {
             )}
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            粘贴 Jira Bug 链接，一键启动自动修复流程
+            {activeWorkspace
+              ? <><code className="bg-slate-100 px-1.5 py-0.5 rounded text-xs">{activeWorkspace.repo_path}</code></>
+              : "粘贴 Jira Bug 链接，一键启动自动修复流程"}
           </p>
         </div>
 
@@ -229,18 +328,20 @@ export default function BatchBugsPage() {
             <div className="flex flex-1 h-full gap-6 overflow-hidden">
               {/* Left: Input form */}
               <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2">
-                <Card>
-                  <CardContent className="pt-4 pb-3 space-y-2">
-                    <Label className="text-xs">目标代码库路径</Label>
-                    <DirectoryPicker
-                      value={targetCwd}
-                      onChange={setTargetCwd}
-                    />
-                    <p className="text-xs text-slate-400">
-                      Claude CLI 的工作目录，指向需要修复的项目代码库
-                    </p>
-                  </CardContent>
-                </Card>
+                {!activeWorkspace && (
+                  <Card>
+                    <CardContent className="pt-4 pb-3 space-y-2">
+                      <Label className="text-xs">目标代码库路径</Label>
+                      <DirectoryPicker
+                        value={targetCwd}
+                        onChange={setTargetCwd}
+                      />
+                      <p className="text-xs text-slate-400">
+                        Claude CLI 的工作目录，指向需要修复的项目代码库
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
 
                 <BugInput
                   jiraUrls={jiraUrls}
@@ -439,6 +540,7 @@ export default function BatchBugsPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+      </div>
     </div>
   );
 }

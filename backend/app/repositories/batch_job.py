@@ -33,6 +33,7 @@ class BatchJobRepository:
         fixer_peer_id: Optional[str] = None,
         verifier_peer_id: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        workspace_id: Optional[str] = None,
     ) -> BatchJobModel:
         """Create a new batch job with bug records.
 
@@ -43,6 +44,7 @@ class BatchJobRepository:
             fixer_peer_id: (Legacy, nullable) Peer ID for bug fixing
             verifier_peer_id: (Legacy, nullable) Peer ID for verification
             config: Job configuration dict
+            workspace_id: Optional workspace association
 
         Returns:
             Created BatchJobModel with bugs relationship loaded
@@ -54,6 +56,7 @@ class BatchJobRepository:
             fixer_peer_id=fixer_peer_id,
             verifier_peer_id=verifier_peer_id,
             config=config,
+            workspace_id=workspace_id,
         )
         self.session.add(job)
 
@@ -85,6 +88,7 @@ class BatchJobRepository:
         self,
         status: Optional[str] = None,
         target_group_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> Tuple[List[BatchJobModel], int]:
@@ -93,6 +97,7 @@ class BatchJobRepository:
         Args:
             status: Filter by job status
             target_group_id: Filter by target group
+            workspace_id: Filter by workspace
             page: Page number (1-indexed)
             page_size: Items per page
 
@@ -115,6 +120,10 @@ class BatchJobRepository:
         if target_group_id:
             query = query.where(BatchJobModel.target_group_id == target_group_id)
             count_query = count_query.where(BatchJobModel.target_group_id == target_group_id)
+
+        if workspace_id:
+            query = query.where(BatchJobModel.workspace_id == workspace_id)
+            count_query = count_query.where(BatchJobModel.workspace_id == workspace_id)
 
         query = query.order_by(BatchJobModel.created_at.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
