@@ -1506,6 +1506,30 @@ async def _execute_spec_pipeline(
             page_doc = page_data.get("document", {})
             page_name = page_doc.get("name", "")
 
+            # 1a-bis. resolve_to_page: if node is too small, find parent page
+            resolved = await client.resolve_to_page(file_key, node_id, page_doc)
+            if resolved:
+                old_node_id = node_id
+                node_id = resolved["page_id"]
+                logger.info(
+                    f"Job {job_id}: resolve_to_page — "
+                    f"{old_node_id} → {node_id} (page '{resolved['page_name']}')"
+                )
+                push_node_event(job_id, "node_output", {
+                    "node_id": "resolve_to_page",
+                    "message": (
+                        f"节点 \"{page_name}\" 太小，已自动切换到页面 "
+                        f"\"{resolved['page_name']}\""
+                    ),
+                })
+                # Re-fetch with the resolved page node
+                nodes_resp = await client.get_file_nodes(file_key, [node_id])
+                file_name = nodes_resp.get("name", file_name)
+                nodes_data = nodes_resp.get("nodes", {})
+                page_data = nodes_data.get(node_id, {})
+                page_doc = page_data.get("document", {})
+                page_name = page_doc.get("name", "")
+
             # 1b. Collect top-level children IDs for screenshots
             children = page_doc.get("children", [])
             child_node_ids = [c.get("id") for c in children if c.get("id")]
@@ -1606,10 +1630,37 @@ async def _execute_spec_pipeline(
         components_completed = analysis_stats.get("succeeded", 0)
         components_failed = analysis_stats.get("failed", 0)
 
-        logger.info(
-            f"Job {job_id}: SpecAnalyzer complete — "
-            f"{components_completed}/{components_total} succeeded"
-        )
+        # Surface SpecAnalyzer errors to the user via SSE
+        analyzer_error = analysis_stats.get("error")
+        if analyzer_error:
+            # Make the error message user-friendly
+            if "api_key" in str(analyzer_error).lower() or "auth" in str(analyzer_error).lower():
+                friendly_msg = "语义分析未执行：请检查 ANTHROPIC_API_KEY 环境变量配置"
+            else:
+                friendly_msg = f"语义分析失败：{analyzer_error}"
+            logger.warning(
+                f"Job {job_id}: SpecAnalyzer error — {analyzer_error}"
+            )
+            push_node_event(job_id, "workflow_error", {
+                "message": friendly_msg,
+                "node_id": "spec_analyzer_0",
+                "error": str(analyzer_error),
+            })
+            # Mark all components as failed if none succeeded
+            if components_completed == 0:
+                components_failed = components_total
+        else:
+            # Edge case: client init OK but every component analysis failed
+            if components_completed == 0 and components_total > 0:
+                push_node_event(job_id, "workflow_error", {
+                    "message": f"语义分析全部失败：{components_total} 个组件均未成功",
+                    "node_id": "spec_analyzer_0",
+                })
+                components_failed = components_total
+            logger.info(
+                f"Job {job_id}: SpecAnalyzer complete — "
+                f"{components_completed}/{components_total} succeeded"
+            )
 
         # Phase 4: SpecAssemblerNode
         from workflow.nodes.spec_nodes import SpecAssemblerNode
