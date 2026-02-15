@@ -23,6 +23,8 @@ import { DesignEventFeed } from "./components/DesignEventFeed";
 import { DesignOverview } from "./components/DesignOverview";
 import { CodePreview } from "./components/CodePreview";
 import { ScanResults } from "./components/ScanResults";
+import { SpecBrowser } from "./spec-browser";
+import { SpecTree } from "./spec-browser";
 import { scanFigma, type FigmaScanResponse } from "@/lib/api";
 
 /* ================================================================
@@ -78,6 +80,8 @@ function DesignToCodeContent() {
     events,
     sseConnected,
     currentNode,
+    designSpec,
+    specComplete,
     submit,
     cancel,
   } = useDesignJob();
@@ -502,7 +506,7 @@ function DesignToCodeContent() {
                     </Button>
                   </div>
 
-                  {/* Code preview (main area) or log */}
+                  {/* Main content: Log / SpecBrowser / CodePreview */}
                   {showLog ? (
                     <div className="flex-1 overflow-hidden">
                       <DesignEventFeed
@@ -510,6 +514,13 @@ function DesignToCodeContent() {
                         currentNode={currentNode}
                         sseConnected={sseConnected}
                         jobStatus={currentJob.job_status}
+                      />
+                    </div>
+                  ) : designSpec ? (
+                    <div className="flex-1 overflow-hidden">
+                      <SpecBrowser
+                        spec={designSpec}
+                        jobId={currentJob.job_id}
                       />
                     </div>
                   ) : (
@@ -534,10 +545,10 @@ function DesignToCodeContent() {
                     />
                   </div>
 
-                  {/* Right: Overview panel */}
-                  <div className="w-[360px] shrink-0 overflow-hidden">
-                    <Card className="h-full flex flex-col">
-                      <CardContent className="p-4 flex-1 flex flex-col overflow-y-auto">
+                  {/* Right: Overview + live SpecTree */}
+                  <div className="w-[360px] shrink-0 overflow-hidden flex flex-col gap-3">
+                    <Card className="shrink-0">
+                      <CardContent className="p-4">
                         <DesignOverview
                           currentJob={currentJob}
                           stats={stats}
@@ -565,6 +576,19 @@ function DesignToCodeContent() {
                         </div>
                       </CardContent>
                     </Card>
+
+                    {/* Live SpecTree — progressive rendering as frames arrive */}
+                    {designSpec && designSpec.components.length > 0 && (
+                      <Card className="flex-1 min-h-0 overflow-hidden">
+                        <CardContent className="p-0 h-full">
+                          <SpecTree
+                            components={designSpec.components}
+                            selectedId={null}
+                            onSelect={() => {}}
+                          />
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
                 </div>
               )}

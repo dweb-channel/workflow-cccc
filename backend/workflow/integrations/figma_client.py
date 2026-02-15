@@ -196,6 +196,22 @@ class FigmaClient:
         logger.info(f"get_file_variables: file={file_key}")
         return data
 
+    async def get_design_tokens(self, file_key: str) -> Dict[str, Any]:
+        """Fetch and parse design tokens from a Figma file's variables.
+
+        Combines get_file_variables + variable parsing + token classification
+        into a single public API.
+
+        Args:
+            file_key: Figma file key.
+
+        Returns:
+            Structured design_tokens dict with colors, fonts, spacing keys.
+        """
+        vars_resp = await self.get_file_variables(file_key)
+        variables_map = self._parse_variables(vars_resp)
+        return self._variables_to_design_tokens(variables_map)
+
     # ------------------------------------------------------------------
     # Screenshot download
     # ------------------------------------------------------------------

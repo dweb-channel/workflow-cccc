@@ -1,0 +1,292 @@
+{
+  "name": "design_to_code_workflow",
+  "title": "设计稿还原",
+  "description": "设计稿还原工作流：自动拆分设计稿 → 逐组件生成代码 → 视觉验证 → 组装集成",
+  "version": "0.1.0-poc",
+  "max_iterations": 100,
+  "nodes": [
+    {
+      "id": "input_node",
+      "type": "data_source",
+      "config": {
+        "name": "设计稿输入",
+        "description": "接收设计稿信息和配置参数",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "design_source": {
+              "type": "string",
+              "description": "设计稿来源类型: figma | pencil"
+            },
+            "design_file": {
+              "type": "string",
+              "description": "Figma URL 或 Pencil .pen 文件路径"
+            },
+            "design_node_id": {
+              "type": "string",
+              "description": "设计稿中目标页面/frame 的节点 ID"
+            },
+            "components": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "node_id": { "type": "string" },
+                  "type": { "type": "string", "enum": ["atom", "molecule", "organism"] },
+                  "neighbors": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "description": "组件列表（POC 阶段手动提供，后续由 DesignAnalyzerNode 自动生成）"
+            },
+            "components_count": {
+              "type": "integer",
+              "description": "组件总数"
+            },
+            "design_tokens": {
+              "type": "object",
+              "description": "Design Tokens（颜色/字号/间距/圆角）"
+            },
+            "output_dir": {
+              "type": "string",
+              "description": "代码输出目录"
+            },
+            "config": {
+              "type": "object",
+              "properties": {
+                "css_framework": { "type": "string", "enum": ["tailwind", "css-modules"], "default": "tailwind" },
+                "max_retries": { "type": "integer", "minimum": 1, "maximum": 5 },
+                "smoke_test_count": { "type": "integer", "default": 3, "description": "前 N 个组件做完整视觉验证" }
+              }
+            },
+            "cwd": { "type": "string" },
+            "job_id": { "type": "string" }
+          },
+          "required": ["design_file", "components", "components_count", "job_id"]
+        },
+        "defaults": {
+          "current_index": 0,
+          "retry_count": 0,
+          "results": [],
+          "component_registry": {},
+          "skeleton_code": "",
+          "context": {},
+          "config": {
+            "css_framework": "tailwind",
+            "max_retries": 3,
+            "smoke_test_count": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "generate_skeleton",
+      "type": "llm_agent",
+      "config": {
+        "name": "生成页面骨架",
+        "system_prompt": "你是一个前端布局专家。你的任务是根据设计稿的组件地图，生成页面的骨架布局代码。\n\n严格规则：\n1. 只生成布局容器（flex/grid），不实现任何组件内容\n2. 每个组件位置用带 data-component 属性的占位 div 表示\n3. 使用 Tailwind CSS\n4. 使用 TypeScript + React\n5. 布局必须匹配设计稿的整体比例和结构\n6. 如果提供了 Design Tokens，在文件顶部定义 CSS 变量\n\n输出格式：\n```tsx\n// 文件路径: {output_dir}/layout/PageSkeleton.tsx\n// 完整可运行的 React 组件代码\n```",
+        "prompt": "根据以下设计稿信息生成页面骨架布局：\n\n## 设计稿来源\n{design_file}\n\n## 组件地图\n以下是页面中识别出的组件区域（按空间位置排列）：\n{components_summary}\n\n## Design Tokens\n{design_tokens_summary}\n\n## 要求\n1. 创建 PageSkeleton.tsx，包含整体 flex/grid 布局\n2. 每个组件位置放一个占位 div：\n   ```tsx\n   <div data-component=\"ComponentName\" className=\"...尺寸和位置样式...\">\n     {/* ComponentName 占位 */}\n   </div>\n   ```\n3. 布局容器的 className 要反映设计稿的结构（如 sidebar 固定宽度、content 自适应）\n4. 导出 slots 对象供后续组件填充：\n   ```tsx\n   export const COMPONENT_SLOTS = ['Sidebar', 'Header', 'MainContent', ...] as const;\n   ```\n\n只输出代码，不要解释。",
+        "cwd": "{cwd}",
+        "timeout": 300
+      }
+    },
+    {
+      "id": "update_skeleton_state",
+      "type": "update_state",
+      "config": {
+        "name": "保存骨架代码到状态",
+        "updates": [
+          {"field": "skeleton_code", "value": "{generate_skeleton.result}"}
+        ]
+      }
+    },
+    {
+      "id": "get_current_component",
+      "type": "get_current_item",
+      "config": {
+        "name": "获取当前组件",
+        "array_field": "components",
+        "index_field": "current_index",
+        "output_key": "current_component"
+      }
+    },
+    {
+      "id": "generate_component",
+      "type": "llm_agent",
+      "config": {
+        "name": "生成组件代码",
+        "system_prompt": "你是一个高保真前端还原工程师。你的任务是根据设计稿精确还原一个 UI 组件。\n\n严格规则：\n1. 只还原视觉外观（default 状态），不实现交互逻辑\n2. 使用 Tailwind CSS，引用 Design Tokens 中定义的 CSS 变量\n3. 使用 TypeScript + React 函数组件\n4. 颜色、字号、间距必须精确匹配设计稿数值\n5. 不要猜测或发明设计稿中没有的元素\n6. 如果设计稿中有图片，用占位 div + 背景色表示\n7. 组件必须可独立渲染（不依赖外部状态）\n8. 导出命名组件和 Props interface\n\n重要：不要创建或写入文件！只在回复中用 ```tsx 代码块输出完整组件代码。\n\n输出格式（严格遵循）：\n```tsx\nimport React from 'react';\n\nexport interface ComponentNameProps {\n  // props\n}\n\nexport function ComponentName({ ...props }: ComponentNameProps) {\n  return (\n    // JSX\n  );\n}\n```\n\n只输出代码，不要解释。",
+        "prompt": "还原以下设计组件：\n\n## 当前组件\n名称: {current_component.name}\n类型: {current_component.type}\n设计节点 ID: {current_component.node_id}\n\n## Design Tokens（全局）\n{design_tokens_summary}\n\n## 可用 CSS 变量（必须使用这些变量名，不要自创）\n{variables_css_content}\n\n## 页面骨架（布局参考）\n{skeleton_code}\n\n## 已完成组件（接口参考）\n{component_registry}\n\n## 相邻组件代码（布局对齐参考）\n{neighbor_code}\n\n## 设计稿节点属性\n{current_component.properties_summary}\n\n## 要求\n1. 精确匹配设计稿的颜色、字号、间距、圆角\n2. 必须使用上述 CSS 变量（如 var(--color-brand-primary)），严禁硬编码颜色值\n3. 参考相邻组件的代码确保间距和视觉衔接一致\n4. 组件宽高应适应骨架中分配的空间\n\n如果这是重试（retry_count={retry_count}），上次视觉验证反馈：\n{context.verify_feedback}",
+        "cwd": "{cwd}",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "verify_component",
+      "type": "verify",
+      "config": {
+        "name": "视觉验证",
+        "verify_type": "llm_agent",
+        "system_prompt": "你是一个 UI 视觉质量审查专家。你的任务是对比设计稿截图和代码实现截图，判断还原质量。\n\n评审标准（按优先级）：\n1. 布局结构：元素排列方向、层级关系是否正确\n2. 间距和尺寸：padding/margin/gap 是否匹配（允许 ±4px 误差）\n3. 颜色：背景色、文字色、边框色是否一致（允许轻微色差）\n4. 字体：字号、字重是否匹配\n5. 装饰：圆角、阴影、边框是否匹配\n\n评分规则：\n- 结构正确 + 颜色/间距基本匹配 → VERIFIED\n- 结构正确但颜色/间距有明显偏差 → FAILED + 具体差异列表\n- 结构错误（缺少元素/层级错乱）→ FAILED + 结构问题描述\n\n你必须在回复中包含 VERIFIED 或 FAILED 关键词。",
+        "prompt_template": "对比以下设计稿和实现：\n\n组件名称: {current_component.name}\n\n请对比两张截图（设计稿 vs 实现），检查：\n1. 布局结构是否一致？\n2. 颜色是否匹配？\n3. 间距和尺寸是否合理？\n4. 是否有遗漏的元素？\n\n## 组件生成代码摘要\n{context.component_summary}\n\n回复 VERIFIED（视觉一致）或 FAILED + 差异列表。",
+        "cwd": "{cwd}",
+        "timeout": 300
+      }
+    },
+    {
+      "id": "check_verify_result",
+      "type": "condition",
+      "config": {
+        "name": "检查验证结果",
+        "condition": "verify_component.verified == True",
+        "true_branch": "update_success",
+        "false_branch": "check_retry"
+      }
+    },
+    {
+      "id": "check_retry",
+      "type": "condition",
+      "config": {
+        "name": "检查重试",
+        "condition": "retry_count < config.max_retries",
+        "true_branch": "increment_retry",
+        "false_branch": "update_failure"
+      }
+    },
+    {
+      "id": "increment_retry",
+      "type": "update_state",
+      "config": {
+        "name": "增加重试计数",
+        "updates": [
+          {"field": "retry_count", "expression": "retry_count + 1"}
+        ]
+      }
+    },
+    {
+      "id": "update_success",
+      "type": "update_state",
+      "config": {
+        "name": "记录组件成功",
+        "updates": [
+          {
+            "field": "results",
+            "append": {
+              "name": "{current_component.name}",
+              "node_id": "{current_component.node_id}",
+              "status": "completed"
+            }
+          },
+          {
+            "field": "component_registry",
+            "update_key": "components",
+            "append": {
+              "name": "{current_component.name}",
+              "file_path": "components/{current_component.name}.tsx",
+              "signature": "",
+              "code": "{generate_component.result}",
+              "neighbors": "{current_component.neighbors}",
+              "status": "completed"
+            }
+          },
+          {"field": "current_index", "expression": "current_index + 1"},
+          {"field": "retry_count", "value": 0},
+          {"field": "context", "value": {}}
+        ]
+      }
+    },
+    {
+      "id": "update_failure",
+      "type": "update_state",
+      "config": {
+        "name": "记录组件失败",
+        "updates": [
+          {
+            "field": "results",
+            "append": {
+              "name": "{current_component.name}",
+              "node_id": "{current_component.node_id}",
+              "status": "failed",
+              "error": "{context.verify_feedback}",
+              "retries": "{retry_count}"
+            }
+          },
+          {"field": "current_index", "expression": "current_index + 1"},
+          {"field": "retry_count", "value": 0},
+          {"field": "context", "value": {}}
+        ]
+      }
+    },
+    {
+      "id": "check_more_components",
+      "type": "condition",
+      "config": {
+        "name": "检查剩余组件",
+        "condition": "current_index < components_count",
+        "true_branch": "get_current_component",
+        "false_branch": "assemble_page"
+      }
+    },
+    {
+      "id": "assemble_page",
+      "type": "llm_agent",
+      "config": {
+        "name": "组装完整页面",
+        "system_prompt": "你是一个前端集成工程师。你的任务是将独立生成的 UI 组件组装成一个完整的可运行页面。\n\n严格规则：\n1. 基于骨架代码（PageSkeleton.tsx）替换占位 div 为实际组件\n2. 处理所有 import 路径（使用相对路径 ./components/XXX）\n3. 确保 Design Tokens CSS 变量在根级定义\n4. 组件间的间距以骨架布局为准，不要自行调整\n5. 最终代码必须能通过 TypeScript 编译 + 浏览器渲染\n6. 不要添加任何交互逻辑（onClick/onChange 等），只做视觉组装\n\n重要：不要创建或写入文件！只在回复中用 ```tsx 代码块输出完整 Page.tsx 代码。只输出代码，不要解释。",
+        "prompt": "将以下组件组装成完整页面：\n\n## 骨架代码\n{skeleton_code}\n\n## 已完成组件\n{component_registry}\n\n## Design Tokens\n{design_tokens_summary}\n\n## 组装要求\n1. 在 PageSkeleton 的 data-component 占位位置替换为实际组件\n2. 添加所有 import 语句\n3. 在页面根 div 上定义 CSS 变量（来自 Design Tokens）\n4. 检查组件间间距是否协调\n5. 生成完整可运行的 Page.tsx\n\n失败组件（跳过）：\n{failed_components}\n\n只输出代码，不要解释。",
+        "cwd": "{cwd}",
+        "timeout": 600
+      }
+    },
+    {
+      "id": "output_node",
+      "type": "output",
+      "config": {
+        "name": "输出结果",
+        "description": "输出设计还原的最终结果",
+        "format": "json",
+        "include_fields": ["job_id", "results", "components_count", "skeleton_code", "component_registry", "output_dir"]
+      }
+    }
+  ],
+  "edges": [
+    {"id": "e1", "source": "input_node", "target": "generate_skeleton"},
+    {"id": "e1b", "source": "generate_skeleton", "target": "update_skeleton_state"},
+    {"id": "e2", "source": "update_skeleton_state", "target": "get_current_component"},
+    {"id": "e3", "source": "get_current_component", "target": "generate_component"},
+    {"id": "e4", "source": "generate_component", "target": "update_success"},
+    {"id": "e9", "source": "update_success", "target": "check_more_components"},
+    {"id": "e11_continue", "source": "check_more_components", "target": "get_current_component", "condition": "condition_result == True"},
+    {"id": "e11_done", "source": "check_more_components", "target": "assemble_page", "condition": "condition_result == False"},
+    {"id": "e12", "source": "assemble_page", "target": "output_node"}
+  ],
+  "entry_point": "input_node",
+  "metadata": {
+    "author": "code-simplifier",
+    "created_at": "2026-02-14",
+    "version_history": [
+      {"version": "0.1.0-poc", "date": "2026-02-14", "changes": "Initial POC template with skeleton + component loop + assembly"}
+    ],
+    "tags": ["design-to-code", "figma", "pencil", "visual-verification", "poc"],
+    "implementation_notes": {
+      "poc_scope": "POC 阶段 components 列表手动提供，后续由 DesignAnalyzerNode 自动生成",
+      "visual_verification": "POC 阶段用 Claude Vision 对比截图，后续加 pixelmatch L2 层",
+      "output_boundary": "产出为高保真静态 UI 组件，不含交互逻辑（hover/click/form）",
+      "smoke_test": "前 smoke_test_count 个组件做完整 L1+L2+L3 视觉验证，后续降级 L1+L2"
+    },
+    "workflow_loops": [
+      {
+        "name": "component_loop",
+        "description": "主循环：遍历 components 数组逐个生成",
+        "path": "get_current_component -> generate_component -> verify_component -> update_success/failure -> check_more_components -> get_current_component",
+        "exit_condition": "current_index >= components_count"
+      },
+      {
+        "name": "retry_loop",
+        "description": "重试循环：视觉验证失败时重试",
+        "path": "generate_component -> verify_component -> check_retry -> increment_retry -> generate_component",
+        "exit_condition": "verify_component.verified == True 或 retry_count >= max_retries"
+      }
+    ]
+  }
+}

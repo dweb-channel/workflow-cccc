@@ -282,11 +282,24 @@ class UpdateStateNode(BaseNodeImpl):
         if "expression" in update:
             return self._evaluate_expression(update["expression"], inputs)
 
-        # Mode 3: Append to array
+        # Mode 3: Append to array (with optional update_key for nested dict)
         if "append" in update:
             append_obj = update["append"]
             # Render any template strings in the append object
             rendered_obj = self._render_object(append_obj, inputs)
+
+            update_key = update.get("update_key")
+            if update_key:
+                # Append to a sub-array inside a dict field
+                # e.g., field="component_registry", update_key="components"
+                parent_dict = inputs.get(field, {})
+                if not isinstance(parent_dict, dict):
+                    parent_dict = {}
+                sub_array = parent_dict.get(update_key, [])
+                if not isinstance(sub_array, list):
+                    sub_array = []
+                updated_dict = {**parent_dict, update_key: sub_array + [rendered_obj]}
+                return updated_dict
 
             # Get current array
             current_array = inputs.get(field, [])

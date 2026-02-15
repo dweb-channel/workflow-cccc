@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from .graph_builder import (
@@ -132,6 +132,8 @@ async def execute_dynamic_workflow(
                     await push_sse_event(run_id, "loop_iteration", {
                         "node_id": node_id,
                         "iteration": current_count,
+                        "current_index": current_count - 1,
+                        "total": workflow_def.max_iterations,
                         "max_iterations": workflow_def.max_iterations,
                         "timestamp": _now(),
                     })
@@ -141,8 +143,15 @@ async def execute_dynamic_workflow(
                     await notify_node_status(run_id, node_id, "running")
                     notified_running.add(node_id)
 
-                # Merge into state
-                state[node_id] = node_output
+                # Merge node output into tracking state.
+                # node_output from astream is the full state dict returned by
+                # graph_builder's node_func ({**prev_state, node_id: result, ...}).
+                # We merge all keys so top-level state (e.g. component_registry,
+                # current_index) stays current across loop iterations.
+                if isinstance(node_output, dict):
+                    state.update(node_output)
+                else:
+                    state[node_id] = node_output
 
                 # Notify completed with output
                 if run_id:
@@ -200,4 +209,4 @@ async def execute_dynamic_workflow(
 
 
 def _now() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(timezone.utc).isoformat()

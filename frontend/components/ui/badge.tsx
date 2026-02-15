@@ -9,7 +9,7 @@ const Badge = React.forwardRef<HTMLDivElement, BadgeProps>(
     <div
       ref={ref}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700",
+        "inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2.5 py-1 text-xs font-medium text-cyan-300",
         className
       )}
       {...props}

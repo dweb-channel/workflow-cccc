@@ -64,13 +64,13 @@ export function MetricsTab() {
     <div className="flex h-full flex-col gap-6 overflow-y-auto pr-2" data-testid="metrics-tab">
       {/* Header */}
       <div className="flex items-center justify-between shrink-0">
-        <h2 className="text-lg font-semibold text-slate-800">修复效果度量</h2>
+        <h2 className="text-lg font-semibold text-slate-200">修复效果度量</h2>
         <Button
           variant="ghost"
           size="sm"
           onClick={loadMetrics}
           disabled={loading}
-          className="text-slate-500 hover:text-slate-700"
+          className="text-slate-400 hover:text-slate-300"
         >
           <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
           刷新
@@ -83,25 +83,25 @@ export function MetricsTab() {
           icon={<BarChart3 className="h-4 w-4 text-blue-500" />}
           label="总任务数"
           value={metrics.total_jobs}
-          bg="bg-blue-50"
+          bg="bg-blue-500/10"
         />
         <SummaryCard
           icon={<Bug className="h-4 w-4 text-purple-500" />}
           label="总 Bug 数"
           value={metrics.total_bugs}
-          bg="bg-purple-50"
+          bg="bg-purple-500/10"
         />
         <SummaryCard
           icon={<CheckCircle className="h-4 w-4 text-green-500" />}
           label="整体成功率"
           value={`${(metrics.overall_success_rate ?? 0).toFixed(1)}%`}
-          bg="bg-green-50"
+          bg="bg-green-500/10"
         />
         <SummaryCard
           icon={<Clock className="h-4 w-4 text-amber-500" />}
           label="平均耗时/Bug"
           value={formatDuration(metrics.avg_bug_duration_ms)}
-          bg="bg-amber-50"
+          bg="bg-amber-500/10"
         />
       </div>
 
@@ -109,14 +109,14 @@ export function MetricsTab() {
       {metrics.step_metrics.length > 0 && (
         <Card className="shrink-0">
           <CardContent className="p-4">
-            <h3 className="mb-3 text-sm font-medium text-slate-700 flex items-center gap-1.5">
+            <h3 className="mb-3 text-sm font-medium text-slate-300 flex items-center gap-1.5">
               <TrendingUp className="h-4 w-4 text-slate-400" />
               步骤性能
             </h3>
             <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="step-metrics-table">
                 <thead>
-                  <tr className="border-b text-left text-xs text-slate-500">
+                  <tr className="border-b border-slate-700 text-left text-xs text-slate-400">
                     <th className="pb-2 font-medium">步骤</th>
                     <th className="pb-2 font-medium text-right">平均耗时</th>
                     <th className="pb-2 font-medium text-right">成功率</th>
@@ -138,7 +138,7 @@ export function MetricsTab() {
       {metrics.recent_jobs.length > 0 && (
         <Card className="shrink-0">
           <CardContent className="p-4">
-            <h3 className="mb-3 text-sm font-medium text-slate-700">
+            <h3 className="mb-3 text-sm font-medium text-slate-300">
               最近任务
             </h3>
             <div className="space-y-2" data-testid="recent-jobs-list">
@@ -154,7 +154,7 @@ export function MetricsTab() {
       {metrics.total_jobs === 0 && (
         <div className="flex flex-1 items-center justify-center text-slate-400">
           <div className="text-center">
-            <BarChart3 className="mx-auto h-10 w-10 text-slate-200" />
+            <BarChart3 className="mx-auto h-10 w-10 text-slate-600" />
             <p className="mt-2 text-sm">暂无度量数据</p>
             <p className="mt-1 text-xs">完成第一个修复任务后，这里会显示统计信息</p>
           </div>
@@ -182,9 +182,9 @@ function SummaryCard({
       <CardContent className={`p-4 ${bg} rounded-lg`}>
         <div className="flex items-center gap-2 mb-1">
           {icon}
-          <span className="text-xs text-slate-500">{label}</span>
+          <span className="text-xs text-slate-400">{label}</span>
         </div>
-        <p className="text-2xl font-bold text-slate-800">{value}</p>
+        <p className="text-2xl font-bold text-slate-100">{value}</p>
       </CardContent>
     </Card>
   );
@@ -198,53 +198,53 @@ function StepRow({ step }: { step: StepMetrics }) {
     rate >= 0.5 ? "bg-amber-500" : "bg-red-500";
 
   return (
-    <tr className="border-b last:border-0">
+    <tr className="border-b border-slate-700 last:border-0">
       <td className="py-2">
-        <span className="text-slate-700">{step.label}</span>
+        <span className="text-slate-300">{step.label}</span>
       </td>
-      <td className="py-2 text-right text-slate-600">
+      <td className="py-2 text-right text-slate-400">
         {formatDuration(step.avg_duration_ms)}
       </td>
       <td className="py-2 text-right">
         <div className="inline-flex items-center gap-2">
-          <div className="h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden">
+          <div className="h-1.5 w-16 rounded-full bg-slate-700 overflow-hidden">
             <div
               className={`h-full rounded-full ${barColor}`}
               style={{ width: `${successPct}%` }}
             />
           </div>
-          <span className="text-xs text-slate-600 w-10 text-right">{successPct}%</span>
+          <span className="text-xs text-slate-400 w-10 text-right">{successPct}%</span>
         </div>
       </td>
-      <td className="py-2 text-right text-slate-500">{step.total_executions}</td>
+      <td className="py-2 text-right text-slate-400">{step.total_executions}</td>
     </tr>
   );
 }
 
 function RecentJobRow({ job }: { job: JobMetricsSummary }) {
   const statusConfig: Record<string, { color: string; label: string }> = {
-    completed: { color: "text-green-600", label: "完成" },
-    failed: { color: "text-red-600", label: "失败" },
-    cancelled: { color: "text-amber-600", label: "取消" },
-    running: { color: "text-blue-600", label: "运行中" },
+    completed: { color: "text-green-400", label: "完成" },
+    failed: { color: "text-red-400", label: "失败" },
+    cancelled: { color: "text-amber-400", label: "取消" },
+    running: { color: "text-blue-400", label: "运行中" },
   };
-  const sc = statusConfig[job.status] ?? { color: "text-slate-600", label: job.status };
+  const sc = statusConfig[job.status] ?? { color: "text-slate-400", label: job.status };
   const successPct = (job.success_rate ?? 0).toFixed(0);
 
   return (
-    <div className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-slate-50 transition-colors">
+    <div className="flex items-center gap-3 rounded-lg px-3 py-2 hover:bg-slate-700/50 transition-colors">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-slate-500 truncate">{job.job_id.slice(0, 12)}</span>
+          <span className="font-mono text-xs text-slate-400 truncate">{job.job_id.slice(0, 12)}</span>
           <span className={`text-xs font-medium ${sc.color}`}>{sc.label}</span>
         </div>
-        <div className="mt-0.5 flex items-center gap-3 text-[11px] text-slate-400">
+        <div className="mt-0.5 flex items-center gap-3 text-[11px] text-slate-500">
           <span>{job.completed}/{job.total_bugs} bugs</span>
           <span>成功率 {successPct}%</span>
           <span>{formatDuration(job.total_duration_ms)}</span>
         </div>
       </div>
-      <span className="text-[11px] text-slate-400 shrink-0">
+      <span className="text-[11px] text-slate-500 shrink-0">
         {formatRelativeTime(job.created_at)}
       </span>
     </div>

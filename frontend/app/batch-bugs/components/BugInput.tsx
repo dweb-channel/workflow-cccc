@@ -129,7 +129,7 @@ https://jira.example.com/browse/BUG-1236`}
               onChange={(e) => onJiraUrlsChange(e.target.value)}
               className="min-h-[160px] font-mono text-sm"
             />
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-slate-400">
               已输入 {parseJiraUrls().length} 个链接
             </p>
           </TabsContent>
@@ -156,7 +156,7 @@ https://jira.example.com/browse/BUG-1236`}
               {jqlResults.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-slate-400">
                       找到 {jqlResults.length} 个 Bug，已选择{" "}
                       {selectedBugKeys.size} 个
                     </p>
@@ -182,11 +182,11 @@ https://jira.example.com/browse/BUG-1236`}
                     </div>
                   </div>
 
-                  <div className="max-h-[200px] overflow-y-auto rounded-md border border-slate-200">
+                  <div className="max-h-[200px] overflow-y-auto rounded-md border border-slate-700">
                     {jqlResults.map((bug) => (
                       <div
                         key={bug.key}
-                        className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0 hover:bg-slate-50"
+                        className="flex items-center gap-3 border-b border-slate-700 px-3 py-2 last:border-b-0 hover:bg-slate-700/50"
                       >
                         <Checkbox
                           checked={selectedBugKeys.has(bug.key)}
@@ -194,10 +194,10 @@ https://jira.example.com/browse/BUG-1236`}
                         />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm font-medium text-blue-600">
+                            <span className="font-mono text-sm font-medium text-cyan-400">
                               {bug.key}
                             </span>
-                            <Badge className="border-slate-200 bg-slate-50 text-slate-600 text-xs">
+                            <Badge className="border-slate-600 bg-slate-700/50 text-slate-300 text-xs">
                               {bug.status}
                             </Badge>
                             {bug.priority && (
@@ -206,7 +206,7 @@ https://jira.example.com/browse/BUG-1236`}
                               </span>
                             )}
                           </div>
-                          <p className="truncate text-xs text-slate-600">
+                          <p className="truncate text-xs text-slate-400">
                             {bug.summary}
                           </p>
                         </div>

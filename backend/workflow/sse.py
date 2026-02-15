@@ -7,7 +7,7 @@ frontend updates during workflow execution.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, TypedDict
 
 import os
@@ -22,6 +22,21 @@ from .logging_config import get_worker_logger
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
 
 logger = get_worker_logger()
+
+# Shared httpx client with connection pooling — avoids creating a new
+# TCP connection for every SSE event push (hundreds per workflow run).
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+async def _get_http_client() -> httpx.AsyncClient:
+    """Get or create the shared httpx client."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=5.0,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
+    return _http_client
 
 
 class WorkflowState(TypedDict, total=False):
@@ -44,15 +59,15 @@ async def push_sse_event(run_id: str, event_type: str, data: dict) -> None:
 
     url = f"{API_BASE_URL}/api/internal/events/{run_id}"
     payload = {"event_type": event_type, "data": data}
-    logger.info(f"📤 Pushing event: {event_type} to {url}")
+    logger.info(f"Pushing event: {event_type} to {url}")
 
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=payload)
-            logger.info(f"✅ Response: {resp.status_code}")
+        client = await _get_http_client()
+        resp = await client.post(url, json=payload)
+        logger.info(f"Response: {resp.status_code}")
     except Exception as e:
         # Log error but don't fail workflow
-        logger.error(f"❌ Failed to push event: {e}")
+        logger.error(f"Failed to push event: {e}")
 
 
 async def notify_node_status(run_id: str, node: str, status: str, output: Any = None) -> None:
@@ -64,10 +79,18 @@ async def notify_node_status(run_id: str, node: str, status: str, output: Any = 
         status: Status (running, completed, error)
         output: Optional output data for completed status
     """
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Push status update
-    await push_sse_event(run_id, "node_update", {
+    # Push status update — use node_started/node_completed for frontend compatibility
+    if status == "running":
+        event_type = "node_started"
+    elif status == "completed":
+        event_type = "node_completed"
+    else:
+        event_type = "node_update"
+
+    await push_sse_event(run_id, event_type, {
+        "node_id": node,
         "node": node,
         "status": status,
         "timestamp": timestamp

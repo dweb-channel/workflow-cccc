@@ -122,6 +122,31 @@ class FigmaRunRequest(BaseModel):
     )
 
 
+class SpecRunRequest(BaseModel):
+    """Request for POST /api/v2/design/run-spec.
+
+    Runs the 3-node spec pipeline (FrameDecomposer → SpecAnalyzer → SpecAssembler)
+    against a Figma page to produce a structured design_spec.json.
+    """
+
+    figma_url: str = Field(
+        ...,
+        description=(
+            "Figma URL, e.g. https://www.figma.com/design/{fileKey}/{name}?node-id={nodeId}"
+        ),
+    )
+    output_dir: str = Field(
+        ..., description="Target directory for generated spec"
+    )
+    model: Optional[str] = Field(
+        None,
+        description=(
+            "Anthropic model for SpecAnalyzer vision analysis. "
+            "Default: claude-sonnet-4-20250514"
+        ),
+    )
+
+
 class FigmaScanRequest(BaseModel):
     """Request for POST /api/v2/design/scan-figma."""
 
@@ -518,6 +543,89 @@ async def run_figma_to_code(
         job_id=job_id,
         status="started",
         design_file=design_export_path,
+        output_dir=output_dir,
+        created_at=job.created_at.isoformat(),
+    )
+
+
+@router.post("/run-spec", response_model=DesignRunResponse, status_code=201)
+async def run_spec_pipeline(
+    payload: SpecRunRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Start a spec generation pipeline from a Figma URL.
+
+    Runs the 3-node spec pipeline:
+      1. FrameDecomposer — extracts structural data from Figma node tree (70%)
+      2. SpecAnalyzer — LLM vision fills semantic fields (role, description, interaction)
+      3. SpecAssembler — assembles final design_spec.json
+
+    SSE events:
+      - frame_decomposed: Node 1 complete, partial specs available
+      - spec_analyzed: Per-component, semantic fields filled
+      - spec_complete: Final spec written to disk
+      - job_done: Pipeline finished
+
+    Requires FIGMA_TOKEN environment variable.
+
+    Usage:
+        POST /api/v2/design/run-spec
+        {
+            "figma_url": "https://www.figma.com/design/6kGd851.../PixelCheese?node-id=5574-3309",
+            "output_dir": "output/spec"
+        }
+    """
+    from workflow.config import FIGMA_TOKEN
+    if not FIGMA_TOKEN:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Figma integration not configured. "
+                "Set FIGMA_TOKEN environment variable with a valid Figma Personal Access Token. "
+                "See: https://www.figma.com/developers/api#access-tokens"
+            ),
+        )
+
+    # Parse Figma URL
+    file_key, node_id = _parse_figma_url(payload.figma_url)
+
+    # Create output directory
+    output_dir = os.path.abspath(payload.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create job in DB
+    job_id = f"spec_{uuid.uuid4().hex[:12]}"
+    spec_path = os.path.join(output_dir, "design_spec.json")
+    repo = DesignJobRepository(session)
+    job = await repo.create(
+        job_id=job_id,
+        design_file=spec_path,
+        output_dir=output_dir,
+        cwd=os.getcwd(),
+        max_retries=0,
+    )
+
+    logger.info(
+        f"Job {job_id}: Created spec pipeline job, "
+        f"file_key={file_key}, node_id={node_id}"
+    )
+
+    # Start async execution
+    task = asyncio.create_task(
+        _execute_spec_pipeline(
+            job_id=job_id,
+            file_key=file_key,
+            node_id=node_id,
+            output_dir=output_dir,
+            model=payload.model,
+        )
+    )
+    task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
+
+    return DesignRunResponse(
+        job_id=job_id,
+        status="started",
+        design_file=spec_path,
         output_dir=output_dir,
         created_at=job.created_at.isoformat(),
     )
@@ -1327,6 +1435,254 @@ async def _execute_figma_pipeline(
             "components_failed": components_failed,
             "error": final_error,
         })
+
+
+async def _execute_spec_pipeline(
+    job_id: str,
+    file_key: str,
+    node_id: str,
+    output_dir: str,
+    model: Optional[str] = None,
+):
+    """Execute the 3-node spec pipeline as a background task.
+
+    Phase 1: Fetch raw Figma data (node tree + screenshots + variables)
+    Phase 2: FrameDecomposerNode — structural extraction (70%)
+    Phase 3: SpecAnalyzerNode — LLM vision analysis (30%)
+    Phase 4: SpecAssemblerNode — final spec assembly
+
+    Uses get_session_ctx() for DB access since this runs outside
+    FastAPI's request lifecycle.
+    """
+    final_status = "failed"
+    final_error: Optional[str] = None
+    components_total = 0
+    components_completed = 0
+    components_failed = 0
+
+    try:
+        # Update status to running
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(job_id, "running")
+        push_node_event(job_id, "job_status", {"status": "running"})
+
+        # Phase 1: Fetch from Figma
+        push_node_event(job_id, "figma_fetch_start", {
+            "file_key": file_key,
+            "node_id": node_id,
+        })
+
+        from workflow.integrations.figma_client import FigmaClient, FigmaClientError
+
+        try:
+            client = FigmaClient()
+        except FigmaClientError as e:
+            error_msg = (
+                "Figma API not configured. Set FIGMA_TOKEN environment variable "
+                "with a valid Figma Personal Access Token."
+            )
+            logger.error(f"Job {job_id}: {error_msg}")
+            async with get_session_ctx() as session:
+                repo = DesignJobRepository(session)
+                await repo.update_status(
+                    job_id, "failed",
+                    error=error_msg,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            push_node_event(job_id, "job_done", {
+                "status": "failed", "error": error_msg,
+                "components_total": 0, "components_completed": 0,
+                "components_failed": 0,
+            })
+            return
+
+        try:
+            # 1a. Fetch raw node tree
+            nodes_resp = await client.get_file_nodes(file_key, [node_id])
+            file_name = nodes_resp.get("name", "")
+            nodes_data = nodes_resp.get("nodes", {})
+            page_data = nodes_data.get(node_id, {})
+            page_doc = page_data.get("document", {})
+            page_name = page_doc.get("name", "")
+
+            # 1b. Collect top-level children IDs for screenshots
+            children = page_doc.get("children", [])
+            child_node_ids = [c.get("id") for c in children if c.get("id")]
+            # Also include the page node itself
+            all_screenshot_ids = [node_id] + child_node_ids
+
+            # 1c. Download screenshots
+            screenshot_paths: Dict[str, str] = {}
+            if all_screenshot_ids:
+                try:
+                    screenshot_paths = await client.download_screenshots(
+                        file_key, all_screenshot_ids, output_dir,
+                    )
+                except FigmaClientError as e:
+                    logger.warning(f"Job {job_id}: Screenshot download failed: {e}")
+
+            # 1d. Fetch design tokens from variables
+            design_tokens_raw: Dict[str, Any] = {}
+            try:
+                design_tokens_raw = await client.get_design_tokens(file_key)
+            except FigmaClientError as e:
+                logger.warning(f"Job {job_id}: Design tokens fetch failed: {e}")
+        finally:
+            await client.close()
+
+        push_node_event(job_id, "figma_fetch_complete", {
+            "components_count": len(children),
+            "screenshots_count": len(screenshot_paths),
+        })
+
+        logger.info(
+            f"Job {job_id}: Figma fetch complete — "
+            f"{len(children)} children, {len(screenshot_paths)} screenshots"
+        )
+
+        # Phase 2: FrameDecomposerNode
+        from workflow.nodes.spec_nodes import FrameDecomposerNode
+
+        decomposer = FrameDecomposerNode(
+            node_id="frame_decomposer_0",
+            node_type="frame_decomposer",
+            config={},
+        )
+        decomposer_result = await decomposer.execute({
+            "figma_node_tree": nodes_resp,
+            "design_tokens": design_tokens_raw,
+            "page_name": page_name,
+            "page_node_id": node_id,
+            "file_key": file_key,
+            "file_name": file_name,
+            "screenshot_paths": screenshot_paths,
+        })
+
+        components = decomposer_result.get("components", [])
+        page_meta = decomposer_result.get("page", {})
+        schema_tokens = decomposer_result.get("design_tokens", {})
+        source_meta = decomposer_result.get("source", {})
+        components_total = len(components)
+
+        # Update component count in DB
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_component_counts(job_id, total=components_total)
+
+        push_node_event(job_id, "frame_decomposed", {
+            "components_count": components_total,
+            "page": page_meta,
+            "components": components,
+        })
+
+        logger.info(
+            f"Job {job_id}: FrameDecomposer complete — "
+            f"{components_total} components"
+        )
+
+        # Phase 3: SpecAnalyzerNode
+        from workflow.nodes.spec_nodes import SpecAnalyzerNode
+
+        analyzer = SpecAnalyzerNode(
+            node_id="spec_analyzer_0",
+            node_type="spec_analyzer",
+            config={
+                "cwd": output_dir,
+                "model": model or "claude-sonnet-4-20250514",
+                "max_tokens": 4096,
+            },
+        )
+        analyzer_result = await analyzer.execute({
+            "components": components,
+            "page": page_meta,
+            "design_tokens": schema_tokens,
+            "source": source_meta,
+            "run_id": job_id,
+        })
+
+        analyzed_components = analyzer_result.get("components", components)
+        analysis_stats = analyzer_result.get("analysis_stats", {})
+        components_completed = analysis_stats.get("succeeded", 0)
+        components_failed = analysis_stats.get("failed", 0)
+
+        logger.info(
+            f"Job {job_id}: SpecAnalyzer complete — "
+            f"{components_completed}/{components_total} succeeded"
+        )
+
+        # Phase 4: SpecAssemblerNode
+        from workflow.nodes.spec_nodes import SpecAssemblerNode
+
+        assembler = SpecAssemblerNode(
+            node_id="spec_assembler_0",
+            node_type="spec_assembler",
+            config={"output_dir": output_dir},
+        )
+        assembler_result = await assembler.execute({
+            "components": analyzed_components,
+            "page": page_meta,
+            "design_tokens": schema_tokens,
+            "source": source_meta,
+            "output_dir": output_dir,
+        })
+
+        spec_path = assembler_result.get("spec_path", "")
+        spec_document = assembler_result.get("spec_document", {})
+
+        push_node_event(job_id, "spec_complete", {
+            "spec_path": spec_path,
+            "components_count": components_total,
+            "components_succeeded": components_completed,
+            "components_failed": components_failed,
+        })
+
+        final_status = "completed"
+
+        # Persist final state to DB
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update(
+                job_id,
+                status=final_status,
+                design_file=spec_path,
+                completed_at=datetime.now(timezone.utc),
+                result={
+                    "spec_path": spec_path,
+                    "analysis_stats": analysis_stats,
+                    "components_count": components_total,
+                },
+                components_total=components_total,
+                components_completed=components_completed,
+                components_failed=components_failed,
+            )
+
+        logger.info(
+            f"Job {job_id}: Spec pipeline {final_status} — "
+            f"{components_completed}/{components_total} components, "
+            f"spec at {spec_path}"
+        )
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: Spec pipeline failed: {e}", exc_info=True)
+        final_status = "failed"
+        final_error = str(e)
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_status(
+                job_id, "failed",
+                error=str(e),
+                completed_at=datetime.now(timezone.utc),
+            )
+
+    # Always push final job_done event
+    push_node_event(job_id, "job_done", {
+        "status": final_status,
+        "components_total": components_total,
+        "components_completed": components_completed,
+        "components_failed": components_failed,
+        "error": final_error,
+    })
 
 
 def _extract_result_summary(result: Dict[str, Any]) -> Dict[str, Any]:

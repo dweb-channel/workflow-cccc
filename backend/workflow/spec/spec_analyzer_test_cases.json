@@ -1,0 +1,189 @@
+{
+  "_comment": "Expected SpecAnalyzer outputs for the 3 components in example_spec.json. Used for prompt validation — the LLM output should match these in structure and semantic accuracy.",
+
+  "test_cases": [
+    {
+      "component_id": "5574:3356",
+      "component_name": "HeroImage",
+      "input_note": "Partial spec has: bounds(0,0,412,549), layout(absolute), sizing(fill,549px), style(none bg), content.image(src, fit:cover, aspect_ratio:3:4). No children.",
+      "expected_output": {
+        "role": "image",
+        "description": "Full-bleed hero image covering the main content area. Shows a decorative/artistic photo related to the album theme. Positioned behind the nav bar (which is transparent) and extends to the bottom action area. The image uses cover fit to fill the entire area without letterboxing. Note: Figma source bounds (412px) exceed the device width (393px) due to the image extending beyond the frame edge; actual rendering should clip to parent width via overflow:hidden.",
+        "render_hint": null,
+        "content_updates": {
+          "image_alt": "Album hero artwork — decorative artistic photo for a design event",
+          "icon_name": null
+        },
+        "interaction": {
+          "behaviors": [],
+          "states": []
+        },
+        "children_updates": []
+      },
+      "validation_criteria": {
+        "role_must_be": "image",
+        "description_must_mention": ["hero", "overflow", "cover"],
+        "render_hint_must_be": null,
+        "image_alt_must_be_non_null": true,
+        "interaction_should_be_empty": true
+      }
+    },
+    {
+      "component_id": "5574:3315",
+      "component_name": "TopNavBar",
+      "input_note": "Partial spec has: bounds(0,0,393,92), layout(flex,column), 2 children: StatusBar(5574:3322) and NavContent(5574:3315-content). NavContent has 3 children: BackIcon, TitleGroup(with TitleCN+SubtitleEN), MoreIcon.",
+      "expected_output": {
+        "role": "header",
+        "description": "Top navigation bar spanning full width. Contains iOS status bar area (54px), followed by a content row with back icon (left), centered dual-line title, and more icon (right). Background is transparent to overlay hero content beneath.",
+        "render_hint": null,
+        "content_updates": {
+          "image_alt": null,
+          "icon_name": null
+        },
+        "interaction": {
+          "behaviors": [],
+          "states": []
+        },
+        "children_updates": [
+          {
+            "id": "5574:3322",
+            "role": "container",
+            "render_hint": "spacer",
+            "description": "iOS status bar placeholder — 54px height. System element: render as a fixed-height spacer. The typography data below reflects the Figma source but should be ignored when render_hint is 'spacer'.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3315-content",
+            "role": "container",
+            "render_hint": null,
+            "description": "Navigation content row below status bar. Back icon on left edge, centered title group, more icon on right edge. Height 38px, horizontally padded 16px.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3323",
+            "role": "icon",
+            "render_hint": null,
+            "description": "Back/close icon (X shape), 24x24px, white. Tappable — navigates back to previous screen.",
+            "content_updates": { "image_alt": null, "icon_name": "close" },
+            "interaction": {
+              "behaviors": [
+                { "trigger": "click", "action": "Navigate back to previous screen", "target": "page" }
+              ],
+              "states": []
+            }
+          },
+          {
+            "id": "5574:3321-group",
+            "role": "container",
+            "render_hint": null,
+            "description": "Centered title group with two vertically stacked text lines. Chinese title on top, Latin subtitle below. Both center-aligned.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3321",
+            "role": "text",
+            "render_hint": null,
+            "description": "Primary Chinese title",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3326",
+            "role": "text",
+            "render_hint": null,
+            "description": "Latin subtitle in smaller weight, uppercase tracking",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3316",
+            "role": "icon",
+            "render_hint": null,
+            "description": "More/ellipsis icon, 24x24px, white. Opens additional options menu.",
+            "content_updates": { "image_alt": null, "icon_name": "more-horizontal" },
+            "interaction": {
+              "behaviors": [
+                { "trigger": "click", "action": "Open options/share menu overlay", "target": "self" }
+              ],
+              "states": []
+            }
+          }
+        ]
+      },
+      "validation_criteria": {
+        "role_must_be": "header",
+        "description_must_mention": ["navigation", "transparent"],
+        "statusbar_must_be_spacer": true,
+        "back_icon_must_have_click": true,
+        "more_icon_must_have_click": true,
+        "icon_names_expected": { "5574:3323": "close", "5574:3316": "more-horizontal" },
+        "children_count": 7
+      }
+    },
+    {
+      "component_id": "5574:3333",
+      "component_name": "BottomActionBar",
+      "input_note": "Partial spec has: bounds(0,714,393,138), layout(flex,column,justify:end), gradient background, 3 children: GradientStrip(decorative), CTAButton(with text+shadow+hover), HomeIndicator.",
+      "expected_output": {
+        "role": "footer",
+        "description": "Bottom action area with gradient overlay strip at top, CTA button, and iOS home indicator. Fixed to bottom of screen. The gradient strip (GradientStrip child) creates a secondary gradient that visually blends with the parent's gradient — both render as overlapping layers for a smooth fade from transparent to opaque black.",
+        "render_hint": null,
+        "content_updates": {
+          "image_alt": null,
+          "icon_name": null
+        },
+        "interaction": {
+          "behaviors": [],
+          "states": []
+        },
+        "children_updates": [
+          {
+            "id": "5574:3369",
+            "role": "decorative",
+            "render_hint": null,
+            "description": "26px gradient overlay strip at top of action bar, creates smooth transition from image content to opaque bottom area.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          },
+          {
+            "id": "5574:3335",
+            "role": "button",
+            "render_hint": null,
+            "description": "Primary call-to-action button with rounded corners. Text content triggers navigation to album streaming page. Centered horizontally, positioned above home indicator.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": {
+              "behaviors": [
+                { "trigger": "click", "action": "Navigate to album live streaming page", "target": "page" }
+              ],
+              "states": [
+                { "name": "hover", "description": "Lighter orange background on hover/press" },
+                { "name": "active", "description": "Slightly dimmed opacity when pressed" }
+              ]
+            }
+          },
+          {
+            "id": "5574:3334",
+            "role": "container",
+            "render_hint": "spacer",
+            "description": "iOS home indicator area — 21px height at bottom. System element: render as a fixed-height spacer.",
+            "content_updates": { "image_alt": null, "icon_name": null },
+            "interaction": { "behaviors": [], "states": [] }
+          }
+        ]
+      },
+      "validation_criteria": {
+        "role_must_be": "footer",
+        "description_must_mention": ["gradient", "bottom"],
+        "cta_must_be_button": true,
+        "cta_must_have_click": true,
+        "cta_must_have_hover_state": true,
+        "gradient_strip_must_be_decorative": true,
+        "home_indicator_must_be_spacer": true,
+        "children_count": 3
+      }
+    }
+  ]
+}

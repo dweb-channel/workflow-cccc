@@ -96,13 +96,13 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
   };
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-        <h3 className="font-semibold text-slate-800">节点配置</h3>
+      <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
+        <h3 className="font-semibold text-slate-100">节点配置</h3>
         <button
           onClick={onClose}
-          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
         >
           ✕
         </button>
@@ -194,7 +194,7 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+      <div className="flex items-center justify-between border-t border-slate-700 px-4 py-3">
         <Button variant="destructive" size="sm" onClick={handleDelete}>
           删除节点
         </Button>
@@ -262,8 +262,8 @@ function LLMAgentConfig({
   const promptError = touched && !prompt.trim() ? "Prompt 不能为空" : undefined;
 
   return (
-    <div className="space-y-4 rounded-md border border-indigo-200 bg-indigo-50/50 p-3">
-      <p className="text-xs font-medium text-indigo-600">LLM Agent 配置</p>
+    <div className="space-y-4 rounded-md border border-cyan-500/30 bg-cyan-500/5 p-3">
+      <p className="text-xs font-medium text-cyan-400">LLM Agent 配置</p>
 
       {/* Prompt */}
       <div className="space-y-1">
@@ -290,7 +290,7 @@ function LLMAgentConfig({
         <span>{showAdvanced ? "▼" : "▶"}</span>
       </button>
       {showAdvanced && (
-        <div className="space-y-3 border-t border-indigo-100 pt-3">
+        <div className="space-y-3 border-t border-cyan-500/20 pt-3">
           <div className="space-y-1">
             <Label className="text-xs">System Prompt</Label>
             <Textarea
@@ -339,8 +339,8 @@ function HttpRequestConfig({
   }, [url, method]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-medium text-slate-500">HTTP 请求配置</p>
+    <div className="space-y-3 rounded-md border border-slate-600 bg-slate-700/50 p-3">
+      <p className="text-xs font-medium text-slate-400">HTTP 请求配置</p>
       <div className="space-y-1">
         <RequiredLabel className="text-xs">URL</RequiredLabel>
         <Input
@@ -382,8 +382,8 @@ function ConditionConfig({
   }, [condition, trueBranch, falseBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-      <p className="text-xs font-medium text-slate-500">条件分支配置</p>
+    <div className="space-y-3 rounded-md border border-slate-600 bg-slate-700/50 p-3">
+      <p className="text-xs font-medium text-slate-400">条件分支配置</p>
       <div className="space-y-1">
         <RequiredLabel className="text-xs">条件表达式</RequiredLabel>
         <Input

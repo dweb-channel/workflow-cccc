@@ -22,13 +22,13 @@ export function EditorToolbar({
   return (
     <div className="flex items-center gap-2">
       {/* Mode toggle */}
-      <div className="flex rounded-md border border-slate-200">
+      <div className="flex rounded-md border border-slate-600">
         <button
           onClick={() => onModeChange("view")}
           className={`px-3 py-1 text-xs font-medium transition-colors ${
             mode === "view"
-              ? "bg-slate-800 text-white"
-              : "bg-white text-slate-600 hover:bg-slate-50"
+              ? "bg-cyan-500 text-slate-900"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
           } rounded-l-md`}
         >
           查看
@@ -37,8 +37,8 @@ export function EditorToolbar({
           onClick={() => onModeChange("edit")}
           className={`px-3 py-1 text-xs font-medium transition-colors ${
             mode === "edit"
-              ? "bg-blue-600 text-white"
-              : "bg-white text-slate-600 hover:bg-slate-50"
+              ? "bg-cyan-500 text-slate-900"
+              : "bg-slate-700 text-slate-300 hover:bg-slate-600"
           } rounded-r-md`}
         >
           编辑

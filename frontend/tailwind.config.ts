@@ -6,17 +6,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "hsl(0 0% 100%)",
-        foreground: "hsl(222.2 84% 4.9%)",
-        muted: "hsl(210 40% 96.1%)",
-        "muted-foreground": "hsl(215.4 16.3% 46.9%)",
-        border: "hsl(214.3 31.8% 91.4%)",
-        input: "hsl(214.3 31.8% 91.4%)",
-        ring: "hsl(222.2 84% 4.9%)",
-        primary: "hsl(222.2 47.4% 11.2%)",
-        "primary-foreground": "hsl(210 40% 98%)",
-        secondary: "hsl(210 40% 96.1%)",
-        "secondary-foreground": "hsl(222.2 47.4% 11.2%)"
+        background: "#0F172A",
+        foreground: "#F8FAFC",
+        muted: "#1E293B",
+        "muted-foreground": "#94A3B8",
+        border: "#334155",
+        input: "#334155",
+        ring: "#22D3EE",
+        primary: "#22D3EE",
+        "primary-foreground": "#0F172A",
+        secondary: "#1E293B",
+        "secondary-foreground": "#F8FAFC",
+        accent: "#22D3EE",
+        "accent-foreground": "#0F172A",
       },
       borderRadius: {
         lg: "0.75rem",

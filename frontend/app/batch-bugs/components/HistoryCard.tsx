@@ -44,7 +44,7 @@ export function HistoryCard({
   return (
     <div>
       <div className="flex items-center justify-between pb-3">
-        <h3 className="text-sm font-semibold text-slate-900">历史任务</h3>
+        <h3 className="text-sm font-semibold text-white">历史任务</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -60,7 +60,7 @@ export function HistoryCard({
             {historyJobs.map((job) => (
               <div key={job.job_id}>
                 <div
-                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 p-3 hover:bg-slate-50"
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-700 p-3 hover:bg-slate-700/50"
                   onClick={() => onToggleDetails(job.job_id)}
                 >
                   <span className="text-lg">
@@ -71,26 +71,26 @@ export function HistoryCard({
                     {job.status === "pending" && "⏳"}
                   </span>
                   <div className="flex-1">
-                    <p className="font-mono text-xs text-slate-600">
+                    <p className="font-mono text-xs text-slate-400">
                       {job.job_id}
                     </p>
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-slate-500">
                       {new Date(job.created_at).toLocaleString()} ·{" "}
                       {job.total_bugs} bugs
                       {job.status === "cancelled" && " · 已取消"}
                     </p>
                   </div>
                   <div className="text-right text-xs">
-                    <span className="text-green-600">{job.completed} ✓</span>
+                    <span className="text-green-400">{job.completed} ✓</span>
                     {job.failed > 0 && (
-                      <span className="ml-2 text-red-600">
+                      <span className="ml-2 text-red-400">
                         {job.failed} ✗
                       </span>
                     )}
                   </div>
                   {onDelete && (
                     <button
-                      className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500"
+                      className="rounded p-1 text-slate-500 hover:bg-red-500/20 hover:text-red-400"
                       title="删除"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -100,12 +100,12 @@ export function HistoryCard({
                       ✕
                     </button>
                   )}
-                  <span className="text-slate-400">
+                  <span className="text-slate-500">
                     {expandedJobId === job.job_id ? "▼" : "▶"}
                   </span>
                 </div>
                 {expandedJobId === job.job_id && expandedJobDetails && (
-                  <div className="ml-4 mt-2 space-y-1 border-l-2 border-slate-200 pl-4">
+                  <div className="ml-4 mt-2 space-y-1 border-l-2 border-slate-600 pl-4">
                     {expandedJobDetails.bugs.map((bug) => (
                       <div
                         key={bug.bug_id}
@@ -118,11 +118,11 @@ export function HistoryCard({
                           {bug.status === "failed" && "❌"}
                           {bug.status === "skipped" && "⏭️"}
                         </span>
-                        <span className="truncate text-slate-600">
+                        <span className="truncate text-slate-400">
                           {bug.url}
                         </span>
                         {bug.error && (
-                          <span className="text-red-500">({bug.error})</span>
+                          <span className="text-red-400">({bug.error})</span>
                         )}
                       </div>
                     ))}

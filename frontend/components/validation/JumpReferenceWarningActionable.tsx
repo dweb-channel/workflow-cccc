@@ -41,20 +41,20 @@ export function JumpReferenceWarningActionable({
   return (
     <div
       data-testid="warning-actionable-jump-reference"
-      className="border border-yellow-200 bg-yellow-50 rounded-lg p-4"
+      className="border border-yellow-800 bg-yellow-950 rounded-lg p-4"
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
         <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
         <div className="flex-1">
-          <h4 className="text-sm font-semibold text-gray-900">
+          <h4 className="text-sm font-semibold text-white">
             跳转引用警告
           </h4>
-          <p className="text-sm text-gray-700 mt-1">
+          <p className="text-sm text-slate-300 mt-1">
             {message}
           </p>
-          <p className="text-xs text-gray-600 mt-1">
-            节点 ID: <code className="bg-yellow-100 px-1 rounded">{nodeId}</code>
+          <p className="text-xs text-slate-400 mt-1">
+            节点 ID: <code className="bg-yellow-900/50 px-1 rounded">{nodeId}</code>
           </p>
         </div>
       </div>
@@ -62,12 +62,12 @@ export function JumpReferenceWarningActionable({
       {/* Jump Paths Visualization */}
       {jumpPaths.length > 0 && (
         <div className="ml-8 mb-3">
-          <p className="text-sm font-medium text-gray-700 mb-2">
+          <p className="text-sm font-medium text-slate-300 mb-2">
             跳转路径 ({jumpPaths.length} 个分支):
           </p>
           <div
             data-testid="jump-paths-list"
-            className="bg-white rounded border border-yellow-200 divide-y divide-yellow-100"
+            className="bg-slate-800 rounded border border-yellow-800 divide-y divide-yellow-900/50"
           >
             {jumpPaths.map((path, idx) => (
               <div
@@ -76,15 +76,15 @@ export function JumpReferenceWarningActionable({
                 className="p-3"
               >
                 <div className="flex items-center gap-2 mb-2">
-                  <code className="text-xs font-mono bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
+                  <code className="text-xs font-mono bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded">
                     {path.condition}
                   </code>
-                  <ArrowRight className="h-4 w-4 text-gray-400" />
+                  <ArrowRight className="h-4 w-4 text-slate-400" />
                   <code
                     className={`text-xs font-mono px-2 py-1 rounded ${
                       path.exists
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'
+                        ? 'bg-green-900/50 text-green-300'
+                        : 'bg-red-900/50 text-red-300'
                     }`}
                   >
                     {path.target}
@@ -114,7 +114,7 @@ export function JumpReferenceWarningActionable({
 
       {/* Generic message when no jump paths */}
       {jumpPaths.length === 0 && (
-        <div className="ml-8 text-sm text-gray-600">
+        <div className="ml-8 text-sm text-slate-400">
           请检查条件节点的跳转配置
         </div>
       )}

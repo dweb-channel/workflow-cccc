@@ -43,37 +43,37 @@ export function MissingFieldReferenceErrorActionable({
   return (
     <div
       data-testid="error-actionable-missing-field-reference"
-      className="border border-red-200 bg-red-50 rounded-lg p-4"
+      className="border border-red-800 bg-red-950 rounded-lg p-4"
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
         <XCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
         <div className="flex-1">
-          <h4 className="text-sm font-semibold text-gray-900">
+          <h4 className="text-sm font-semibold text-white">
             字段引用错误
           </h4>
-          <p className="text-sm text-gray-700 mt-1">
+          <p className="text-sm text-slate-300 mt-1">
             {message}
           </p>
-          <p className="text-xs text-gray-600 mt-1">
-            节点 ID: <code className="bg-red-100 px-1 rounded">{nodeId}</code>
+          <p className="text-xs text-slate-400 mt-1">
+            节点 ID: <code className="bg-red-900/50 px-1 rounded">{nodeId}</code>
           </p>
         </div>
       </div>
 
       {/* Error Details */}
       <div className="ml-8 mb-3">
-        <div className="bg-white rounded border border-red-200 p-3 space-y-2">
+        <div className="bg-slate-800 rounded border border-red-800 p-3 space-y-2">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-gray-600">引用字段:</span>
+            <span className="text-slate-400">引用字段:</span>
             <code
               data-testid="missing-field-name"
-              className="bg-red-100 text-red-800 px-2 py-0.5 rounded font-mono text-xs"
+              className="bg-red-900/50 text-red-300 px-2 py-0.5 rounded font-mono text-xs"
             >
               {field}
             </code>
           </div>
-          <div className="text-xs text-gray-600">
+          <div className="text-xs text-slate-400">
             上游节点: {upstream_node_ids?.join(', ') ?? '无'}
           </div>
         </div>
@@ -81,7 +81,7 @@ export function MissingFieldReferenceErrorActionable({
 
       {/* Field Picker */}
       <div className="ml-8 space-y-2">
-        <p className="text-sm font-medium text-gray-700">
+        <p className="text-sm font-medium text-slate-300">
           选择可用字段 ({available_fields.length} 个可用):
         </p>
         <div

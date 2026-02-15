@@ -1,0 +1,412 @@
+{
+  "version": "1.0",
+  "source": {
+    "tool": "figma",
+    "file_key": "6kGd851qaAX4TiL44vpIrO",
+    "file_name": "像素芝士V2.9版本",
+    "exported_at": "2026-02-15T03:30:00Z"
+  },
+  "page": {
+    "name": "底部带按钮（极限高度）",
+    "node_id": "5574:3309",
+    "device": {
+      "type": "mobile",
+      "width": 393,
+      "height": 852
+    },
+    "description": "Mobile app screen with status bar, branded header area, large hero image section, page indicator dots, and a bottom action bar with CTA button and home indicator.",
+    "responsive_strategy": "fixed-width",
+    "layout": {
+      "type": "stack"
+    }
+  },
+  "design_tokens": {
+    "colors": {
+      "brand-primary": "#FF6B35",
+      "background-dark": "#1A1A1A",
+      "text-primary": "#FFFFFF",
+      "text-secondary": "#FFFFFFB3",
+      "surface-overlay": "#00000040"
+    },
+    "typography": {
+      "font_family": "PingFang SC",
+      "scale": {
+        "title": { "size": 16, "weight": 600, "line_height": 22 },
+        "subtitle": { "size": 12, "weight": 500, "line_height": 16 },
+        "button-label": { "size": 14, "weight": 600, "line_height": 20 }
+      }
+    },
+    "spacing": {
+      "xs": 4,
+      "sm": 8,
+      "md": 16,
+      "lg": 24
+    },
+    "radii": {
+      "sm": 4,
+      "md": 8,
+      "lg": 16,
+      "full": 9999
+    }
+  },
+  "components": [
+    {
+      "id": "5574:3356",
+      "name": "HeroImage",
+      "role": "image",
+      "z_index": 0,
+      "description": "Full-bleed hero image covering the main content area. Shows a decorative/artistic photo related to the album theme. Positioned behind the nav bar (which is transparent) and extends to the bottom action area. The image uses cover fit to fill the entire area without letterboxing. Note: Figma source bounds (412px) exceed the device width (393px) due to the image extending beyond the frame edge; actual rendering should clip to parent width via overflow:hidden.",
+      "bounds": { "x": 0, "y": 0, "width": 412, "height": 549 },
+      "layout": {
+        "type": "absolute"
+      },
+      "sizing": {
+        "width": "fill",
+        "height": "549px",
+        "aspect_ratio": "3:4"
+      },
+      "style": {
+        "background": { "type": "none" },
+        "corner_radius": 0
+      },
+      "content": {
+        "image": {
+          "src": "screenshots/5574_3356.png",
+          "alt": "Album hero artwork — decorative artistic photo for 像素芝士 Design Week event",
+          "fit": "cover",
+          "aspect_ratio": "3:4",
+          "placeholder": "blur"
+        }
+      },
+      "screenshot_path": "screenshots/5574_3356.png"
+    },
+    {
+      "id": "5574:3315",
+      "name": "TopNavBar",
+      "role": "header",
+      "z_index": 1,
+      "description": "Top navigation bar spanning full width. Contains iOS status bar area (54px), followed by a content row with back icon (left), centered dual-line title, and more icon (right). Background is transparent to overlay hero content beneath.",
+      "bounds": { "x": 0, "y": 0, "width": 393, "height": 92 },
+      "layout": {
+        "type": "flex",
+        "direction": "column",
+        "justify": "start",
+        "align": "stretch",
+        "gap": 0,
+        "padding": [0, 0, 0, 0],
+        "overflow": "hidden"
+      },
+      "sizing": {
+        "width": "393px",
+        "height": "92px"
+      },
+      "style": {
+        "background": { "type": "none" },
+        "opacity": 1.0
+      },
+      "children": [
+        {
+          "id": "5574:3322",
+          "name": "StatusBar",
+          "role": "container",
+          "render_hint": "spacer",
+          "description": "iOS status bar placeholder — 54px height. System element: render as a fixed-height spacer. The typography data below reflects the Figma source but should be ignored when render_hint is 'spacer'.",
+          "bounds": { "x": 0, "y": 0, "width": 393, "height": 54 },
+          "layout": {
+            "type": "flex",
+            "direction": "row",
+            "justify": "space-between",
+            "align": "center",
+            "gap": 0,
+            "padding": [14, 24, 0, 24]
+          },
+          "sizing": { "width": "fill", "height": "54px" },
+          "style": {
+            "background": { "type": "none" }
+          },
+          "typography": {
+            "content": "9:41",
+            "font_family": "SF Pro",
+            "font_size": 15,
+            "font_weight": 600,
+            "line_height": 20,
+            "color": "#FFFFFF",
+            "align": "center"
+          }
+        },
+        {
+          "id": "5574:3315-content",
+          "name": "NavContent",
+          "role": "container",
+          "description": "Navigation content row below status bar. Back icon on left edge, centered title group, more icon on right edge. Height 38px, horizontally padded 16px.",
+          "bounds": { "x": 0, "y": 54, "width": 393, "height": 38 },
+          "layout": {
+            "type": "flex",
+            "direction": "row",
+            "justify": "space-between",
+            "align": "center",
+            "gap": 0,
+            "padding": [0, 16, 0, 16]
+          },
+          "sizing": { "width": "fill", "height": "38px" },
+          "style": {
+            "background": { "type": "none" }
+          },
+          "children": [
+            {
+              "id": "5574:3323",
+              "name": "BackIcon",
+              "role": "icon",
+              "description": "Back/close icon (X shape), 24×24px, white. Tappable — navigates back to previous screen.",
+              "bounds": { "x": 16, "y": 57, "width": 24, "height": 24 },
+              "sizing": { "width": "24px", "height": "24px" },
+              "style": {},
+              "content": {
+                "icon": {
+                  "name": "close",
+                  "size": 24,
+                  "color": { "value": "#FFFFFF", "token": "text-primary" }
+                }
+              },
+              "interaction": {
+                "behaviors": [
+                  {
+                    "trigger": "click",
+                    "action": "Navigate back to previous screen",
+                    "target": "page"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "5574:3321-group",
+              "name": "TitleGroup",
+              "role": "container",
+              "description": "Centered title group with two vertically stacked text lines. Chinese title '像素芝士' on top, Latin subtitle 'DESIGN WEEK' below. Both center-aligned.",
+              "bounds": { "x": 80, "y": 54, "width": 233, "height": 38 },
+              "layout": {
+                "type": "flex",
+                "direction": "column",
+                "justify": "center",
+                "align": "center",
+                "gap": 0,
+                "padding": [0, 0, 0, 0]
+              },
+              "sizing": { "width": "hug", "height": "hug" },
+              "style": {},
+              "children": [
+                {
+                  "id": "5574:3321",
+                  "name": "TitleCN",
+                  "role": "text",
+                  "description": "Primary Chinese title",
+                  "bounds": { "x": 80, "y": 59, "width": 233, "height": 22 },
+                  "sizing": { "width": "hug", "height": "hug" },
+                  "style": {},
+                  "typography": {
+                    "content": "像素芝士",
+                    "font_family": "PingFang SC",
+                    "font_size": 16,
+                    "font_weight": 600,
+                    "line_height": 22,
+                    "letter_spacing": 0,
+                    "color": { "value": "#FFFFFF", "token": "text-primary" },
+                    "align": "center"
+                  }
+                },
+                {
+                  "id": "5574:3326",
+                  "name": "SubtitleEN",
+                  "role": "text",
+                  "description": "Latin subtitle in smaller weight",
+                  "bounds": { "x": 80, "y": 58, "width": 233, "height": 22 },
+                  "sizing": { "width": "hug", "height": "hug" },
+                  "style": {},
+                  "typography": {
+                    "content": "DESIGN WEEK",
+                    "font_family": "PingFang SC",
+                    "font_size": 11,
+                    "font_weight": 400,
+                    "line_height": 16,
+                    "letter_spacing": 2,
+                    "color": { "value": "#FFFFFFB3", "token": "text-secondary" },
+                    "align": "center",
+                    "transform": "uppercase"
+                  }
+                }
+              ]
+            },
+            {
+              "id": "5574:3316",
+              "name": "MoreIcon",
+              "role": "icon",
+              "description": "More/ellipsis icon, 24×24px, white. Opens additional options menu.",
+              "bounds": { "x": 353, "y": 57, "width": 24, "height": 24 },
+              "sizing": { "width": "24px", "height": "24px" },
+              "style": {},
+              "content": {
+                "icon": {
+                  "name": "more-horizontal",
+                  "size": 24,
+                  "color": { "value": "#FFFFFF", "token": "text-primary" }
+                }
+              },
+              "interaction": {
+                "behaviors": [
+                  {
+                    "trigger": "click",
+                    "action": "Open options/share menu overlay",
+                    "target": "self"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "screenshot_path": "screenshots/5574_3315.png"
+    },
+    {
+      "id": "5574:3333",
+      "name": "BottomActionBar",
+      "role": "footer",
+      "z_index": 2,
+      "description": "Bottom action area with gradient overlay strip at top, CTA button, and iOS home indicator. Fixed to bottom of screen. The gradient strip (GradientStrip child) creates a secondary gradient that visually blends with the parent's gradient — both render as overlapping layers for a smooth fade from transparent to opaque black.",
+      "bounds": { "x": 0, "y": 714, "width": 393, "height": 138 },
+      "layout": {
+        "type": "flex",
+        "direction": "column",
+        "justify": "end",
+        "align": "center",
+        "gap": 0,
+        "padding": [0, 0, 0, 0]
+      },
+      "sizing": {
+        "width": "fill",
+        "height": "138px"
+      },
+      "style": {
+        "background": {
+          "type": "gradient-linear",
+          "gradient": {
+            "angle": 180,
+            "stops": [
+              { "color": "#00000000", "position": 0.0 },
+              { "color": "#000000CC", "position": 1.0 }
+            ]
+          }
+        }
+      },
+      "children": [
+        {
+          "id": "5574:3369",
+          "name": "GradientStrip",
+          "role": "decorative",
+          "description": "26px gradient overlay strip at top of action bar, creates smooth transition from image content to opaque bottom area.",
+          "bounds": { "x": 0, "y": 738, "width": 393, "height": 26 },
+          "sizing": { "width": "fill", "height": "26px" },
+          "style": {
+            "background": {
+              "type": "gradient-linear",
+              "gradient": {
+                "angle": 180,
+                "stops": [
+                  { "color": "#00000000", "position": 0.0 },
+                  { "color": "#00000066", "position": 1.0 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "5574:3335",
+          "name": "CTAButton",
+          "role": "button",
+          "description": "Primary call-to-action button with rounded corners. Text '进入相册直播'. Centered horizontally, positioned above home indicator.",
+          "bounds": { "x": 131, "y": 764, "width": 130, "height": 38 },
+          "layout": {
+            "type": "flex",
+            "direction": "row",
+            "justify": "center",
+            "align": "center",
+            "gap": 0,
+            "padding": [8, 24, 8, 24]
+          },
+          "sizing": { "width": "hug", "height": "38px" },
+          "style": {
+            "background": {
+              "type": "solid",
+              "color": { "value": "#FF6B35", "token": "brand-primary" }
+            },
+            "corner_radius": 19,
+            "shadow": [
+              {
+                "type": "drop",
+                "x": 0,
+                "y": 2,
+                "blur": 8,
+                "spread": 0,
+                "color": { "value": "#FF6B3540" }
+              }
+            ]
+          },
+          "typography": {
+            "content": "进入相册直播",
+            "font_family": "PingFang SC",
+            "font_size": 14,
+            "font_weight": 600,
+            "line_height": 20,
+            "color": { "value": "#FFFFFF", "token": "text-primary" },
+            "align": "center"
+          },
+          "interaction": {
+            "behaviors": [
+              {
+                "trigger": "click",
+                "action": "Navigate to album live streaming page",
+                "target": "page"
+              }
+            ],
+            "states": [
+              {
+                "name": "hover",
+                "style_overrides": {
+                  "background": { "type": "solid", "color": { "value": "#FF8F5E" } }
+                },
+                "description": "Lighter orange on hover/press"
+              },
+              {
+                "name": "active",
+                "style_overrides": {
+                  "opacity": 0.8
+                },
+                "description": "Slightly dimmed when pressed"
+              }
+            ],
+            "transitions": [
+              {
+                "property": "background-color",
+                "duration_ms": 150,
+                "easing": "ease-out"
+              }
+            ]
+          },
+          "screenshot_path": "screenshots/5574_3335.png"
+        },
+        {
+          "id": "5574:3334",
+          "name": "HomeIndicator",
+          "role": "container",
+          "render_hint": "spacer",
+          "description": "iOS home indicator area — 21px height at bottom. System element: render as a fixed-height spacer.",
+          "bounds": { "x": 0, "y": 831, "width": 393, "height": 21 },
+          "sizing": { "width": "fill", "height": "21px" },
+          "style": {
+            "background": { "type": "none" }
+          }
+        }
+      ],
+      "screenshot_path": "screenshots/5574_3333.png"
+    }
+  ]
+}

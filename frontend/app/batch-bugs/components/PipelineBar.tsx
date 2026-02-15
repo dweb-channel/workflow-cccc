@@ -26,11 +26,11 @@ export function PipelineBar({ currentJob, activeBugIndex, onBugSelect }: Pipelin
   const isFinished = ["completed", "failed", "cancelled"].includes(currentJob.job_status);
 
   return (
-    <div className="rounded-xl border border-[#e2e8f0] bg-white px-5 py-3.5">
+    <div className="rounded-xl border border-slate-700 bg-slate-800 px-5 py-3.5">
       {/* Header row */}
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[13px] font-semibold text-[#475569]">执行进度</span>
-        <span className="text-xs text-[#94a3b8]">
+        <span className="text-[13px] font-semibold text-slate-300">执行进度</span>
+        <span className="text-xs text-slate-500">
           {isFinished ? (
             <>
               {completed}/{total} 完成
@@ -70,7 +70,7 @@ function BugBadgeGroup({
   return (
     <>
       <BugBadge bug={bug} isActive={isActive} onSelect={onSelect} />
-      {!isLast && <span className="shrink-0 text-[#cbd5e1]">&rarr;</span>}
+      {!isLast && <span className="shrink-0 text-slate-600">&rarr;</span>}
     </>
   );
 }
@@ -86,44 +86,44 @@ const BADGE_CONFIG: Record<string, {
   subColor: string;
 }> = {
   completed: {
-    bg: "#dcfce7",
-    border: "#bbf7d0",
+    bg: "rgba(34,197,94,0.1)",
+    border: "rgba(34,197,94,0.3)",
     borderWidth: 1,
     icon: "\u2705",
-    idColor: "#15803d",
-    subColor: "#4ade80",
+    idColor: "#4ade80",
+    subColor: "#22c55e",
   },
   in_progress: {
-    bg: "#dbeafe",
-    border: "#3b82f6",
+    bg: "rgba(6,182,212,0.1)",
+    border: "#06b6d4",
     borderWidth: 2,
     icon: "\u{1F527}",
-    idColor: "#1d4ed8",
-    subColor: "#60a5fa",
+    idColor: "#22d3ee",
+    subColor: "#06b6d4",
   },
   pending: {
-    bg: "#f8fafc",
-    border: "#e2e8f0",
+    bg: "rgba(51,65,85,0.5)",
+    border: "rgba(71,85,105,0.5)",
     borderWidth: 1,
     icon: "\u23F3",
-    idColor: "#64748b",
-    subColor: "#94a3b8",
+    idColor: "#94a3b8",
+    subColor: "#64748b",
   },
   failed: {
-    bg: "#fef2f2",
-    border: "#fecaca",
+    bg: "rgba(239,68,68,0.1)",
+    border: "rgba(239,68,68,0.3)",
     borderWidth: 1,
     icon: "\u274C",
-    idColor: "#991b1b",
-    subColor: "#f87171",
+    idColor: "#f87171",
+    subColor: "#ef4444",
   },
   skipped: {
-    bg: "#fef2f2",
-    border: "#fecaca",
+    bg: "rgba(239,68,68,0.1)",
+    border: "rgba(239,68,68,0.3)",
     borderWidth: 1,
     icon: "\u23ED\uFE0F",
-    idColor: "#991b1b",
-    subColor: "#f87171",
+    idColor: "#f87171",
+    subColor: "#ef4444",
   },
 };
 
@@ -143,7 +143,7 @@ function BugBadge({
     <button
       onClick={onSelect}
       className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 transition-shadow ${
-        isActive ? "ring-2 ring-[#3b82f6] ring-offset-1" : ""
+        isActive ? "ring-2 ring-cyan-500 ring-offset-1 ring-offset-slate-800" : ""
       }`}
       style={{
         backgroundColor: cfg.bg,

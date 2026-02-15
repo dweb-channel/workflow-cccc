@@ -67,10 +67,10 @@ export function NodePalette() {
                   key={info.type}
                   draggable
                   onDragStart={(e) => onDragStart(e, info)}
-                  className="flex cursor-grab items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm transition-colors hover:border-blue-300 hover:bg-blue-50 active:cursor-grabbing"
+                  className="flex cursor-grab items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm shadow-sm transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/10 active:cursor-grabbing"
                 >
                   <span>{info.icon}</span>
-                  <span className="text-slate-700">{info.label}</span>
+                  <span className="text-slate-300">{info.label}</span>
                 </div>
               ))}
             </div>

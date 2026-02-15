@@ -130,17 +130,17 @@ function buildFeedItems(events: AIThinkingEvent[]): FeedItem[] {
 
 // ---- Event style config ----
 const EVENT_CONFIG: Record<string, { tagBg: string; tagColor: string; label: string; borderColor?: string }> = {
-  thinking: { tagBg: "#f3e8ff", tagColor: "#7c3aed", label: "\u5206\u6790" },
-  text:     { tagBg: "#f1f5f9", tagColor: "#475569", label: "\u8F93\u51FA" },
-  read:     { tagBg: "#ecfdf5", tagColor: "#059669", label: "\u8BFB\u53D6" },
-  edit:     { tagBg: "#fff7ed", tagColor: "#ea580c", label: "\u4FEE\u6539\u4EE3\u7801", borderColor: "#f59e0b" },
-  bash:     { tagBg: "#1e293b", tagColor: "#4ade80", label: "\u6267\u884C\u547D\u4EE4" },
-  result:   { tagBg: "#dbeafe", tagColor: "#3b82f6", label: "\u5B8C\u6210", borderColor: "#3b82f6" },
+  thinking: { tagBg: "rgba(139,92,246,0.15)", tagColor: "#a78bfa", label: "\u5206\u6790" },
+  text:     { tagBg: "rgba(100,116,139,0.2)", tagColor: "#94a3b8", label: "\u8F93\u51FA" },
+  read:     { tagBg: "rgba(16,185,129,0.12)", tagColor: "#34d399", label: "\u8BFB\u53D6" },
+  edit:     { tagBg: "rgba(249,115,22,0.12)", tagColor: "#fb923c", label: "\u4FEE\u6539\u4EE3\u7801", borderColor: "#f59e0b" },
+  bash:     { tagBg: "#0F172A", tagColor: "#4ade80", label: "\u6267\u884C\u547D\u4EE4" },
+  result:   { tagBg: "rgba(6,182,212,0.12)", tagColor: "#22d3ee", label: "\u5B8C\u6210", borderColor: "#06b6d4" },
 };
 
 const NODE_RESULT_CONFIG: Record<string, { tagBg: string; tagColor: string; label: string; borderColor: string }> = {
-  fix_bug_peer: { tagBg: "#dbeafe", tagColor: "#2563eb", label: "\u4FEE\u590D\u7ED3\u679C", borderColor: "#3b82f6" },
-  verify_fix:   { tagBg: "#dcfce7", tagColor: "#16a34a", label: "\u9A8C\u8BC1\u7ED3\u679C", borderColor: "#22c55e" },
+  fix_bug_peer: { tagBg: "rgba(6,182,212,0.12)", tagColor: "#22d3ee", label: "\u4FEE\u590D\u7ED3\u679C", borderColor: "#06b6d4" },
+  verify_fix:   { tagBg: "rgba(34,197,94,0.12)", tagColor: "#4ade80", label: "\u9A8C\u8BC1\u7ED3\u679C", borderColor: "#22c55e" },
 };
 
 /* ================================================================
@@ -204,7 +204,7 @@ export function ActivityFeed({
 
   if (!currentJob) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-[#e2e8f0] bg-white text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-sm text-slate-400">
         提交任务后，执行日志将在此显示
       </div>
     );
@@ -216,11 +216,11 @@ export function ActivityFeed({
   const isStreaming = aiStats.streaming;
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-[#e2e8f0] bg-white overflow-hidden">
+    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
       {/* ---- Header ---- */}
-      <div className="flex items-center justify-between border-b border-[#e2e8f0] bg-[#f8fafc] px-4 py-3">
+      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[#0f172a]">执行日志</span>
+          <span className="text-sm font-semibold text-white">执行日志</span>
           {isStreaming && (
             <span className="flex items-center gap-1 rounded-full bg-[#fef2f2] px-2 py-0.5">
               <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444] animate-pulse" />
@@ -229,7 +229,7 @@ export function ActivityFeed({
           )}
         </div>
         {currentBugLabel && (
-          <span className="text-xs text-[#64748b]">
+          <span className="text-xs text-slate-400">
             当前: {currentBugLabel} (Bug {inProgressIdx + 1}/{total})
           </span>
         )}
@@ -275,11 +275,11 @@ export function ActivityFeed({
       </div>
 
       {/* ---- Bottom Bar ---- */}
-      <div className="flex items-center gap-2 border-t border-[#e2e8f0] bg-[#f8fafc] px-4 py-2.5">
+      <div className="flex items-center gap-2 border-t border-slate-700 bg-slate-900 px-4 py-2.5">
         {isStreaming ? (
           <>
             <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-            <span className="text-xs text-[#64748b]">
+            <span className="text-xs text-slate-400">
               {getStreamingLabel(allAiEvents)}
             </span>
           </>
@@ -293,7 +293,7 @@ export function ActivityFeed({
         <span className="font-mono text-[11px] text-[#cbd5e1]">
           {aiStats.tokens_in.toLocaleString()} / {aiStats.tokens_out.toLocaleString()} tokens
         </span>
-        <span className="font-mono text-[11px] font-medium text-[#64748b]">
+        <span className="font-mono text-[11px] font-medium text-slate-400">
           ${aiStats.cost.toFixed(2)}
         </span>
       </div>
@@ -318,13 +318,13 @@ function CollapsedBugRow({
   onExpand: () => void;
   onRetry?: () => void;
 }) {
-  const bgColor = bug.status === "completed" ? "#f0fdf4"
-    : bug.status === "failed" || bug.status === "skipped" ? "#fef2f2"
-    : "#f8fafc";
+  const bgColor = bug.status === "completed" ? "rgba(34,197,94,0.08)"
+    : bug.status === "failed" || bug.status === "skipped" ? "rgba(239,68,68,0.08)"
+    : "rgba(30,41,59,0.5)";
 
-  const iconColor = bug.status === "completed" ? "#16a34a"
-    : bug.status === "failed" ? "#dc2626"
-    : "#64748b";
+  const iconColor = bug.status === "completed" ? "#4ade80"
+    : bug.status === "failed" ? "#f87171"
+    : "#94a3b8";
 
   const statusIcon = bug.status === "completed" ? "\u2705"
     : bug.status === "failed" ? "\u274C"
@@ -334,7 +334,7 @@ function CollapsedBugRow({
 
   return (
     <div
-      className="flex w-full items-center gap-2.5 border-b border-[#e2e8f0] px-4 py-3 text-left transition-colors hover:bg-[#f8fafc] cursor-pointer"
+      className="flex w-full items-center gap-2.5 border-b border-slate-700 px-4 py-3 text-left transition-colors hover:bg-slate-700/50 cursor-pointer"
       style={{ backgroundColor: bgColor }}
       onClick={onExpand}
     >
@@ -348,12 +348,12 @@ function CollapsedBugRow({
       {bug.status === "failed" && onRetry && (
         <button
           onClick={(e) => { e.stopPropagation(); onRetry(); }}
-          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-[#2563eb] bg-[#dbeafe] hover:bg-[#bfdbfe] transition-colors"
+          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
         >
           重试
         </button>
       )}
-      <span className="text-[11px] text-[#94a3b8]">展开 ▾</span>
+      <span className="text-[11px] text-slate-500">展开 ▾</span>
     </div>
   );
 }
@@ -384,42 +384,42 @@ function ExpandedBugSection({
   );
 
   return (
-    <div className="border-b border-[#e2e8f0]">
+    <div className="border-b border-slate-700">
       {bug.status !== "in_progress" && (
         <div
           onClick={onCollapse}
-          className="flex w-full items-center gap-2.5 bg-[#f8fafc] px-4 py-2 text-left border-b border-[#f1f5f9] hover:bg-[#f1f5f9] transition-colors cursor-pointer"
+          className="flex w-full items-center gap-2.5 bg-slate-900 px-4 py-2 text-left border-b border-slate-700 hover:bg-slate-700/50 transition-colors cursor-pointer"
         >
           <span className="text-sm">
             {bug.status === "completed" ? "\u2705" : bug.status === "failed" ? "\u274C" : "\u23F3"}
           </span>
-          <span className="font-mono text-[13px] font-semibold text-[#0f172a]">{bug.bug_id}</span>
+          <span className="font-mono text-[13px] font-semibold text-white">{bug.bug_id}</span>
           <div className="flex-1" />
           {bug.status === "failed" && onRetry && (
             <button
               onClick={(e) => { e.stopPropagation(); onRetry(); }}
-              className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-[#2563eb] bg-[#dbeafe] hover:bg-[#bfdbfe] transition-colors"
+              className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
             >
               重试
             </button>
           )}
-          <span className="text-[11px] text-[#94a3b8]">收起 ▴</span>
+          <span className="text-[11px] text-slate-500">收起 ▴</span>
         </div>
       )}
 
       {/* DB sync warnings */}
       {dbSyncWarnings.map((w, i) => (
-        <div key={`dbw-${i}`} className="flex items-center gap-2 bg-[#fffbeb] border-b border-[#fde68a] px-4 py-2">
+        <div key={`dbw-${i}`} className="flex items-center gap-2 bg-amber-500/10 border-b border-amber-500/30 px-4 py-2">
           <span className="text-xs">⚠️</span>
-          <span className="text-xs font-medium text-[#92400e]">{w.message}</span>
-          <span className="ml-auto text-[10px] text-[#d97706]">{formatTime(w.timestamp)}</span>
+          <span className="text-xs font-medium text-amber-400">{w.message}</span>
+          <span className="ml-auto text-[10px] text-amber-500">{formatTime(w.timestamp)}</span>
         </div>
       ))}
 
       {/* Step summary strip — shows pipeline step outcomes with output_preview */}
       {completedSteps.length > 0 && (
-        <div className="border-b border-[#f1f5f9] bg-[#fafafa] px-4 py-2.5 space-y-1.5">
-          <span className="text-[11px] font-semibold text-[#94a3b8] uppercase tracking-wide">步骤摘要</span>
+        <div className="border-b border-slate-700 bg-slate-900/50 px-4 py-2.5 space-y-1.5">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">步骤摘要</span>
           {completedSteps.map((step, i) => (
             <StepOutputRow key={`step-${i}`} step={step} />
           ))}
@@ -430,7 +430,7 @@ function ExpandedBugSection({
         {feedItems.length === 0 ? (
           <div className="flex items-center gap-2 px-4 py-3">
             <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-            <span className="text-xs text-[#64748b]">等待 AI 开始分析...</span>
+            <span className="text-xs text-slate-400">等待 AI 开始分析...</span>
           </div>
         ) : (
           feedItems.map((item, i) => {
@@ -456,13 +456,13 @@ function NodeSeparatorLine({ nodeId, timestamp, bugId }: { nodeId: string; times
   const { icon, label } = getNodeLabel(nodeId);
 
   return (
-    <div className="flex items-center gap-2 bg-[#eff6ff] px-4 py-2.5 border-b border-[#e2e8f0]">
-      <div className="h-px w-5 bg-[#93c5fd]" />
-      <span className="text-xs font-semibold text-[#2563eb]">
+    <div className="flex items-center gap-2 bg-cyan-500/10 px-4 py-2.5 border-b border-slate-700">
+      <div className="h-px w-5 bg-cyan-500/40" />
+      <span className="text-xs font-semibold text-cyan-400">
         {icon} {label} — {bugId}
       </span>
-      <span className="font-mono text-[11px] text-[#93c5fd]">{formatTime(timestamp)}</span>
-      <div className="h-px flex-1 bg-[#93c5fd]" />
+      <span className="font-mono text-[11px] text-cyan-500/50">{formatTime(timestamp)}</span>
+      <div className="h-px flex-1 bg-cyan-500/40" />
     </div>
   );
 }
@@ -473,8 +473,8 @@ function NodeSeparatorLine({ nodeId, timestamp, bugId }: { nodeId: string; times
 
 function AIAvatar() {
   return (
-    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#eff6ff]">
-      <span className="text-[10px] font-bold text-[#3b82f6]">AI</span>
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/10">
+      <span className="text-[10px] font-bold text-cyan-400">AI</span>
     </div>
   );
 }
@@ -505,7 +505,7 @@ function ExploreGroupCard({ group }: { group: ExploreGroup }) {
 
   return (
     <div
-      className="border-b border-[#f1f5f9] px-4 py-3"
+      className="border-b border-slate-700 px-4 py-3"
       data-testid="event-group"
       data-count={count}
     >
@@ -517,23 +517,23 @@ function ExploreGroupCard({ group }: { group: ExploreGroup }) {
             <div className="min-w-0 flex-1">
               <span
                 className="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium"
-                style={{ backgroundColor: "#f3e8ff", color: "#7c3aed" }}
+                style={{ backgroundColor: "rgba(139,92,246,0.15)", color: "#a78bfa" }}
               >
                 💭 分析探索
               </span>
-              <p className="mt-1 text-xs leading-relaxed text-[#334155]">
+              <p className="mt-1 text-xs leading-relaxed text-slate-300">
                 {mainText}{mainText.length >= 80 ? "..." : ""}
               </p>
               {group.lastFile && (
-                <p className="mt-0.5 text-[11px] text-[#64748b]">
-                  最近: <span className="font-mono text-[#0f172a]">{group.lastFile}</span>
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  最近: <span className="font-mono text-slate-200">{group.lastFile}</span>
                 </p>
               )}
-              <p className="mt-0.5 text-[11px] text-[#94a3b8]">
+              <p className="mt-0.5 text-[11px] text-slate-500">
                 {summaryStats}
               </p>
             </div>
-            <span className="shrink-0 text-[11px] text-[#94a3b8]">
+            <span className="shrink-0 text-[11px] text-slate-500">
               {formatRelativeTime(group.timestamp)}
             </span>
           </div>
@@ -542,7 +542,7 @@ function ExploreGroupCard({ group }: { group: ExploreGroup }) {
           {count > 1 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mt-1.5 text-[11px] font-medium text-[#3b82f6] hover:text-[#2563eb]"
+              className="mt-1.5 text-[11px] font-medium text-cyan-400 hover:text-cyan-300"
               data-testid="event-group-expand"
             >
               {expanded ? `收起 ${count} 条详情 ▴` : `展开 ${count} 条详情 ▾`}
@@ -551,7 +551,7 @@ function ExploreGroupCard({ group }: { group: ExploreGroup }) {
 
           {/* Expanded detail list */}
           {expanded && (
-            <div className="mt-2 space-y-1 border-l-2 border-[#e2e8f0] pl-3">
+            <div className="mt-2 space-y-1 border-l-2 border-slate-600 pl-3">
               {group.events.map((evt, i) => (
                 <MiniEventRow key={i} event={evt} />
               ))}
@@ -569,11 +569,11 @@ function MiniEventRow({ event }: { event: AIThinkingEvent }) {
 
   return (
     <div className="flex items-start gap-1.5 text-[11px]">
-      <span className="shrink-0 font-mono text-[#94a3b8] w-[48px]">{formatTime(event.timestamp)}</span>
+      <span className="shrink-0 font-mono text-slate-500 w-[48px]">{formatTime(event.timestamp)}</span>
       <span className="shrink-0 rounded px-1 py-0.5" style={{ backgroundColor: cfg.tagBg, color: cfg.tagColor }}>
         {cfg.label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-[#475569]">
+      <span className="min-w-0 flex-1 truncate text-slate-400">
         {getMiniContent(event)}
       </span>
     </div>
@@ -609,7 +609,7 @@ function EventCard({ event }: { event: AIThinkingEvent }) {
 
   return (
     <div
-      className={`border-b border-[#f1f5f9] px-4 py-3 ${borderColor ? "border-l-[3px]" : ""}`}
+      className={`border-b border-slate-700 px-4 py-3 ${borderColor ? "border-l-[3px]" : ""}`}
       style={borderColor ? { borderLeftColor: borderColor } : undefined}
       data-testid="event-card"
     >
@@ -623,7 +623,7 @@ function EventCard({ event }: { event: AIThinkingEvent }) {
             >
               {isError ? "❌ 执行出错" : cfg.label}
             </span>
-            <span className="shrink-0 text-[11px] text-[#94a3b8]">
+            <span className="shrink-0 text-[11px] text-slate-500">
               {formatRelativeTime(event.timestamp)}
             </span>
           </div>
@@ -645,7 +645,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "thinking":
     case "text":
       return (
-        <p className="text-xs leading-relaxed text-[#334155]">
+        <p className="text-xs leading-relaxed text-slate-300">
           {"content" in event ? event.content : ""}
         </p>
       );
@@ -653,9 +653,9 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "read": {
       const e = event as AIThinkingReadEvent;
       return (
-        <span className="font-mono text-xs text-[#0f172a]">
+        <span className="font-mono text-xs text-slate-200">
           {e.file}
-          {e.lines && <span className="text-[#94a3b8]">  {e.lines}</span>}
+          {e.lines && <span className="text-slate-500">  {e.lines}</span>}
         </span>
       );
     }
@@ -665,14 +665,14 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
       return (
         <div className="space-y-1.5">
           {e.description && (
-            <p className="text-xs text-[#475569]">{e.description}</p>
+            <p className="text-xs text-slate-400">{e.description}</p>
           )}
-          <p className="font-mono text-xs font-medium text-[#0f172a]">{e.file}</p>
+          <p className="font-mono text-xs font-medium text-slate-200">{e.file}</p>
           {e.diff && (
-            <div className="rounded-md bg-[#fefce8] px-2.5 py-2">
+            <div className="rounded-md bg-slate-900 px-2.5 py-2">
               <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
                 {e.diff.split("\n").map((line, i) => (
-                  <span key={i} className={line.startsWith("+") ? "text-[#16a34a]" : line.startsWith("-") ? "text-[#dc2626]" : "text-[#78350f]"}>
+                  <span key={i} className={line.startsWith("+") ? "text-green-400" : line.startsWith("-") ? "text-red-400" : "text-slate-400"}>
                     {line}{"\n"}
                   </span>
                 ))}
@@ -688,9 +688,9 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
       return (
         <div className="space-y-1">
           {e.description && (
-            <p className="text-xs text-[#475569]">{e.description}</p>
+            <p className="text-xs text-slate-400">{e.description}</p>
           )}
-          <div className="rounded-md bg-[#1e293b] px-2.5 py-2 space-y-1">
+          <div className="rounded-md bg-[#0F172A] px-2.5 py-2 space-y-1">
             <p className="font-mono text-[11px] font-medium text-[#4ade80]">
               $ {e.command}
             </p>
@@ -707,11 +707,11 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "result": {
       const isVerify = event.node_id === "verify_fix";
       const isFix = event.node_id === "fix_bug_peer";
-      const borderColor = isVerify ? "#bbf7d0" : isFix ? "#bfdbfe" : "#e2e8f0";
-      const bgColor = isVerify ? "#f0fdf4" : isFix ? "#eff6ff" : "#f8fafc";
+      const borderColor = isVerify ? "rgba(34,197,94,0.3)" : isFix ? "rgba(6,182,212,0.3)" : "rgba(51,65,85,0.5)";
+      const bgColor = isVerify ? "rgba(34,197,94,0.08)" : isFix ? "rgba(6,182,212,0.08)" : "rgba(30,41,59,0.5)";
       return (
         <div className="rounded-md border px-3 py-2" style={{ borderColor, backgroundColor: bgColor }}>
-          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-[#334155]">
+          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
             {event.content}
           </pre>
         </div>
@@ -720,7 +720,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
 
     default:
       return (
-        <p className="text-xs text-[#94a3b8]">
+        <p className="text-xs text-slate-500">
           {"content" in event ? (event as { content: string }).content : JSON.stringify(event)}
         </p>
       );
@@ -746,22 +746,22 @@ function StepOutputRow({ step }: { step: BugStep }) {
   return (
     <div className="flex items-start gap-2 text-xs">
       <span className="shrink-0 mt-0.5">{icon}</span>
-      <span className="shrink-0 font-medium text-[#475569]">{step.label}</span>
+      <span className="shrink-0 font-medium text-slate-300">{step.label}</span>
       <div className="min-w-0 flex-1">
-        <span className={`text-[#64748b] ${!expanded && isLong ? "line-clamp-1" : ""}`}>
+        <span className={`text-slate-400 ${!expanded && isLong ? "line-clamp-1" : ""}`}>
           <OutputPreviewText text={expanded ? preview : (isLong ? preview.slice(0, 80) + "..." : preview)} />
         </span>
         {isLong && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="ml-1 text-[11px] font-medium text-[#3b82f6] hover:text-[#2563eb]"
+            className="ml-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300"
           >
             {expanded ? "收起" : "展开"}
           </button>
         )}
       </div>
       {step.duration_ms != null && step.duration_ms > 0 && (
-        <span className="shrink-0 font-mono text-[10px] text-[#94a3b8]">
+        <span className="shrink-0 font-mono text-[10px] text-slate-500">
           {Math.round(step.duration_ms / 1000)}s
         </span>
       )}
@@ -786,7 +786,7 @@ function OutputPreviewText({ text }: { text: string }) {
             href={part}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[#2563eb] underline hover:text-[#1d4ed8]"
+            className="text-cyan-400 underline hover:text-cyan-300"
             onClick={(e) => e.stopPropagation()}
           >
             {part}

@@ -87,7 +87,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
           readOnly
           value={value || ""}
           placeholder="点击右侧按钮选择目录..."
-          className="text-sm font-mono flex-1 bg-slate-50 cursor-pointer"
+          className="text-sm font-mono flex-1 bg-slate-900 cursor-pointer"
           onClick={() => setOpen(true)}
         />
         <Button
@@ -131,14 +131,14 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
           </div>
 
           {/* Breadcrumb */}
-          <div className="flex items-center gap-1 text-xs text-slate-500 overflow-x-auto">
+          <div className="flex items-center gap-1 text-xs text-slate-400 overflow-x-auto">
             {currentPath.split("/").filter(Boolean).map((segment, i, arr) => {
               const segPath = "/" + arr.slice(0, i + 1).join("/");
               return (
                 <span key={segPath} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-slate-300">/</span>}
+                  {i > 0 && <span className="text-slate-600">/</span>}
                   <button
-                    className="hover:text-blue-600 hover:underline"
+                    className="hover:text-cyan-400 hover:underline"
                     onClick={() => browse(segPath)}
                   >
                     {segment}
@@ -151,7 +151,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
           {/* Directory listing */}
           <div className="border rounded-md max-h-[300px] overflow-y-auto">
             {error && (
-              <div className="p-3 text-sm text-red-600 bg-red-50">{error}</div>
+              <div className="p-3 text-sm text-red-400 bg-red-500/10">{error}</div>
             )}
 
             {loading && (
@@ -163,11 +163,11 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
                 {/* Parent directory */}
                 {parentPath && (
                   <button
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 border-b border-slate-700 flex items-center gap-2"
                     onClick={() => browse(parentPath)}
                   >
-                    <span className="text-slate-400">↑</span>
-                    <span className="text-slate-500">..</span>
+                    <span className="text-slate-500">↑</span>
+                    <span className="text-slate-400">..</span>
                   </button>
                 )}
 
@@ -180,10 +180,10 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
                 {entries.map((entry) => (
                   <button
                     key={entry.path}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b last:border-b-0 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-cyan-500/10 border-b border-slate-700 last:border-b-0 flex items-center gap-2"
                     onClick={() => browse(entry.path)}
                   >
-                    <span className="text-blue-500">📁</span>
+                    <span className="text-cyan-400">📁</span>
                     <span>{entry.name}</span>
                   </button>
                 ))}
@@ -193,7 +193,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
 
           <DialogFooter>
             <div className="flex items-center justify-between w-full">
-              <span className="text-xs text-slate-400 font-mono truncate max-w-[300px]">
+              <span className="text-xs text-slate-500 font-mono truncate max-w-[300px]">
                 {currentPath}
               </span>
               <Button onClick={handleSelect} size="sm">

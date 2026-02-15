@@ -11,6 +11,8 @@ import {
   type DesignRunResponse,
 } from "@/lib/api";
 import type { DesignJob, PipelineEvent } from "../types";
+import type { DesignSpec, ComponentSpec, ComponentUpdate, SemanticRole } from "@/lib/types/design-spec";
+import { applyComponentUpdates } from "@/lib/types/design-spec";
 
 /** Safe JSON.parse — returns null on failure */
 function safeParse(raw: string): unknown | null {
@@ -34,6 +36,8 @@ export function useDesignJob() {
   const [sseConnected, setSseConnected] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
   const [currentNode, setCurrentNode] = useState<string | null>(null);
+  const [designSpec, setDesignSpec] = useState<DesignSpec | null>(null);
+  const [specComplete, setSpecComplete] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryCountRef = useRef(0);
@@ -224,6 +228,80 @@ export function useDesignJob() {
         pushEvent("ai_thinking", data);
       });
 
+      // ---- Design Spec progressive rendering ----
+
+      // frame_decomposed: Node 1 finished — all partial components arrive at once
+      // Backend payload: { components: ComponentSpec[], page: {...}, components_count: N }
+      es.addEventListener("frame_decomposed", (e) => {
+        const data = safeParse(e.data) as Record<string, unknown> | null;
+        if (!data) return;
+        const components = data.components as ComponentSpec[] | undefined;
+        const page = data.page as DesignSpec["page"] | undefined;
+        if (components && components.length > 0) {
+          setDesignSpec((prev) => {
+            if (!prev) {
+              // Initialize spec with all decomposed components
+              return {
+                version: "1.0",
+                source: (data.source as DesignSpec["source"]) ?? {
+                  tool: "figma",
+                  file_key: "",
+                },
+                page: page ?? {},
+                design_tokens: data.design_tokens as
+                  | DesignSpec["design_tokens"]
+                  | undefined,
+                components,
+              };
+            }
+            // Merge components by id
+            const merged = [...prev.components];
+            for (const comp of components) {
+              const idx = merged.findIndex((c) => c.id === comp.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...comp };
+              } else {
+                merged.push(comp);
+              }
+            }
+            return { ...prev, components: merged, page: page ?? prev.page };
+          });
+        }
+        pushEvent("frame_decomposed", data);
+      });
+
+      // spec_analyzed: Node 2 finished one component's semantic analysis
+      // Backend payload: { component_id, component_name, role, description, index, total }
+      es.addEventListener("spec_analyzed", (e) => {
+        const data = safeParse(e.data) as Record<string, unknown> | null;
+        if (!data) return;
+        const componentId = data.component_id as string | undefined;
+        if (componentId) {
+          const update: ComponentUpdate = {
+            id: componentId,
+            role: data.role as SemanticRole | undefined,
+            description: data.description as string | undefined,
+          };
+          setDesignSpec((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              components: applyComponentUpdates(prev.components, [update]),
+            };
+          });
+        }
+        pushEvent("spec_analyzed", data);
+      });
+
+      // spec_complete: Node 3 finished — spec file written
+      // Backend payload: { spec_path, components_count, components_succeeded, components_failed }
+      es.addEventListener("spec_complete", (e) => {
+        const data = safeParse(e.data) as Record<string, unknown> | null;
+        if (!data) return;
+        setSpecComplete(true);
+        pushEvent("spec_complete", data);
+      });
+
       // Final event — always sent
       es.addEventListener("job_done", (e) => {
         const data = safeParse(e.data) as Record<string, unknown> | null;
@@ -325,6 +403,8 @@ export function useDesignJob() {
         setCurrentJob(job);
         setEvents([]);
         setCurrentNode(null);
+        setDesignSpec(null);
+        setSpecComplete(false);
         connectSSE(response.job_id);
         startPolling(response.job_id);
         return response;
@@ -365,6 +445,8 @@ export function useDesignJob() {
     events,
     sseConnected,
     currentNode,
+    designSpec,
+    specComplete,
     submit,
     cancel,
   };

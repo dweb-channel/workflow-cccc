@@ -3,6 +3,10 @@
 import os
 import shutil
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env file from working directory
+
 # Temporal
 TEMPORAL_ADDRESS = os.getenv("TEMPORAL_ADDRESS", "localhost:7233")
 TASK_QUEUE = os.getenv("TEMPORAL_TASK_QUEUE", "business-workflow-task-queue")

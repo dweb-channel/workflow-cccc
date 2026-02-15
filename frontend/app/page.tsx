@@ -713,10 +713,10 @@ function WorkflowPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Workflow List Panel */}
-      <div className="w-[200px] shrink-0 border-r border-slate-200 bg-white overflow-y-auto p-4">
+      <div className="w-[200px] shrink-0 border-r border-slate-700 bg-slate-800/50 overflow-y-auto p-4">
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-xs font-medium text-slate-500">工作流列表</h2>
+            <h2 className="text-xs font-medium text-slate-400">工作流列表</h2>
             <Button
               variant="ghost"
               size="sm"
@@ -729,7 +729,7 @@ function WorkflowPage() {
           </div>
           <div className="space-y-1">
             {workflowList.length === 0 ? (
-              <p className="py-4 text-center text-xs text-slate-400">暂无工作流，点击 + 创建</p>
+              <p className="py-4 text-center text-xs text-slate-500">暂无工作流，点击 + 创建</p>
             ) : (
               workflowList.map((wf) => {
                 const active = wf.id === workflow?.id;
@@ -738,7 +738,7 @@ function WorkflowPage() {
                   <div
                     key={wf.id}
                     className={`group cursor-pointer rounded-lg px-3 py-2 transition-colors ${
-                      active ? "bg-slate-100 ring-1 ring-slate-200" : "hover:bg-slate-50"
+                      active ? "bg-slate-700/50 ring-1 ring-cyan-500/30" : "hover:bg-slate-700/30"
                     }`}
                     onClick={() => handleSwitchWorkflow(wf.id)}
                     onDoubleClick={(e) => handleStartRename(wf, e)}
@@ -746,7 +746,7 @@ function WorkflowPage() {
                     <div className="flex items-center justify-between">
                       {renamingId === wf.id ? (
                         <input
-                          className="w-full rounded border border-blue-300 bg-white px-1 py-0.5 text-sm outline-none focus:ring-1 focus:ring-blue-400"
+                          className="w-full rounded border border-cyan-500/50 bg-slate-700 px-1 py-0.5 text-sm text-white outline-none focus:ring-1 focus:ring-cyan-400"
                           value={renameValue}
                           onChange={(e) => setRenameValue(e.target.value)}
                           onBlur={() => handleConfirmRename(wf.id)}
@@ -758,13 +758,13 @@ function WorkflowPage() {
                           autoFocus
                         />
                       ) : (
-                        <span className={`truncate text-sm ${active ? "font-medium text-slate-900" : "text-slate-600"}`}>
+                        <span className={`truncate text-sm ${active ? "font-medium text-white" : "text-slate-400"}`}>
                           {wf.name}
                         </span>
                       )}
                       {renamingId !== wf.id && (
                         <button
-                          className="ml-1 hidden shrink-0 rounded p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-500 group-hover:block"
+                          className="ml-1 hidden shrink-0 rounded p-0.5 text-slate-500 hover:bg-red-500/10 hover:text-red-400 group-hover:block"
                           onClick={(e) => { e.stopPropagation(); handleDeleteWorkflow(wf.id); }}
                           title="删除"
                         >
@@ -785,7 +785,7 @@ function WorkflowPage() {
           </div>
         </div>
         {/* Template Selector */}
-        <div className="mt-4 border-t border-slate-200 pt-4">
+        <div className="mt-4 border-t border-slate-700 pt-4">
           <TemplateSelector
             onSelectTemplate={handleApplyTemplate}
             disabled={!workflow || running}
@@ -801,7 +801,7 @@ function WorkflowPage() {
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>{workflow.name}</CardTitle>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-400">
               版本 {workflow.version} · 最近更新 {formatRelativeTime(workflow.updated_at)}
             </p>
           </div>
@@ -867,14 +867,14 @@ function WorkflowPage() {
               deleteKeyCode={editorMode === "edit" ? "Backspace" : null}
               fitView
               fitViewOptions={{ maxZoom: 1 }}
-              className={editorMode === "edit" ? "bg-blue-50/30" : "bg-slate-50"}
+              className={editorMode === "edit" ? "bg-slate-900/50" : "bg-[#0F172A]"}
             >
               <Controls />
               <Background
                 variant={BackgroundVariant.Dots}
                 gap={16}
                 size={1}
-                color={editorMode === "edit" ? "#93c5fd" : undefined}
+                color={editorMode === "edit" ? "#22D3EE33" : "#334155"}
               />
             </ReactFlow>
           </CardContent>
@@ -899,14 +899,14 @@ function WorkflowPage() {
                 onDelete={handleEdgeDelete}
               />
             ) : (
-              <div className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-200 px-4 py-3">
-                  <h3 className="font-semibold text-slate-800">工作流设置</h3>
+              <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
+                <div className="border-b border-slate-700 px-4 py-3">
+                  <h3 className="font-semibold text-slate-100">工作流设置</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-600">最大循环迭代次数</label>
+                      <label className="text-xs font-medium text-slate-400">最大循环迭代次数</label>
                       <input
                         type="number"
                         min={1}
@@ -916,14 +916,14 @@ function WorkflowPage() {
                           setMaxIterations(Math.max(1, Math.min(100, Number(e.target.value) || 10)));
                           setGraphChanged(true);
                         }}
-                        className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400"
+                        className="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
                       />
                       <p className="text-[10px] text-slate-400">
                         循环路径中节点的最大重复执行次数（防止无限循环），默认 10
                       </p>
                     </div>
-                    <hr className="border-slate-100" />
-                    <p className="text-xs text-slate-400">点击节点或连接进行配置</p>
+                    <hr className="border-slate-700" />
+                    <p className="text-xs text-slate-500">点击节点或连接进行配置</p>
                   </div>
                 </div>
               </div>
@@ -942,9 +942,9 @@ function WorkflowPage() {
                   placeholder="请输入工作流的初始输入，例如：实现一个用户登录功能，支持邮箱和手机号登录"
                   value={requestText}
                   onChange={(e) => setRequestText(e.target.value)}
-                  className="min-h-[120px] border-emerald-200 focus:border-emerald-500"
+                  className="min-h-[120px] border-slate-600 focus:border-cyan-400"
                 />
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-400">
                   作为 initial_state.request 传递给工作流入口节点
                 </p>
               </div>
@@ -960,10 +960,10 @@ function WorkflowPage() {
             <CardTitle className="text-sm">执行日志</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="max-h-48 overflow-y-auto rounded bg-slate-50 p-3 text-xs font-mono">
+            <div className="max-h-48 overflow-y-auto rounded bg-slate-900 p-3 text-xs font-mono">
               {executionStatus.sseEvents.map((event, idx) => (
-                <div key={idx} className={`${event.type === 'error' ? 'text-red-600' : event.type === 'completed' ? 'text-emerald-600' : 'text-slate-600'}`}>
-                  <span className="text-slate-400">[{event.time}]</span> {event.message}
+                <div key={idx} className={`${event.type === 'error' ? 'text-red-400' : event.type === 'completed' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  <span className="text-slate-500">[{event.time}]</span> {event.message}
                 </div>
               ))}
             </div>
@@ -982,7 +982,7 @@ function WorkflowPage() {
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <p className="text-slate-400">请从左侧选择工作流，或点击 + 创建新工作流</p>
+            <p className="text-slate-500">请从左侧选择工作流，或点击 + 创建新工作流</p>
           </div>
         </div>
       )}

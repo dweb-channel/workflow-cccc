@@ -33,10 +33,10 @@ export function CircularDependencyErrorActionable({
     isBackEdge: idx === cycle_path.length - 2
   }));
 
-  const borderColor = isWarning ? "border-amber-200" : "border-red-200";
-  const bgColor = isWarning ? "bg-amber-50" : "bg-red-50";
+  const borderColor = isWarning ? "border-amber-800" : "border-red-800";
+  const bgColor = isWarning ? "bg-amber-950" : "bg-red-950";
   const iconColor = isWarning ? "text-amber-600" : "text-red-600";
-  const pathBorder = isWarning ? "border-amber-200" : "border-red-200";
+  const pathBorder = isWarning ? "border-amber-800" : "border-red-800";
   const arrowColor = isWarning ? "text-amber-500" : "text-red-500";
   const Icon = isWarning ? AlertTriangle : XCircle;
 
@@ -49,10 +49,10 @@ export function CircularDependencyErrorActionable({
       <div className="flex items-start gap-3 mb-3">
         <Icon className={`h-5 w-5 ${iconColor} flex-shrink-0 mt-0.5`} />
         <div className="flex-1">
-          <h4 className="text-sm font-semibold text-gray-900">
+          <h4 className="text-sm font-semibold text-white">
             {isWarning ? "检测到受控循环" : "检测到循环依赖"}
           </h4>
-          <p className="text-sm text-gray-700 mt-1">
+          <p className="text-sm text-slate-300 mt-1">
             {message}
           </p>
         </div>
@@ -60,15 +60,15 @@ export function CircularDependencyErrorActionable({
 
       {/* Controlled loop info */}
       {isWarning && condition_node_id && (
-        <div className="ml-8 mb-3 rounded border border-amber-200 bg-white p-3">
+        <div className="ml-8 mb-3 rounded border border-amber-800 bg-slate-800 p-3">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-amber-600">🔀</span>
-            <span className="text-gray-700">
-              由 <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs text-amber-800">{condition_node_id}</code> 控制退出
+            <span className="text-slate-300">
+              由 <code className="rounded bg-amber-900/50 px-1.5 py-0.5 font-mono text-xs text-amber-300">{condition_node_id}</code> 控制退出
             </span>
           </div>
           {max_iterations != null && (
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-slate-400">
               最大迭代次数: {max_iterations}
             </p>
           )}
@@ -77,12 +77,12 @@ export function CircularDependencyErrorActionable({
 
       {/* Cycle Path Visualization */}
       <div className="ml-8 mb-3">
-        <p className="text-sm font-medium text-gray-700 mb-2">
+        <p className="text-sm font-medium text-slate-300 mb-2">
           循环路径 ({cycle_path.length} 个节点):
         </p>
         <div
           data-testid="cycle-path-visualization"
-          className={`bg-white rounded border ${pathBorder} p-3`}
+          className={`bg-slate-800 rounded border ${pathBorder} p-3`}
         >
           <div className="flex flex-wrap items-center gap-2">
             {cycle_path.map((nodeId, idx) => (
@@ -91,12 +91,12 @@ export function CircularDependencyErrorActionable({
                   data-testid={`cycle-node-${idx}`}
                   className={`px-2 py-1 rounded font-mono text-xs ${
                     nodeId === condition_node_id
-                      ? 'bg-amber-200 text-amber-900 font-bold'
+                      ? 'bg-amber-900/50 text-amber-300 font-bold'
                       : idx === 0
                         ? isWarning
-                          ? 'bg-amber-100 text-amber-800 font-bold'
-                          : 'bg-red-200 text-red-900 font-bold'
-                        : 'bg-gray-100 text-gray-800'
+                          ? 'bg-amber-900/50 text-amber-300 font-bold'
+                          : 'bg-red-900/50 text-red-300 font-bold'
+                        : 'bg-slate-700/50 text-slate-200'
                   }`}
                 >
                   {nodeId}
@@ -113,7 +113,7 @@ export function CircularDependencyErrorActionable({
       {/* Break Cycle Actions (only for errors, not warnings) */}
       {!isWarning && (
         <div className="ml-8 space-y-2">
-          <p className="text-sm font-medium text-gray-700">
+          <p className="text-sm font-medium text-slate-300">
             打断循环 (删除以下任一连接):
           </p>
           <div
@@ -134,7 +134,7 @@ export function CircularDependencyErrorActionable({
                 >
                   删除连接
                 </Button>
-                <span className="text-gray-700">
+                <span className="text-slate-300">
                   {edge.source} → {edge.target}
                   {edge.isBackEdge && (
                     <span className="ml-2 text-red-600 text-xs">(回环边)</span>
