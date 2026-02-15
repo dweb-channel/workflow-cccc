@@ -501,6 +501,27 @@ def _should_recurse(node: Dict, width: float, height: float, depth: int) -> bool
     return True
 
 
+def _normalize_bounds(spec: Dict, origin_x: float, origin_y: float) -> Dict:
+    """Normalize canvas-absolute bounds to page-relative coordinates.
+
+    Subtracts page origin so (0, 0) = top-left of the page/frame.
+    Recurses into children if present.
+    """
+    if "bounds" in spec:
+        b = spec["bounds"]
+        spec["bounds"] = {
+            "x": round(b["x"] - origin_x),
+            "y": round(b["y"] - origin_y),
+            "width": round(b.get("width", 0)),
+            "height": round(b.get("height", 0)),
+        }
+    if "children" in spec and isinstance(spec["children"], list):
+        spec["children"] = [
+            _normalize_bounds(c, origin_x, origin_y) for c in spec["children"]
+        ]
+    return spec
+
+
 # ---------------------------------------------------------------------------
 # Core: Figma node → ComponentSpec mapping
 # ---------------------------------------------------------------------------
@@ -830,14 +851,18 @@ class FrameDecomposerNode(BaseNodeImpl):
                 components.append(spec)
                 children_bounds.append(spec["bounds"])
 
+        # Normalize canvas-absolute coords → page-relative
+        page_bbox = page_doc.get("absoluteBoundingBox", {})
+        origin_x = page_bbox.get("x", 0)
+        origin_y = page_bbox.get("y", 0)
+        components = [_normalize_bounds(c, origin_x, origin_y) for c in components]
+        children_bounds = [c["bounds"] for c in components]
+
         # Detect page-level layout
         if len(components) <= 1:
             page_layout: Dict[str, Any] = {"type": "flex", "direction": "column"}
         else:
             page_layout = detect_container_layout(page_doc, children_bounds)
-
-        # Build page metadata
-        page_bbox = page_doc.get("absoluteBoundingBox", {})
         page_width = page_bbox.get("width", 0)
         page_height = page_bbox.get("height", 0)
 
@@ -1113,52 +1138,58 @@ class SpecAnalyzerNode(BaseNodeImpl):
             }
 
         stats = {"total": len(components), "succeeded": 0, "failed": 0}
-        analyzed_components: List[Dict] = []
 
-        for idx, component in enumerate(components):
+        # Concurrent analysis with semaphore to limit parallel CLI processes
+        import asyncio
+        _CLI_CONCURRENCY = 3
+        sem = asyncio.Semaphore(_CLI_CONCURRENCY)
+
+        async def _analyze_one(idx: int, component: Dict) -> Dict:
             comp_name = component.get("name", f"component_{idx}")
             comp_id = component.get("id", "")
             logger.info(
                 "SpecAnalyzerNode [%s]: analyzing %s (%d/%d)",
                 self.node_id, comp_name, idx + 1, len(components),
             )
+            async with sem:
+                try:
+                    result = await self._analyze_single_component(
+                        claude_bin=claude_bin,
+                        component=component,
+                        page=page,
+                        design_tokens=design_tokens,
+                        device=device,
+                        page_layout=page_layout,
+                        sibling_names=sibling_names,
+                        cwd=cwd,
+                        model=model,
+                    )
+                    stats["succeeded"] += 1
 
-            try:
-                result = await self._analyze_single_component(
-                    claude_bin=claude_bin,
-                    component=component,
-                    page=page,
-                    design_tokens=design_tokens,
-                    device=device,
-                    page_layout=page_layout,
-                    sibling_names=sibling_names,
-                    cwd=cwd,
-                    model=model,
-                )
-                analyzed_components.append(result)
-                stats["succeeded"] += 1
+                    # Push SSE event for this component
+                    if run_id:
+                        from ..sse import push_sse_event
+                        await push_sse_event(run_id, "spec_analyzed", {
+                            "component_id": comp_id,
+                            "component_name": comp_name,
+                            "role": result.get("role"),
+                            "description": result.get("description", "")[:200],
+                            "index": idx,
+                            "total": len(components),
+                        })
 
-                # Push SSE event for this component
-                if run_id:
-                    from ..sse import push_sse_event
-                    await push_sse_event(run_id, "spec_analyzed", {
-                        "component_id": comp_id,
-                        "component_name": comp_name,
-                        "role": result.get("role"),
-                        "description": result.get("description", "")[:200],
-                        "index": idx,
-                        "total": len(components),
-                    })
+                    return result
+                except Exception as e:
+                    logger.error(
+                        "SpecAnalyzerNode [%s]: failed to analyze %s: %s",
+                        self.node_id, comp_name, e,
+                    )
+                    stats["failed"] += 1
+                    return {**component, "_analysis_failed": True}
 
-            except Exception as e:
-                logger.error(
-                    "SpecAnalyzerNode [%s]: failed to analyze %s: %s",
-                    self.node_id, comp_name, e,
-                )
-                # Preserve original component, mark as failed
-                failed = {**component, "_analysis_failed": True}
-                analyzed_components.append(failed)
-                stats["failed"] += 1
+        analyzed_components = await asyncio.gather(
+            *[_analyze_one(i, c) for i, c in enumerate(components)]
+        )
 
         logger.info(
             "SpecAnalyzerNode [%s]: done — %d/%d succeeded",
@@ -1268,13 +1299,13 @@ class SpecAnalyzerNode(BaseNodeImpl):
 
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=120.0,
+                proc.communicate(), timeout=300.0,
             )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()
             raise TimeoutError(
-                f"Claude CLI timed out (120s) for {component.get('name')}"
+                f"Claude CLI timed out (300s) for {component.get('name')}"
             )
 
         raw_text = stdout.decode("utf-8", errors="replace").strip()

@@ -1506,29 +1506,8 @@ async def _execute_spec_pipeline(
             page_doc = page_data.get("document", {})
             page_name = page_doc.get("name", "")
 
-            # 1a-bis. resolve_to_page: if node is too small, find parent page
-            resolved = await client.resolve_to_page(file_key, node_id, page_doc)
-            if resolved:
-                old_node_id = node_id
-                node_id = resolved["page_id"]
-                logger.info(
-                    f"Job {job_id}: resolve_to_page — "
-                    f"{old_node_id} → {node_id} (page '{resolved['page_name']}')"
-                )
-                push_node_event(job_id, "node_output", {
-                    "node_id": "resolve_to_page",
-                    "message": (
-                        f"节点 \"{page_name}\" 太小，已自动切换到页面 "
-                        f"\"{resolved['page_name']}\""
-                    ),
-                })
-                # Re-fetch with the resolved page node
-                nodes_resp = await client.get_file_nodes(file_key, [node_id])
-                file_name = nodes_resp.get("name", file_name)
-                nodes_data = nodes_resp.get("nodes", {})
-                page_data = nodes_data.get(node_id, {})
-                page_doc = page_data.get("document", {})
-                page_name = page_doc.get("name", "")
+            # Skip resolve_to_page — user targets the exact Frame they want.
+            # The scan-figma endpoint still uses resolve_to_page for discovery.
 
             # 1b. Collect top-level children IDs for screenshots
             children = page_doc.get("children", [])

@@ -116,6 +116,10 @@ def _merge_into_component(
         component["description"] = update["description"]
     if "render_hint" in update and update["render_hint"] is not None:
         component["render_hint"] = update["render_hint"]
+    # LLM-suggested semantic name replaces Figma layer name
+    suggested = update.get("suggested_name")
+    if suggested and isinstance(suggested, str) and suggested.strip():
+        component["name"] = suggested.strip()
 
     # Content updates (image.alt, icon.name)
     content_updates = update.get("content_updates")

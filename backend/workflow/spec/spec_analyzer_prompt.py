@@ -31,6 +31,7 @@ You must fill the **semantic fields** that require visual understanding:
 ```
 {
   "role": "<one of the 19 roles below>",
+  "suggested_name": "<PascalCase semantic name, e.g. Header, PhotoGallery, HeroBanner>",
   "description": "<clear, unambiguous natural language description>",
   "render_hint": "<full | spacer | platform | null>",
   "content_updates": {
@@ -44,17 +45,7 @@ You must fill the **semantic fields** that require visual understanding:
     "states": [
       {"name": "<hover|active|disabled|selected|loading|empty|error>", "description": "<what changes>"}
     ]
-  },
-  "children_updates": [
-    {
-      "id": "<child node id>",
-      "role": "<role>",
-      "description": "<description>",
-      "render_hint": "<full | spacer | platform | null>",
-      "content_updates": { "image_alt": null, "icon_name": null },
-      "interaction": { "behaviors": [], "states": [] }
-    }
-  ]
+  }
 }
 ```
 
@@ -126,12 +117,6 @@ Infer interactions from visual cues + component role:
   `"page"` for page-level navigation (browser/router), \
   or a specific component name for targeting another element
 
-### Recursive Children Processing
-
-The `children_updates` array must contain one entry for **every child** \
-in the partial spec's `children` array (matched by `id`). \
-For deeply nested children, flatten ALL descendants into `children_updates` \
-with their full `id`.
 """
 
 SPEC_ANALYZER_USER_PROMPT = """\
@@ -151,13 +136,14 @@ Analyze this UI component and fill its semantic fields.
 
 ## Instructions
 1. First, look at the screenshot carefully. Describe to yourself what you see.
-2. Cross-reference with the structural data above (bounds, layout, style, typography, children).
-3. Determine the `role` for this component and each child/descendant.
-4. Write a clear `description` for this component and each child/descendant.
-5. Check if any element is a system element (StatusBar, HomeIndicator, etc.) → set `render_hint`.
-6. For image elements, write descriptive `alt` text based on what you see in the screenshot.
-7. For icon elements, identify the icon shape and assign a standard name (e.g., "close", "arrow-left", "more-horizontal", "search", "heart").
-8. Infer interaction behaviors from the component's role and visual affordances.
+2. Cross-reference with the structural data above (bounds, layout, style, typography).
+3. Determine the `role` for this component.
+4. Suggest a semantic PascalCase `suggested_name` based on what you see (e.g. "Header", "PhotoGallery", "HeroBanner"). Ignore the original Figma layer name.
+5. Write a clear `description` for this component.
+6. Check if this is a system element (StatusBar, HomeIndicator, etc.) → set `render_hint`.
+7. For image elements, write descriptive `alt` text based on what you see in the screenshot.
+8. For icon elements, identify the icon shape and assign a standard name (e.g., "close", "arrow-left", "more-horizontal", "search", "heart").
+9. Infer interaction behaviors from the component's role and visual affordances.
 
 Return a single JSON object following the schema defined in the system prompt. \
 No markdown, no explanation — just the JSON object."""
@@ -177,6 +163,7 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
             ],
         },
         "description": {"type": "string"},
+        "suggested_name": {"type": "string"},
         "render_hint": {
             "type": ["string", "null"],
             "enum": ["full", "spacer", "platform", None],
@@ -214,21 +201,6 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
                             "description": {"type": "string"},
                         },
                     },
-                },
-            },
-        },
-        "children_updates": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["id", "role", "description"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "role": {"type": "string"},
-                    "description": {"type": "string"},
-                    "render_hint": {"type": ["string", "null"]},
-                    "content_updates": {"type": "object"},
-                    "interaction": {"type": "object"},
                 },
             },
         },
