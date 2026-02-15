@@ -898,28 +898,6 @@ from ..spec.spec_analyzer_prompt import (
 from ..spec.spec_merger import merge_analyzer_output
 
 
-def _encode_screenshot_b64(screenshot_path: str, cwd: str) -> Optional[str]:
-    """Read screenshot file and return base64-encoded string, or None."""
-    import base64
-
-    if not screenshot_path:
-        return None
-    abs_path = (
-        screenshot_path
-        if os.path.isabs(screenshot_path)
-        else os.path.join(cwd, screenshot_path)
-    )
-    if not os.path.isfile(abs_path):
-        logger.warning("SpecAnalyzerNode: screenshot not found: %s", abs_path)
-        return None
-    try:
-        with open(abs_path, "rb") as f:
-            return base64.b64encode(f.read()).decode("ascii")
-    except Exception as e:
-        logger.warning("SpecAnalyzerNode: failed to read screenshot: %s", e)
-        return None
-
-
 def _strip_semantic_fields(spec: Dict) -> Dict:
     """Create a copy of ComponentSpec with semantic fields nulled out.
 
@@ -974,7 +952,7 @@ def _parse_analyzer_json(raw: str) -> Optional[Dict]:
     node_type="spec_analyzer",
     display_name="Spec Analyzer",
     description=(
-        "Uses Anthropic SDK vision API to fill semantic fields "
+        "Uses Claude CLI with vision to fill semantic fields "
         "(role, description, interaction) in ComponentSpecs. "
         "Processes each frame with screenshot + partial spec."
     ),
@@ -1010,9 +988,9 @@ class SpecAnalyzerNode(BaseNodeImpl):
     """Node 2: SpecAnalyzer — LLM vision analysis for semantic fields.
 
     For each top-level component:
-    1. Reads screenshot (screenshot_path → base64)
-    2. Builds prompt (partial spec JSON + page context + screenshot)
-    3. Calls Anthropic SDK with vision
+    1. Resolves screenshot absolute path
+    2. Builds prompt (partial spec JSON + page context + screenshot ref)
+    3. Calls Claude CLI subprocess with vision (Read tool for images)
     4. Parses returned JSON, merges into ComponentSpec
     5. Sends SSE event per completed component
     """
@@ -1038,24 +1016,17 @@ class SpecAnalyzerNode(BaseNodeImpl):
         page_layout = page.get("layout", {})
         sibling_names = [c.get("name", "?") for c in components]
 
-        # Initialize async Anthropic client (non-blocking in async context)
-        try:
-            import anthropic
-            client = anthropic.AsyncAnthropic()
-        except ImportError:
+        # Verify claude CLI is available
+        import shutil
+        claude_bin = shutil.which("claude")
+        if not claude_bin:
             logger.error(
-                "SpecAnalyzerNode: anthropic package not installed. "
-                "Run: pip install anthropic"
+                "SpecAnalyzerNode: 'claude' CLI not found in PATH. "
+                "Install Claude Code: https://code.claude.com"
             )
             return {
                 "components": components,
-                "analysis_stats": {"error": "anthropic package not installed"},
-            }
-        except Exception as e:
-            logger.error("SpecAnalyzerNode: failed to init Anthropic client: %s", e)
-            return {
-                "components": components,
-                "analysis_stats": {"error": str(e)},
+                "analysis_stats": {"error": "claude CLI not found in PATH"},
             }
 
         stats = {"total": len(components), "succeeded": 0, "failed": 0}
@@ -1071,7 +1042,7 @@ class SpecAnalyzerNode(BaseNodeImpl):
 
             try:
                 result = await self._analyze_single_component(
-                    client=client,
+                    claude_bin=claude_bin,
                     component=component,
                     page=page,
                     design_tokens=design_tokens,
@@ -1080,7 +1051,6 @@ class SpecAnalyzerNode(BaseNodeImpl):
                     sibling_names=sibling_names,
                     cwd=cwd,
                     model=model,
-                    max_tokens=max_tokens,
                 )
                 analyzed_components.append(result)
                 stats["succeeded"] += 1
@@ -1119,7 +1089,7 @@ class SpecAnalyzerNode(BaseNodeImpl):
 
     async def _analyze_single_component(
         self,
-        client: Any,
+        claude_bin: str,
         component: Dict,
         page: Dict,
         design_tokens: Dict,
@@ -1128,9 +1098,10 @@ class SpecAnalyzerNode(BaseNodeImpl):
         sibling_names: List[str],
         cwd: str,
         model: str,
-        max_tokens: int,
     ) -> Dict:
-        """Analyze a single component with Anthropic vision API."""
+        """Analyze a single component using Claude CLI subprocess."""
+        import asyncio
+
         # Build partial spec (structural data only)
         partial_spec = _strip_semantic_fields(component)
         partial_spec_json = json.dumps(partial_spec, ensure_ascii=False, indent=2)
@@ -1150,49 +1121,110 @@ class SpecAnalyzerNode(BaseNodeImpl):
             partial_spec_json=partial_spec_json,
         )
 
-        # Build message content (text + optional image)
-        content: List[Dict] = []
+        # Resolve screenshot absolute path for CLI Read tool
+        screenshot_path = component.get("screenshot_path", "")
+        screenshot_abs = ""
+        if screenshot_path:
+            screenshot_abs = (
+                screenshot_path
+                if os.path.isabs(screenshot_path)
+                else os.path.join(cwd, screenshot_path)
+            )
+            if not os.path.isfile(screenshot_abs):
+                logger.warning(
+                    "SpecAnalyzerNode: screenshot not found: %s", screenshot_abs
+                )
+                screenshot_abs = ""
 
-        # Add screenshot if available
-        screenshot_b64 = _encode_screenshot_b64(
-            component.get("screenshot_path", ""), cwd
+        # Build the full prompt for CLI: system prompt + screenshot ref + user prompt
+        cli_prompt_parts = [
+            SPEC_ANALYZER_SYSTEM_PROMPT,
+            "",
+        ]
+        if screenshot_abs:
+            cli_prompt_parts.append(
+                f"First, read the screenshot image at: {screenshot_abs}"
+            )
+            cli_prompt_parts.append(
+                "Use this screenshot as visual context for your analysis."
+            )
+            cli_prompt_parts.append("")
+        cli_prompt_parts.append(user_text)
+        cli_prompt = "\n".join(cli_prompt_parts)
+
+        # Build CLI command
+        cmd = [
+            claude_bin,
+            "-p", cli_prompt,
+            "--output-format", "json",
+            "--model", model,
+            "--dangerously-skip-permissions",
+            "--no-session-persistence",
+        ]
+        if screenshot_abs:
+            cmd.extend(["--allowedTools", "Read"])
+        else:
+            cmd.extend(["--tools", ""])
+
+        # Build env: inherit current env but remove CLAUDECODE to avoid
+        # nested session detection
+        cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+        logger.info(
+            "SpecAnalyzerNode [%s]: calling claude CLI for %s",
+            self.node_id, component.get("name", "?"),
         )
-        if screenshot_b64:
-            content.append({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/png",
-                    "data": screenshot_b64,
-                },
-            })
 
-        content.append({"type": "text", "text": user_text})
-
-        # Call Anthropic API (async — non-blocking)
-        response = await client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            system=SPEC_ANALYZER_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": content}],
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=cli_env,
         )
 
-        # Extract text response
-        raw_text = ""
-        for block in response.content:
-            if hasattr(block, "text"):
-                raw_text += block.text
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=120.0,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            raise TimeoutError(
+                f"Claude CLI timed out (120s) for {component.get('name')}"
+            )
+
+        if proc.returncode != 0:
+            err_msg = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Claude CLI failed (exit {proc.returncode}) for "
+                f"{component.get('name')}: {err_msg[:500]}"
+            )
+
+        raw_text = stdout.decode("utf-8", errors="replace").strip()
+
+        # --output-format json wraps the response in a JSON envelope
+        # with a "result" field containing the text
+        cli_output = None
+        try:
+            cli_output = json.loads(raw_text)
+        except json.JSONDecodeError:
+            pass
+
+        # Extract the actual text content from CLI JSON envelope
+        if isinstance(cli_output, dict) and "result" in cli_output:
+            raw_text = cli_output["result"]
+        elif isinstance(cli_output, dict) and "content" in cli_output:
+            raw_text = cli_output["content"]
 
         # Parse JSON output — raise on failure so execute() counts it as failed
         analyzer_output = _parse_analyzer_json(raw_text)
         if not analyzer_output:
             raise ValueError(
-                f"JSON parse failed for {component.get('name')}"
+                f"JSON parse failed for {component.get('name')}, "
+                f"raw[:300]: {raw_text[:300]}"
             )
 
         # Merge LLM output into component using spec_merger
-        # (handles deepcopy, content_updates, interaction states merge,
-        #  children_updates flattened→recursive, transitions preservation)
         return merge_analyzer_output(component, analyzer_output)
 
 
