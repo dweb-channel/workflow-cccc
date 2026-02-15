@@ -120,7 +120,7 @@ function ComponentRow({
 
       {/* Bottom line: size + layout summary */}
       <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
-        <span>{component.bounds.width}x{component.bounds.height}</span>
+        <span>{Math.round(component.bounds.width)}x{Math.round(component.bounds.height)}</span>
         {layoutSummary && (
           <>
             <span className="text-slate-600">|</span>

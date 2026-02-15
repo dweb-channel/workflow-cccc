@@ -58,8 +58,8 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
         )}
         {/* Bounds */}
         <div className="mt-1.5 flex gap-3 text-[10px] text-slate-500 font-mono">
-          <span>x:{component.bounds.x} y:{component.bounds.y}</span>
-          <span>{component.bounds.width} x {component.bounds.height}</span>
+          <span>x:{Math.round(component.bounds.x)} y:{Math.round(component.bounds.y)}</span>
+          <span>{Math.round(component.bounds.width)} x {Math.round(component.bounds.height)}</span>
           <span>id: {component.id}</span>
         </div>
       </div>
