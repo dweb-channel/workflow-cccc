@@ -3,11 +3,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   submitDesignRun,
-  submitFigmaRun,
+  submitSpecRun,
   getDesignJobStatus,
   getDesignJobStreamUrl,
   type DesignRunRequest,
-  type FigmaRunRequest,
+  type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
 import type { DesignJob, PipelineEvent } from "../types";
@@ -381,14 +381,14 @@ export function useDesignJob() {
   // --- Submit ---
   const submit = useCallback(
     async (
-      request: DesignRunRequest | FigmaRunRequest
+      request: DesignRunRequest | SpecRunRequest
     ): Promise<DesignRunResponse | null> => {
       setSubmitting(true);
       setSubmitError(null);
       try {
-        const isFigma = "figma_url" in request;
-        const response = isFigma
-          ? await submitFigmaRun(request as FigmaRunRequest)
+        const isSpec = "figma_url" in request;
+        const response = isSpec
+          ? await submitSpecRun(request as SpecRunRequest)
           : await submitDesignRun(request as DesignRunRequest);
         const job: DesignJob = {
           job_id: response.job_id,

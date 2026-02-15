@@ -41,6 +41,9 @@ const EVENT_CONFIG: Record<string, { tagBg: string; tagColor: string; label: str
   job_done: { tagBg: "rgba(6,182,212,0.15)", tagColor: "#22d3ee", label: "任务结束" },
   figma_fetch_start: { tagBg: "rgba(139,92,246,0.12)", tagColor: "#a78bfa", label: "Figma 获取" },
   figma_fetch_complete: { tagBg: "rgba(34,197,94,0.12)", tagColor: "#4ade80", label: "Figma 完成" },
+  frame_decomposed: { tagBg: "rgba(6,182,212,0.15)", tagColor: "#22d3ee", label: "结构分解" },
+  spec_analyzed: { tagBg: "rgba(139,92,246,0.15)", tagColor: "#a78bfa", label: "语义分析" },
+  spec_complete: { tagBg: "rgba(34,197,94,0.15)", tagColor: "#4ade80", label: "规格完成" },
 };
 
 function getNodeLabel(nodeId: string) {

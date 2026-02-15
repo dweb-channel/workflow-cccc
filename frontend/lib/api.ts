@@ -707,6 +707,21 @@ export async function submitFigmaRun(payload: FigmaRunRequest): Promise<DesignRu
   return handleResponse<DesignRunResponse>(response);
 }
 
+export interface SpecRunRequest {
+  figma_url: string;
+  output_dir: string;
+  model?: string;
+}
+
+export async function submitSpecRun(payload: SpecRunRequest): Promise<DesignRunResponse> {
+  const response = await fetch(`${API_BASE}/api/v2/design/run-spec`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<DesignRunResponse>(response);
+}
+
 export async function getDesignJobStatus(jobId: string): Promise<DesignJobStatusResponse> {
   const response = await fetch(`${API_BASE}/api/v2/design/${jobId}`);
   return handleResponse<DesignJobStatusResponse>(response);

@@ -16,7 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileEdit, Play, Palette, Link, FileJson, Search, Loader2 } from "lucide-react";
+import { FileEdit, Play, Palette, Link, FileJson, Loader2 } from "lucide-react";
 
 import { useDesignJob } from "./hooks/useDesignJob";
 import { DesignEventFeed } from "./components/DesignEventFeed";
@@ -181,7 +181,6 @@ function DesignToCodeContent() {
         ? {
             figma_url: figmaUrl.trim(),
             output_dir: outputDir.trim(),
-            max_retries: maxRetries,
           }
         : {
             design_file: designFile.trim(),
@@ -368,34 +367,37 @@ function DesignToCodeContent() {
                           <Input
                             value={outputDir}
                             onChange={(e) => setOutputDir(e.target.value)}
-                            placeholder="output/generated"
+                            placeholder="output/spec"
                             className="font-mono text-sm"
                           />
                           <p className="text-xs text-slate-400">
-                            生成的 React + Tailwind 代码将输出到此目录
+                            生成的 design_spec.json 将输出到此目录
                           </p>
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-xs">
-                            最大重试次数 (每个组件)
-                          </Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={5}
-                            value={maxRetries}
-                            onChange={(e) =>
-                              setMaxRetries(
-                                Math.min(5, Math.max(0, Number(e.target.value)))
-                              )
-                            }
-                            className="w-24 font-mono text-sm"
-                          />
-                          <p className="text-xs text-slate-400">
-                            组件视觉验证不通过时的最大重试次数（0-5）
-                          </p>
-                        </div>
+                        {/* Max retries — only for JSON/code pipeline mode */}
+                        {inputMode === "json" && (
+                          <div className="space-y-2">
+                            <Label className="text-xs">
+                              最大重试次数 (每个组件)
+                            </Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={5}
+                              value={maxRetries}
+                              onChange={(e) =>
+                                setMaxRetries(
+                                  Math.min(5, Math.max(0, Number(e.target.value)))
+                                )
+                              }
+                              className="w-24 font-mono text-sm"
+                            />
+                            <p className="text-xs text-slate-400">
+                              组件视觉验证不通过时的最大重试次数（0-5）
+                            </p>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
 
@@ -405,36 +407,15 @@ function DesignToCodeContent() {
                       </div>
                     )}
 
-                    {/* Figma mode: Scan button → classify → confirm → submit */}
-                    {/* JSON mode: Direct submit */}
-                    {inputMode === "figma" ? (
-                      <Button
-                        className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
-                        onClick={handleScan}
-                        disabled={scanStep === "scanning" || !figmaUrl.trim() || !outputDir.trim()}
-                      >
-                        {scanStep === "scanning" ? (
-                          <>
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                            扫描分析中...
-                          </>
-                        ) : (
-                          <>
-                            <Search className="mr-1.5 h-3.5 w-3.5" />
-                            扫描设计稿
-                          </>
-                        )}
-                      </Button>
-                    ) : (
-                      <Button
-                        className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
-                        onClick={handleSubmit}
-                        disabled={submitting || !canSubmit}
-                      >
-                        <Play className="mr-1.5 h-3.5 w-3.5" />
-                        {submitting ? "提交中..." : "开始生成"}
-                      </Button>
-                    )}
+                    {/* Direct submit for both modes */}
+                    <Button
+                      className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
+                      onClick={handleSubmit}
+                      disabled={submitting || !canSubmit}
+                    >
+                      <Play className="mr-1.5 h-3.5 w-3.5" />
+                      {submitting ? "提交中..." : inputMode === "figma" ? "生成设计规格" : "开始生成"}
+                    </Button>
                   </div>
 
                   {/* Right: Pipeline info card */}
@@ -635,23 +616,23 @@ function DesignToCodeContent() {
 const PIPELINE_STAGES = [
   {
     icon: "1\uFE0F\u20E3",
-    label: "设计分析",
-    desc: "解析 design_export.json，提取组件列表和 design tokens",
+    label: "Figma 数据获取",
+    desc: "获取 Figma 节点树、截图和 Design Tokens（颜色/字体/间距）",
   },
   {
     icon: "2\uFE0F\u20E3",
-    label: "骨架生成",
-    desc: "生成页面骨架 PageSkeleton.tsx，包含组件 slot 占位",
+    label: "结构分解",
+    desc: "解析节点树，提取组件层级、布局、样式和尺寸信息（70% 数据）",
   },
   {
     icon: "3\uFE0F\u20E3",
-    label: "组件循环",
-    desc: "逐个生成每个组件的 React + Tailwind 代码，通过视觉验证后进入下一个",
+    label: "语义分析",
+    desc: "AI 分析每个组件的语义角色、描述和交互行为（30% 数据）",
   },
   {
     icon: "4\uFE0F\u20E3",
-    label: "页面组装",
-    desc: "将所有组件代码替换骨架中的 slot，输出完整 Page.tsx",
+    label: "规格组装",
+    desc: "合并结构和语义数据，输出完整 design_spec.json",
   },
 ];
 
