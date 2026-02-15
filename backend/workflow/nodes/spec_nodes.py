@@ -456,6 +456,52 @@ def _to_component_name(figma_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Pruning: control recursion depth for layout-focused spec
+# ---------------------------------------------------------------------------
+
+# Max depth for component tree recursion.
+# 0 = top-level components only (layout skeleton — padding/gap/flex)
+# 1 = one level of children (section internals visible)
+_MAX_COMPONENT_DEPTH = 0
+
+_VECTOR_TYPES = frozenset({
+    "VECTOR", "LINE", "ELLIPSE", "STAR",
+    "REGULAR_POLYGON", "BOOLEAN_OPERATION",
+})
+
+
+def _should_recurse(node: Dict, width: float, height: float, depth: int) -> bool:
+    """Determine if we should recursively expand a node's children.
+
+    Pruning rules for layout-focused spec generation:
+    1. Vector/shape nodes — internal SVG paths irrelevant for layout
+    2. Small components (≤48px) — icon-level, no layout meaning
+    3. Platform/spacer elements — system UI, skip internals
+    4. Depth limit — only layout skeleton, no component internals
+    """
+    node_type = node.get("type", "")
+    name = node.get("name", "")
+
+    # Rule 1: Vector types never have meaningful layout children
+    if node_type in _VECTOR_TYPES:
+        return False
+
+    # Rule 2: Small components (icon-sized) — no layout to extract
+    if width <= 48 and height <= 48:
+        return False
+
+    # Rule 3: Platform/spacer elements — system UI internals
+    if detect_render_hint(name):
+        return False
+
+    # Rule 4: Depth limit — layout skeleton only
+    if depth >= _MAX_COMPONENT_DEPTH:
+        return False
+
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Core: Figma node → ComponentSpec mapping
 # ---------------------------------------------------------------------------
 
@@ -464,6 +510,7 @@ def figma_node_to_component_spec(
     node: Dict,
     z_index: int = 0,
     reverse_map: Optional[Dict[str, str]] = None,
+    depth: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """Convert a raw Figma node to a PartialComponentSpec.
 
@@ -475,6 +522,10 @@ def figma_node_to_component_spec(
     - role → "other"
     - description → ""
     - interaction → None
+
+    Pruning: controlled by _should_recurse() and _MAX_COMPONENT_DEPTH.
+    When not recursing, children_bounds are still computed from raw Figma
+    bbox for accurate layout detection (stack vs absolute).
     """
     node_type = node.get("type", "")
     name = node.get("name", "Unknown")
@@ -482,6 +533,11 @@ def figma_node_to_component_spec(
     visible = node.get("visible", True)
 
     if not visible:
+        return None
+
+    # Filter opacity=0 nodes (visible=True but fully transparent)
+    opacity = node.get("opacity", 1.0)
+    if opacity == 0:
         return None
 
     bbox = node.get("absoluteBoundingBox", {})
@@ -500,17 +556,37 @@ def figma_node_to_component_spec(
         "height": height,
     }
 
-    # --- Recursively build children ---
+    # --- Build children (with pruning) ---
     children_specs: List[Dict] = []
     children = node.get("children", [])
     children_bounds: List[Dict] = []
-    for i, child in enumerate(children):
-        child_spec = figma_node_to_component_spec(
-            child, z_index=i, reverse_map=reverse_map,
-        )
-        if child_spec:
-            children_specs.append(child_spec)
-            children_bounds.append(child_spec["bounds"])
+
+    if _should_recurse(node, width, height, depth):
+        # Recurse into children
+        for i, child in enumerate(children):
+            child_spec = figma_node_to_component_spec(
+                child, z_index=i, reverse_map=reverse_map,
+                depth=depth + 1,
+            )
+            if child_spec:
+                children_specs.append(child_spec)
+                children_bounds.append(child_spec["bounds"])
+    else:
+        # Not recursing — still compute children_bounds from raw Figma bbox
+        # so detect_container_layout() can detect stack (overlapping) layout
+        for child in children:
+            if not child.get("visible", True):
+                continue
+            if child.get("opacity", 1.0) == 0:
+                continue
+            c_bbox = child.get("absoluteBoundingBox", {})
+            if c_bbox and c_bbox.get("width", 0) > 0 and c_bbox.get("height", 0) > 0:
+                children_bounds.append({
+                    "x": c_bbox.get("x", 0),
+                    "y": c_bbox.get("y", 0),
+                    "width": c_bbox.get("width", 0),
+                    "height": c_bbox.get("height", 0),
+                })
 
     # --- Layout ---
     layout = detect_container_layout(node, children_bounds)
@@ -528,8 +604,7 @@ def figma_node_to_component_spec(
     effects = node.get("effects", [])
     effects_style = figma_effects_to_style(effects)
 
-    opacity = node.get("opacity", 1.0)
-
+    # opacity already read at top of function for the opacity=0 filter
     style: Dict[str, Any] = {"background": background}
     if border:
         style["border"] = border
@@ -617,6 +692,14 @@ def figma_node_to_component_spec(
         spec["content"] = content
     if children_specs:
         spec["children"] = children_specs
+    elif children:
+        # Not recursed — record how many children were collapsed
+        visible_count = sum(
+            1 for c in children
+            if c.get("visible", True) and c.get("opacity", 1.0) != 0
+        )
+        if visible_count > 0:
+            spec["children_collapsed"] = visible_count
 
     return spec
 
@@ -1003,7 +1086,7 @@ class SpecAnalyzerNode(BaseNodeImpl):
         run_id = inputs.get("run_id", "")
         cwd = self.config.get("cwd", ".")
 
-        model = self.config.get("model", "claude-sonnet-4-20250514")
+        model = self.config.get("model", "")
         max_tokens = self.config.get("max_tokens", 4096)
 
         logger.info(
@@ -1152,15 +1235,16 @@ class SpecAnalyzerNode(BaseNodeImpl):
         cli_prompt_parts.append(user_text)
         cli_prompt = "\n".join(cli_prompt_parts)
 
-        # Build CLI command
+        # Build CLI command (no --model flag: use CLI's default)
         cmd = [
             claude_bin,
             "-p", cli_prompt,
             "--output-format", "json",
-            "--model", model,
             "--dangerously-skip-permissions",
             "--no-session-persistence",
         ]
+        if model:
+            cmd.extend(["--model", model])
         if screenshot_abs:
             cmd.extend(["--allowedTools", "Read"])
         else:
@@ -1193,13 +1277,6 @@ class SpecAnalyzerNode(BaseNodeImpl):
                 f"Claude CLI timed out (120s) for {component.get('name')}"
             )
 
-        if proc.returncode != 0:
-            err_msg = stderr.decode("utf-8", errors="replace").strip()
-            raise RuntimeError(
-                f"Claude CLI failed (exit {proc.returncode}) for "
-                f"{component.get('name')}: {err_msg[:500]}"
-            )
-
         raw_text = stdout.decode("utf-8", errors="replace").strip()
 
         # --output-format json wraps the response in a JSON envelope
@@ -1209,6 +1286,19 @@ class SpecAnalyzerNode(BaseNodeImpl):
             cli_output = json.loads(raw_text)
         except json.JSONDecodeError:
             pass
+
+        # Check for CLI-level errors (non-zero exit or is_error in envelope)
+        if proc.returncode != 0 or (
+            isinstance(cli_output, dict) and cli_output.get("is_error")
+        ):
+            # Extract error from envelope result (stderr is often empty)
+            err_msg = stderr.decode("utf-8", errors="replace").strip()
+            if not err_msg and isinstance(cli_output, dict):
+                err_msg = cli_output.get("result", "")
+            raise RuntimeError(
+                f"Claude CLI failed (exit {proc.returncode}) for "
+                f"{component.get('name')}: {err_msg[:500]}"
+            )
 
         # Extract the actual text content from CLI JSON envelope
         if isinstance(cli_output, dict) and "result" in cli_output:

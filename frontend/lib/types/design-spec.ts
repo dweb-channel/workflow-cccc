@@ -182,6 +182,7 @@ export interface ComponentSpec {
   content?: ContentSpec;
   interaction?: InteractionSpec;
   children?: ComponentSpec[];
+  children_collapsed?: number;
   screenshot_path?: string;
 }
 

@@ -103,6 +103,14 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
             <ChildrenSection children={component.children} onNavigate={onNavigate} />
           </Section>
         )}
+
+        {component.children_collapsed != null && component.children_collapsed > 0 && (
+          <div className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2">
+            <span className="text-[11px] text-slate-500">
+              {component.children_collapsed} child nodes collapsed (depth=0 layout skeleton)
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

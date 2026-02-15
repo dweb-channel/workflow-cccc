@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import type { ComponentSpec, SemanticRole, RenderHint } from "@/lib/types/design-spec";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import type { ComponentSpec, SemanticRole } from "@/lib/types/design-spec";
+import { resolveSpacing } from "@/lib/types/design-spec";
 
 // ---- Role badge colors (5 groups) ----
 
@@ -54,18 +53,17 @@ export function SpecTree({ components, selectedId, onSelect }: SpecTreeProps) {
           Components
         </span>
         <span className="ml-2 text-[11px] text-slate-500">
-          ({countAll(components)})
+          ({components.length})
         </span>
       </div>
 
-      {/* Tree body */}
+      {/* Flat component list */}
       <div className="flex-1 overflow-y-auto py-1">
         {components.map((comp) => (
-          <TreeNode
+          <ComponentRow
             key={comp.id}
             component={comp}
-            depth={0}
-            selectedId={selectedId}
+            isSelected={selectedId === comp.id}
             onSelect={onSelect}
           />
         ))}
@@ -74,60 +72,31 @@ export function SpecTree({ components, selectedId, onSelect }: SpecTreeProps) {
   );
 }
 
-// ---- Tree node (recursive) ----
+// ---- Component row (flat, layout-focused) ----
 
-function TreeNode({
+function ComponentRow({
   component,
-  depth,
-  selectedId,
+  isSelected,
   onSelect,
 }: {
   component: ComponentSpec;
-  depth: number;
-  selectedId: string | null;
+  isSelected: boolean;
   onSelect: (id: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(depth < 2);
-  const hasChildren = component.children && component.children.length > 0;
-  const isSelected = selectedId === component.id;
   const isSpacer = component.render_hint === "spacer";
   const isPlatform = component.render_hint === "platform";
   const roleColor = getRoleColor(component.role);
-
-  const handleToggle = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      setExpanded((p) => !p);
-    },
-    []
-  );
+  const layoutSummary = getLayoutSummary(component);
 
   return (
-    <>
-      <button
-        onClick={() => onSelect(component.id)}
-        className={`flex w-full items-center gap-1 px-2 py-1 text-left transition-colors hover:bg-slate-700/40 ${
-          isSelected ? "bg-violet-500/15" : ""
-        }`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-      >
-        {/* Expand/collapse chevron */}
-        {hasChildren ? (
-          <span
-            onClick={handleToggle}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded hover:bg-slate-600/50"
-          >
-            {expanded ? (
-              <ChevronDown className="h-3 w-3 text-slate-500" />
-            ) : (
-              <ChevronRight className="h-3 w-3 text-slate-500" />
-            )}
-          </span>
-        ) : (
-          <span className="h-4 w-4 shrink-0" />
-        )}
-
-        {/* Name */}
+    <button
+      onClick={() => onSelect(component.id)}
+      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-slate-700/40 border-b border-slate-700/30 ${
+        isSelected ? "bg-violet-500/15" : ""
+      }`}
+    >
+      {/* Top line: name + role badge */}
+      <div className="flex items-center gap-1.5">
         <span
           className={`truncate text-[12px] ${
             isSelected
@@ -147,55 +116,61 @@ function TreeNode({
         >
           {component.role}
         </span>
+      </div>
 
-        {/* render_hint indicator */}
-        {isSpacer && (
-          <span className="shrink-0 text-[9px] text-slate-600" title="Spacer element">
-            SP
+      {/* Bottom line: size + layout summary */}
+      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+        <span>{component.bounds.width}x{component.bounds.height}</span>
+        {layoutSummary && (
+          <>
+            <span className="text-slate-600">|</span>
+            <span className="truncate text-slate-400">{layoutSummary}</span>
+          </>
+        )}
+        {component.children_collapsed != null && component.children_collapsed > 0 && (
+          <span className="ml-auto shrink-0 text-slate-600">
+            {component.children_collapsed} nodes
           </span>
         )}
-        {isPlatform && (
-          <span className="shrink-0 text-[9px] text-slate-600" title="Platform element">
-            PL
-          </span>
-        )}
-
-        {/* z_index if present and > 0 */}
-        {component.z_index != null && component.z_index > 0 && (
-          <span
-            className="shrink-0 rounded bg-slate-700 px-1 text-[9px] text-slate-400"
-            title={`z-index: ${component.z_index}`}
-          >
-            z{component.z_index}
-          </span>
-        )}
-      </button>
-
-      {/* Children */}
-      {hasChildren && expanded && (
-        <>
-          {component.children!.map((child) => (
-            <TreeNode
-              key={child.id}
-              component={child}
-              depth={depth + 1}
-              selectedId={selectedId}
-              onSelect={onSelect}
-            />
-          ))}
-        </>
-      )}
-    </>
+      </div>
+    </button>
   );
 }
 
 // ---- Helpers ----
 
-function countAll(components: ComponentSpec[]): number {
-  let count = 0;
-  for (const c of components) {
-    count++;
-    if (c.children) count += countAll(c.children);
+function getLayoutSummary(component: ComponentSpec): string {
+  const parts: string[] = [];
+  const layout = component.layout;
+
+  if (layout.type) {
+    if (layout.type === "flex") {
+      parts.push(`flex ${layout.direction || "row"}`);
+    } else {
+      parts.push(layout.type);
+    }
   }
-  return count;
+
+  if (layout.gap != null) {
+    parts.push(`gap:${resolveSpacing(layout.gap)}`);
+  }
+
+  if (layout.padding) {
+    const p = layout.padding.map((v) => resolveSpacing(v));
+    // Only show if not all zeros
+    if (p.some((v) => v !== 0)) {
+      // Compact format: show unique values
+      const unique = [...new Set(p)];
+      if (unique.length === 1) {
+        parts.push(`p:${unique[0]}`);
+      } else {
+        parts.push(`p:[${p.join(",")}]`);
+      }
+    }
+  }
+
+  if (layout.align) parts.push(`align:${layout.align}`);
+  if (layout.justify && layout.justify !== "start") parts.push(`justify:${layout.justify}`);
+
+  return parts.join(" ");
 }

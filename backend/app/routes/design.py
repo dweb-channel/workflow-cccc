@@ -141,8 +141,8 @@ class SpecRunRequest(BaseModel):
     model: Optional[str] = Field(
         None,
         description=(
-            "Anthropic model for SpecAnalyzer vision analysis. "
-            "Default: claude-sonnet-4-20250514"
+            "Model for SpecAnalyzer vision analysis. "
+            "Optional — omit to use CLI default. Accepts aliases (sonnet, opus) or full model IDs."
         ),
     )
 
@@ -1613,7 +1613,7 @@ async def _execute_spec_pipeline(
             node_type="spec_analyzer",
             config={
                 "cwd": output_dir,
-                "model": model or "claude-sonnet-4-20250514",
+                "model": model or "",
                 "max_tokens": 4096,
             },
         )
