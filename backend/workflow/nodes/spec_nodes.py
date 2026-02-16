@@ -1187,9 +1187,24 @@ class SpecAnalyzerNode(BaseNodeImpl):
                     stats["failed"] += 1
                     return {**component, "_analysis_failed": True}
 
-        analyzed_components = await asyncio.gather(
-            *[_analyze_one(i, c) for i, c in enumerate(components)]
+        raw_results = await asyncio.gather(
+            *[_analyze_one(i, c) for i, c in enumerate(components)],
+            return_exceptions=True,
         )
+        # Handle exceptions returned by return_exceptions=True
+        analyzed_components = []
+        for i, r in enumerate(raw_results):
+            if isinstance(r, BaseException):
+                comp = components[i]
+                logger.error(
+                    "SpecAnalyzerNode [%s]: component %s raised %s: %s",
+                    self.node_id, comp.get("name", f"component_{i}"),
+                    type(r).__name__, r,
+                )
+                stats["failed"] += 1
+                analyzed_components.append({**comp, "_analysis_failed": True})
+            else:
+                analyzed_components.append(r)
 
         logger.info(
             "SpecAnalyzerNode [%s]: done — %d/%d succeeded",
@@ -1442,3 +1457,463 @@ class SpecAssemblerNode(BaseNodeImpl):
             "spec_path": spec_path,
             "spec_document": spec_document,
         }
+
+
+# ---------------------------------------------------------------------------
+# Node 4: CodeGenNode — per-component code generation
+# ---------------------------------------------------------------------------
+
+@register_node_type(
+    node_type="code_gen",
+    display_name="Code Generator",
+    description=(
+        "Generates frontend code for each component using Claude CLI. "
+        "Takes component spec + screenshot, outputs structured JSON with code."
+    ),
+    category="generation",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "components": {
+                "type": "array",
+                "description": "ComponentSpecs from SpecAssembler",
+            },
+            "page": {"type": "object"},
+            "design_tokens": {"type": "object"},
+            "source": {"type": "object"},
+            "output_dir": {"type": "string"},
+            "tech_stack": {"type": "string"},
+        },
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "codegen_results": {"type": "array"},
+            "codegen_stats": {"type": "object"},
+            "page_component": {"type": "object"},
+        },
+    },
+    icon="code",
+    color="#F59E0B",
+)
+class CodeGenNode(BaseNodeImpl):
+    """Node 4: Code Generator — per-component code generation via Claude CLI.
+
+    For each component:
+    1. Builds codegen prompt (spec JSON + screenshot + page context + tech stack)
+    2. Calls Claude CLI subprocess with vision
+    3. Parses structured JSON output (component_name, file_name, code, dependencies)
+    4. Writes component files to output_dir/components/
+    5. Generates Page assembler component (Phase 4)
+    """
+
+    async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        components = inputs.get("components", [])
+        page = inputs.get("page", {})
+        design_tokens = inputs.get("design_tokens", {})
+        source = inputs.get("source", {})
+        output_dir = self.config.get("output_dir") or inputs.get("output_dir", "")
+        tech_stack = self.config.get("tech_stack", "react-tailwind")
+        run_id = inputs.get("run_id", "")
+
+        device = page.get("device", {})
+        page_layout = page.get("layout", {})
+
+        logger.info(
+            "CodeGenNode [%s]: generating code for %d components, stack=%s",
+            self.node_id, len(components), tech_stack,
+        )
+
+        # Verify claude CLI is available
+        import shutil
+        claude_bin = shutil.which("claude")
+        if not claude_bin:
+            logger.error("CodeGenNode: 'claude' CLI not found in PATH.")
+            return {
+                "codegen_results": [],
+                "codegen_stats": {"error": "claude CLI not found in PATH"},
+            }
+
+        # Import prompt templates
+        from ..spec.codegen_prompt import (
+            CODEGEN_SYSTEM_PROMPT,
+            CODEGEN_USER_PROMPT,
+            get_tech_stack_config,
+            build_sibling_context,
+        )
+
+        stack_config = get_tech_stack_config(tech_stack)
+        file_ext = stack_config["file_ext"]
+
+        stats = {"total": len(components), "succeeded": 0, "failed": 0}
+
+        # Concurrent generation with semaphore
+        import asyncio
+        _CLI_CONCURRENCY = 3
+        sem = asyncio.Semaphore(_CLI_CONCURRENCY)
+
+        async def _gen_one(idx: int, component: Dict) -> Optional[Dict]:
+            comp_name = component.get("name", f"Component{idx}")
+            logger.info(
+                "CodeGenNode [%s]: generating %s (%d/%d)",
+                self.node_id, comp_name, idx + 1, len(components),
+            )
+            # Per-component sibling context (marks current component)
+            sibling_context = build_sibling_context(components, idx)
+
+            async with sem:
+                try:
+                    result = await self._generate_single_component(
+                        claude_bin=claude_bin,
+                        component=component,
+                        page=page,
+                        device=device,
+                        page_layout=page_layout,
+                        sibling_context=sibling_context,
+                        stack_config=stack_config,
+                        output_dir=output_dir,
+                        file_ext=file_ext,
+                    )
+                    stats["succeeded"] += 1
+
+                    if run_id:
+                        from ..sse import push_sse_event
+                        await push_sse_event(run_id, "codegen_complete", {
+                            "component_name": comp_name,
+                            "file_name": result.get("file_name", ""),
+                            "index": idx,
+                            "total": len(components),
+                        })
+
+                    return result
+                except Exception as e:
+                    logger.error(
+                        "CodeGenNode [%s]: failed to generate %s: %s",
+                        self.node_id, comp_name, e,
+                    )
+                    stats["failed"] += 1
+                    return {
+                        "component_id": component.get("id", ""),
+                        "component_name": comp_name,
+                        "file_name": f"{comp_name}.{file_ext}",
+                        "code": "",
+                        "error": str(e),
+                    }
+
+        raw_results = await asyncio.gather(
+            *[_gen_one(i, c) for i, c in enumerate(components)],
+            return_exceptions=True,
+        )
+        # Handle exceptions returned by return_exceptions=True
+        codegen_results = []
+        for i, r in enumerate(raw_results):
+            if isinstance(r, BaseException):
+                comp = components[i]
+                logger.error(
+                    "CodeGenNode [%s]: component %s raised %s: %s",
+                    self.node_id, comp.get("name", f"Component{i}"),
+                    type(r).__name__, r,
+                )
+                stats["failed"] += 1
+                codegen_results.append({
+                    "component_id": comp.get("id", ""),
+                    "component_name": comp.get("name", f"Component{i}"),
+                    "file_name": f"{comp.get('name', f'Component{i}')}.{file_ext}",
+                    "code": "",
+                    "error": f"{type(r).__name__}: {r}",
+                })
+            elif r is not None:
+                codegen_results.append(r)
+
+        # Phase 4: Generate Page assembler component
+        page_component = self._assemble_page(
+            components, codegen_results, page, stack_config, file_ext, output_dir,
+        )
+
+        logger.info(
+            "CodeGenNode [%s]: done — %d/%d succeeded",
+            self.node_id, stats["succeeded"], stats["total"],
+        )
+
+        return {
+            "codegen_results": codegen_results,
+            "codegen_stats": stats,
+            "page_component": page_component,
+        }
+
+    async def _generate_single_component(
+        self,
+        claude_bin: str,
+        component: Dict,
+        page: Dict,
+        device: Dict,
+        page_layout: Dict,
+        sibling_context: str,
+        stack_config: Dict,
+        output_dir: str,
+        file_ext: str,
+    ) -> Dict:
+        """Generate code for a single component using Claude CLI."""
+        import asyncio
+        from ..spec.codegen_prompt import (
+            CODEGEN_SYSTEM_PROMPT,
+            CODEGEN_USER_PROMPT,
+        )
+
+        # Build component spec JSON (exclude screenshot_path for cleanliness)
+        spec_for_prompt = {k: v for k, v in component.items()
+                          if k != "screenshot_path" and not k.startswith("_")}
+        spec_json = json.dumps(spec_for_prompt, ensure_ascii=False, indent=2)
+
+        # Build system prompt with tech stack injected
+        system_prompt = CODEGEN_SYSTEM_PROMPT.format(
+            tech_stack=stack_config["name"],
+            tech_stack_guidelines=stack_config["guidelines"],
+            file_ext=file_ext,
+        )
+
+        # Build user prompt
+        user_prompt = CODEGEN_USER_PROMPT.format(
+            device_type=device.get("type", "mobile"),
+            device_width=device.get("width", 393),
+            device_height=device.get("height", 852),
+            page_layout_type=page_layout.get("type", "stack"),
+            sibling_context=sibling_context,
+            component_spec_json=spec_json,
+        )
+
+        # Resolve screenshot path
+        screenshot_path = component.get("screenshot_path", "")
+        screenshot_abs = ""
+        if screenshot_path:
+            screenshot_abs = (
+                screenshot_path
+                if os.path.isabs(screenshot_path)
+                else os.path.join(output_dir, screenshot_path)
+            )
+            if not os.path.isfile(screenshot_abs):
+                logger.warning(
+                    "CodeGenNode: screenshot not found: %s", screenshot_abs
+                )
+                screenshot_abs = ""
+
+        # Build full CLI prompt
+        cli_prompt_parts = [system_prompt, ""]
+        if screenshot_abs:
+            cli_prompt_parts.append(
+                f"First, read the screenshot image at: {screenshot_abs}"
+            )
+            cli_prompt_parts.append(
+                "Use this screenshot as the visual reference for your code generation."
+            )
+            cli_prompt_parts.append("")
+        cli_prompt_parts.append(user_prompt)
+        cli_prompt = "\n".join(cli_prompt_parts)
+
+        # Build CLI command
+        cmd = [
+            claude_bin,
+            "-p", cli_prompt,
+            "--output-format", "json",
+            "--dangerously-skip-permissions",
+            "--no-session-persistence",
+        ]
+        model = self.config.get("model", "")
+        if model:
+            cmd.extend(["--model", model])
+        if screenshot_abs:
+            cmd.extend(["--allowedTools", "Read"])
+        else:
+            cmd.extend(["--tools", ""])
+
+        cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+        logger.info(
+            "CodeGenNode [%s]: calling claude CLI for %s",
+            self.node_id, component.get("name", "?"),
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=cli_env,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=600.0,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            raise TimeoutError(
+                f"Claude CLI timed out (600s) for {component.get('name')}"
+            )
+
+        raw_text = stdout.decode("utf-8", errors="replace").strip()
+
+        # Parse CLI JSON envelope
+        cli_output = None
+        try:
+            cli_output = json.loads(raw_text)
+        except json.JSONDecodeError:
+            pass
+
+        if proc.returncode != 0 or (
+            isinstance(cli_output, dict) and cli_output.get("is_error")
+        ):
+            err_msg = stderr.decode("utf-8", errors="replace").strip()
+            if not err_msg and isinstance(cli_output, dict):
+                err_msg = cli_output.get("result", "")
+            raise RuntimeError(
+                f"Claude CLI failed (exit {proc.returncode}) for "
+                f"{component.get('name')}: {err_msg[:500]}"
+            )
+
+        # Extract text from CLI envelope
+        if isinstance(cli_output, dict) and "result" in cli_output:
+            raw_text = cli_output["result"]
+        elif isinstance(cli_output, dict) and "content" in cli_output:
+            raw_text = cli_output["content"]
+
+        # Parse the structured JSON output
+        codegen_output = self._parse_codegen_json(raw_text)
+        if not codegen_output:
+            raise ValueError(
+                f"JSON parse failed for {component.get('name')}, "
+                f"raw[:300]: {raw_text[:300]}"
+            )
+
+        # Ensure required fields
+        comp_name = component.get("name", "Component")
+        codegen_output["component_id"] = component.get("id", "")
+        codegen_output.setdefault("component_name", comp_name)
+        codegen_output.setdefault("file_name", f"{comp_name}.{file_ext}")
+        codegen_output.setdefault("dependencies", [])
+        codegen_output.setdefault("tailwind_classes_used", [])
+
+        # Write component file to disk
+        if output_dir and codegen_output.get("code"):
+            components_dir = os.path.join(output_dir, "components")
+            os.makedirs(components_dir, exist_ok=True)
+            file_path = os.path.join(
+                components_dir, codegen_output["file_name"]
+            )
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(codegen_output["code"])
+            codegen_output["file_path"] = file_path
+            logger.info(
+                "CodeGenNode [%s]: wrote %s",
+                self.node_id, file_path,
+            )
+
+        return codegen_output
+
+    def _parse_codegen_json(self, raw_text: str) -> Optional[Dict]:
+        """Parse JSON from LLM output, handling markdown fences."""
+        if not raw_text:
+            return None
+
+        # Try direct parse
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError:
+            pass
+
+        # Try extracting from markdown code fence
+        import re
+        fence_match = re.search(
+            r"```(?:json)?\s*\n(.*?)\n```",
+            raw_text,
+            re.DOTALL,
+        )
+        if fence_match:
+            try:
+                return json.loads(fence_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # Try finding first { ... } block
+        brace_start = raw_text.find("{")
+        brace_end = raw_text.rfind("}")
+        if brace_start != -1 and brace_end > brace_start:
+            try:
+                return json.loads(raw_text[brace_start:brace_end + 1])
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _assemble_page(
+        self,
+        components: List[Dict],
+        codegen_results: List[Dict],
+        page: Dict,
+        stack_config: Dict,
+        file_ext: str,
+        output_dir: str,
+    ) -> Dict:
+        """Phase 4: Mechanically assemble a Page component that imports all children."""
+        page_name = page.get("name", "Page").replace(" ", "")
+        page_layout = page.get("layout", {})
+        layout_type = page_layout.get("type", "stack")
+        device = page.get("device", {})
+
+        # Collect successful codegen results
+        valid_results = [r for r in codegen_results if r.get("code")]
+
+        # Build imports
+        imports = []
+        component_refs = []
+        for r in valid_results:
+            name = r.get("component_name", "Component")
+            fname = r.get("file_name", f"{name}.{file_ext}")
+            # Strip extension for import path
+            import_path = f"./components/{fname.rsplit('.', 1)[0]}"
+            imports.append(f'import {name} from "{import_path}";')
+            component_refs.append(name)
+
+        # Build layout style based on page layout
+        if layout_type == "flex":
+            direction = page_layout.get("direction", "column")
+            gap = page_layout.get("gap", 0)
+            layout_classes = f"flex flex-{'col' if direction == 'column' else 'row'}"
+            if gap:
+                layout_classes += f" gap-[{int(gap)}px]"
+        else:
+            layout_classes = "relative"
+
+        width = int(device.get("width", 393))
+        height = int(device.get("height", 852))
+
+        # Generate page code
+        page_code = f'''import React from "react";
+{chr(10).join(imports)}
+
+export default function {page_name}() {{
+  return (
+    <div className="w-[{width}px] min-h-[{height}px] {layout_classes} mx-auto overflow-hidden bg-white">
+      {chr(10) + "      ".join(f"<{name} />" for name in component_refs)}
+    </div>
+  );
+}}
+'''
+
+        page_result = {
+            "component_name": page_name,
+            "file_name": f"{page_name}.{file_ext}",
+            "code": page_code,
+            "dependencies": ["react"],
+        }
+
+        # Write page file
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            page_path = os.path.join(output_dir, page_result["file_name"])
+            with open(page_path, "w", encoding="utf-8") as f:
+                f.write(page_code)
+            page_result["file_path"] = page_path
+            logger.info("CodeGenNode: wrote page component %s", page_path)
+
+        return page_result

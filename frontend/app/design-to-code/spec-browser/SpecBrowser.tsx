@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useMemo, useCallback } from "react";
-import type { DesignSpec, ComponentSpec } from "@/lib/types/design-spec";
+import type { DesignSpec, ComponentSpec, CodeGenOutput } from "@/lib/types/design-spec";
 import { SpecTree } from "./SpecTree";
 import { SpecCard } from "./SpecCard";
 import { SpecPreview } from "./SpecPreview";
-import { Copy, Check, Download } from "lucide-react";
+import { ComponentCodeView } from "./ComponentCodeView";
+import { Copy, Check, Download, FileText, Code } from "lucide-react";
 
 // ================================================================
 // SpecBrowser — Three-panel spec document viewer
@@ -15,16 +16,26 @@ import { Copy, Check, Download } from "lucide-react";
 // Right:  SpecPreview (280px) — screenshot / CSS preview
 // ================================================================
 
+type CenterTab = "spec" | "code";
+
 interface SpecBrowserProps {
   spec: DesignSpec;
   jobId?: string;
+  codeGenOutput?: CodeGenOutput | null;
 }
 
-export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
+export function SpecBrowser({ spec, jobId, codeGenOutput }: SpecBrowserProps) {
   const [selectedId, setSelectedId] = useState<string | null>(
     spec.components[0]?.id ?? null
   );
   const [copied, setCopied] = useState(false);
+  const [centerTab, setCenterTab] = useState<CenterTab>("spec");
+
+  // Build code result lookup map (component_id → CodeGenResult)
+  const codeResultMap = useMemo(() => {
+    if (!codeGenOutput?.components) return new Map();
+    return new Map(codeGenOutput.components.map((c) => [c.component_id, c]));
+  }, [codeGenOutput]);
 
   // Build flat lookup map for O(1) component finding
   const componentMap = useMemo(() => {
@@ -138,18 +149,59 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
           />
         </div>
 
-        {/* Center: Card */}
-        <div className="flex-1 overflow-hidden border-r border-slate-700">
-          {selectedComponent ? (
-            <SpecCard
-              component={selectedComponent}
-              onNavigate={handleNavigate}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-slate-500 text-xs">
-              Select a component from the tree
-            </div>
-          )}
+        {/* Center: Card / Code */}
+        <div className="flex flex-1 flex-col overflow-hidden border-r border-slate-700">
+          {/* Tab bar */}
+          <div className="flex items-center gap-1 border-b border-slate-700 bg-slate-800 px-3 py-1.5 shrink-0">
+            <button
+              onClick={() => setCenterTab("spec")}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+                centerTab === "spec"
+                  ? "bg-violet-500/20 text-violet-300"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+              }`}
+            >
+              <FileText className="h-3 w-3" />
+              Spec
+            </button>
+            <button
+              onClick={() => setCenterTab("code")}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] transition-colors ${
+                centerTab === "code"
+                  ? "bg-violet-500/20 text-violet-300"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-700/50"
+              }`}
+            >
+              <Code className="h-3 w-3" />
+              Code
+              {selectedId && codeResultMap.has(selectedId) && (
+                <span className="ml-1 h-1.5 w-1.5 rounded-full bg-green-400" />
+              )}
+            </button>
+          </div>
+
+          {/* Tab content */}
+          <div className="flex-1 overflow-hidden">
+            {selectedComponent ? (
+              centerTab === "spec" ? (
+                <SpecCard
+                  component={selectedComponent}
+                  onNavigate={handleNavigate}
+                />
+              ) : (
+                <ComponentCodeView
+                  componentName={selectedComponent.name}
+                  codeResult={
+                    selectedId ? (codeResultMap.get(selectedId) ?? null) : null
+                  }
+                />
+              )
+            ) : (
+              <div className="flex h-full items-center justify-center text-slate-500 text-xs">
+                Select a component from the tree
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Preview */}

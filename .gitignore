@@ -35,5 +35,18 @@ mcp-servers.json
 # Temporal
 temporal-data/
 
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
+# Pipeline output (generated code, screenshots, design exports)
+backend/output/
+backend/data/
+data/
+
+# Frontend public assets (generated)
+frontend/public/spec-data/
+
 # CCCC state
 .cccc/

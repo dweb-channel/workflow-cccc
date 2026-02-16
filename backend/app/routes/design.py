@@ -147,6 +147,31 @@ class SpecRunRequest(BaseModel):
     )
 
 
+class CodeGenRequest(BaseModel):
+    """Request for POST /api/v2/design/run-codegen.
+
+    Runs Phase 3 code generation from an existing design_spec.json.
+    Each component gets its own file; a Page component assembles them.
+    """
+
+    spec_path: str = Field(
+        ...,
+        description="Path to design_spec.json from a completed spec pipeline run",
+    )
+    output_dir: Optional[str] = Field(
+        None,
+        description="Output directory for generated code. Defaults to spec's directory.",
+    )
+    tech_stack: str = Field(
+        default="react-tailwind",
+        description="Tech stack: react-tailwind, vue-tailwind",
+    )
+    model: Optional[str] = Field(
+        None,
+        description="Model for code generation. Optional — omit to use CLI default.",
+    )
+
+
 class FigmaScanRequest(BaseModel):
     """Request for POST /api/v2/design/scan-figma."""
 
@@ -617,6 +642,87 @@ async def run_spec_pipeline(
             file_key=file_key,
             node_id=node_id,
             output_dir=output_dir,
+            model=payload.model,
+        )
+    )
+    task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
+
+    return DesignRunResponse(
+        job_id=job_id,
+        status="started",
+        design_file=spec_path,
+        output_dir=output_dir,
+        created_at=job.created_at.isoformat(),
+    )
+
+
+@router.post("/run-codegen", response_model=DesignRunResponse, status_code=201)
+async def run_codegen_pipeline(
+    payload: CodeGenRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    """Start code generation from an existing design_spec.json.
+
+    Phase 3: Per-component code generation using Claude CLI.
+    Phase 4: Mechanical page assembly.
+
+    Requires a completed spec pipeline output (design_spec.json).
+
+    Usage:
+        POST /api/v2/design/run-codegen
+        {
+            "spec_path": "output/generated/design_spec.json",
+            "tech_stack": "react-tailwind"
+        }
+    """
+    # Resolve spec path
+    spec_path = os.path.abspath(payload.spec_path)
+    if not os.path.isfile(spec_path):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Spec file not found: {spec_path}",
+        )
+
+    # Load spec
+    with open(spec_path, "r", encoding="utf-8") as f:
+        spec_document = json.load(f)
+
+    components = spec_document.get("components", [])
+    if not components:
+        raise HTTPException(
+            status_code=400,
+            detail="Spec contains no components",
+        )
+
+    # Determine output directory
+    output_dir = os.path.abspath(
+        payload.output_dir or os.path.dirname(spec_path)
+    )
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create job in DB
+    job_id = f"codegen_{uuid.uuid4().hex[:12]}"
+    repo = DesignJobRepository(session)
+    job = await repo.create(
+        job_id=job_id,
+        design_file=spec_path,
+        output_dir=output_dir,
+        cwd=os.getcwd(),
+        max_retries=0,
+    )
+
+    logger.info(
+        f"Job {job_id}: Created codegen job, "
+        f"{len(components)} components, stack={payload.tech_stack}"
+    )
+
+    # Start async execution
+    task = asyncio.create_task(
+        _execute_codegen_pipeline(
+            job_id=job_id,
+            spec_document=spec_document,
+            output_dir=output_dir,
+            tech_stack=payload.tech_stack,
             model=payload.model,
         )
     )
@@ -1693,26 +1799,191 @@ async def _execute_spec_pipeline(
             f"spec at {spec_path}"
         )
 
-    except Exception as e:
+    except BaseException as e:
         logger.error(f"Job {job_id}: Spec pipeline failed: {e}", exc_info=True)
         final_status = "failed"
         final_error = str(e)
+        try:
+            async with get_session_ctx() as session:
+                repo = DesignJobRepository(session)
+                await repo.update_status(
+                    job_id, "failed",
+                    error=str(e),
+                    completed_at=datetime.now(timezone.utc),
+                )
+        except Exception:
+            logger.warning(f"Job {job_id}: Failed to persist error status to DB")
+    finally:
+        # Ensure DB is never stuck in "running" state
+        if final_status not in ("completed", "failed"):
+            final_status = "failed"
+            final_error = final_error or "Pipeline interrupted unexpectedly"
+            try:
+                async with get_session_ctx() as session:
+                    repo = DesignJobRepository(session)
+                    await repo.update_status(
+                        job_id, "failed",
+                        error=final_error,
+                        completed_at=datetime.now(timezone.utc),
+                    )
+            except Exception:
+                pass  # DB may be unavailable during shutdown
+
+        # Always push final job_done event
+        push_node_event(job_id, "job_done", {
+            "status": final_status,
+            "components_total": components_total,
+            "components_completed": components_completed,
+            "components_failed": components_failed,
+            "error": final_error,
+        })
+
+
+async def _execute_codegen_pipeline(
+    job_id: str,
+    spec_document: Dict[str, Any],
+    output_dir: str,
+    tech_stack: str = "react-tailwind",
+    model: Optional[str] = None,
+):
+    """Execute Phase 3+4 code generation pipeline as a background task.
+
+    Phase 3: CodeGenNode — per-component code generation via Claude CLI
+    Phase 4: Page assembly (mechanical, inside CodeGenNode)
+    """
+    final_status = "failed"
+    final_error: Optional[str] = None
+    components_total = 0
+    components_completed = 0
+    components_failed = 0
+
+    try:
+        # Update status to running
         async with get_session_ctx() as session:
             repo = DesignJobRepository(session)
-            await repo.update_status(
-                job_id, "failed",
-                error=str(e),
+            await repo.update_status(job_id, "running")
+        push_node_event(job_id, "job_status", {"status": "running"})
+
+        components = spec_document.get("components", [])
+        page = spec_document.get("page", {})
+        design_tokens = spec_document.get("design_tokens", {})
+        source = spec_document.get("source", {})
+        components_total = len(components)
+
+        # Update component count in DB
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update_component_counts(job_id, total=components_total)
+
+        push_node_event(job_id, "codegen_start", {
+            "components_count": components_total,
+            "tech_stack": tech_stack,
+        })
+
+        logger.info(
+            f"Job {job_id}: Starting codegen — "
+            f"{components_total} components, stack={tech_stack}"
+        )
+
+        # Phase 3+4: CodeGenNode
+        from workflow.nodes.spec_nodes import CodeGenNode
+
+        codegen = CodeGenNode(
+            node_id="code_gen_0",
+            node_type="code_gen",
+            config={
+                "output_dir": output_dir,
+                "tech_stack": tech_stack,
+                "model": model or "",
+            },
+        )
+        codegen_result = await codegen.execute({
+            "components": components,
+            "page": page,
+            "design_tokens": design_tokens,
+            "source": source,
+            "output_dir": output_dir,
+            "run_id": job_id,
+        })
+
+        codegen_stats = codegen_result.get("codegen_stats", {})
+        components_completed = codegen_stats.get("succeeded", 0)
+        components_failed = codegen_stats.get("failed", 0)
+        codegen_results = codegen_result.get("codegen_results", [])
+        page_component = codegen_result.get("page_component", {})
+
+        push_node_event(job_id, "codegen_done", {
+            "components_succeeded": components_completed,
+            "components_failed": components_failed,
+            "page_file": page_component.get("file_path", ""),
+            "component_files": [
+                r.get("file_path", "") for r in codegen_results if r.get("code")
+            ],
+        })
+
+        final_status = "completed"
+
+        # Persist final state to DB
+        async with get_session_ctx() as session:
+            repo = DesignJobRepository(session)
+            await repo.update(
+                job_id,
+                status=final_status,
                 completed_at=datetime.now(timezone.utc),
+                result={
+                    "codegen_stats": codegen_stats,
+                    "components_count": components_total,
+                    "page_component": page_component.get("file_name"),
+                    "tech_stack": tech_stack,
+                },
+                components_total=components_total,
+                components_completed=components_completed,
+                components_failed=components_failed,
             )
 
-    # Always push final job_done event
-    push_node_event(job_id, "job_done", {
-        "status": final_status,
-        "components_total": components_total,
-        "components_completed": components_completed,
-        "components_failed": components_failed,
-        "error": final_error,
-    })
+        logger.info(
+            f"Job {job_id}: Codegen pipeline {final_status} — "
+            f"{components_completed}/{components_total} components"
+        )
+
+    except BaseException as e:
+        logger.error(f"Job {job_id}: Codegen pipeline failed: {e}", exc_info=True)
+        final_status = "failed"
+        final_error = str(e)
+        try:
+            async with get_session_ctx() as session:
+                repo = DesignJobRepository(session)
+                await repo.update_status(
+                    job_id, "failed",
+                    error=str(e),
+                    completed_at=datetime.now(timezone.utc),
+                )
+        except Exception:
+            logger.warning(f"Job {job_id}: Failed to persist error status to DB")
+    finally:
+        # Ensure DB is never stuck in "running" state
+        if final_status not in ("completed", "failed"):
+            final_status = "failed"
+            final_error = final_error or "Pipeline interrupted unexpectedly"
+            try:
+                async with get_session_ctx() as session:
+                    repo = DesignJobRepository(session)
+                    await repo.update_status(
+                        job_id, "failed",
+                        error=final_error,
+                        completed_at=datetime.now(timezone.utc),
+                    )
+            except Exception:
+                pass  # DB may be unavailable during shutdown
+
+        # Always push final job_done event
+        push_node_event(job_id, "job_done", {
+            "status": final_status,
+            "components_total": components_total,
+            "components_completed": components_completed,
+            "components_failed": components_failed,
+            "error": final_error,
+        })
 
 
 def _extract_result_summary(result: Dict[str, Any]) -> Dict[str, Any]:

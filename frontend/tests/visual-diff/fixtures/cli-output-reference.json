@@ -1,0 +1,75 @@
+{
+  "_description": "Reference CLI stdout outputs for visual-comparator.ts subprocess mock. Use these in Python tests as mock subprocess return values.",
+  "_generated_at": "2026-02-14T08:07:00Z",
+  "_command": "npx tsx tests/visual-diff/visual-comparator.ts compare --design <design.png> --actual <actual.png> --output <dir> --component-id <id>",
+  "_note": "Use `npx tsx` (not `npx ts-node`) — ESM project requires tsx for correct module resolution.",
+
+  "pass_case": {
+    "input": {
+      "design": "tests/visual-diff/fixtures/header-design.png",
+      "actual": "tests/visual-diff/fixtures/header-actual-good.png",
+      "component_id": "header"
+    },
+    "stdout": {
+      "component_id": "header",
+      "verdict": "pass",
+      "pixel_diff": {
+        "diffPercentage": 0.35,
+        "totalPixels": 36156,
+        "diffPixels": 126,
+        "diffImagePath": "/tmp/vdiff-test-good/diff.png",
+        "actualImagePath": "tests/visual-diff/fixtures/header-actual-good.png",
+        "expectedImagePath": "tests/visual-diff/fixtures/header-design.png"
+      },
+      "timestamp": "2026-02-14T08:06:59.471Z"
+    }
+  },
+
+  "fail_case": {
+    "input": {
+      "design": "tests/visual-diff/fixtures/header-design.png",
+      "actual": "tests/visual-diff/fixtures/header-actual-bad.png",
+      "component_id": "header-bad"
+    },
+    "stdout": {
+      "component_id": "header-bad",
+      "verdict": "fail",
+      "pixel_diff": {
+        "diffPercentage": 77.67,
+        "totalPixels": 36156,
+        "diffPixels": 28082,
+        "diffImagePath": "/tmp/vdiff-test-bad/diff.png",
+        "actualImagePath": "tests/visual-diff/fixtures/header-actual-bad.png",
+        "expectedImagePath": "tests/visual-diff/fixtures/header-design.png"
+      },
+      "timestamp": "2026-02-14T08:07:05.736Z"
+    }
+  },
+
+  "identical_case": {
+    "input": {
+      "design": "tests/visual-diff/fixtures/header-design.png",
+      "actual": "tests/visual-diff/fixtures/header-design.png",
+      "component_id": "header-identical"
+    },
+    "stdout": {
+      "component_id": "header-identical",
+      "verdict": "pass",
+      "pixel_diff": {
+        "diffPercentage": 0,
+        "totalPixels": 36156,
+        "diffPixels": 0,
+        "diffImagePath": "/tmp/vdiff-test-identical/diff.png",
+        "actualImagePath": "tests/visual-diff/fixtures/header-design.png",
+        "expectedImagePath": "tests/visual-diff/fixtures/header-design.png"
+      },
+      "timestamp": "2026-02-14T08:07:16.153Z"
+    }
+  },
+
+  "python_mock_example": {
+    "_description": "Example of how to mock asyncio.create_subprocess_shell in Python tests",
+    "pass_stdout_json": "{\"component_id\":\"header\",\"verdict\":\"pass\",\"pixel_diff\":{\"diffPercentage\":0.35,\"totalPixels\":36156,\"diffPixels\":126,\"diffImagePath\":\"/tmp/vdiff-test-good/diff.png\"},\"timestamp\":\"2026-02-14T08:06:59.471Z\"}",
+    "fail_stdout_json": "{\"component_id\":\"header-bad\",\"verdict\":\"fail\",\"pixel_diff\":{\"diffPercentage\":77.67,\"totalPixels\":36156,\"diffPixels\":28082,\"diffImagePath\":\"/tmp/vdiff-test-bad/diff.png\"},\"timestamp\":\"2026-02-14T08:07:05.736Z\"}"
+  }
+}
