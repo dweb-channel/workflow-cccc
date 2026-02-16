@@ -1788,8 +1788,8 @@ class CodeGenNode(BaseNodeImpl):
         # Ensure required fields
         comp_name = component.get("name", "Component")
         codegen_output["component_id"] = component.get("id", "")
-        codegen_output.setdefault("component_name", comp_name)
-        codegen_output.setdefault("file_name", f"{comp_name}.{file_ext}")
+        codegen_output["component_name"] = comp_name
+        codegen_output["file_name"] = f"{comp_name}.{file_ext}"
         codegen_output.setdefault("dependencies", [])
         codegen_output.setdefault("tailwind_classes_used", [])
 
@@ -1855,7 +1855,9 @@ class CodeGenNode(BaseNodeImpl):
         output_dir: str,
     ) -> Dict:
         """Phase 4: Mechanically assemble a Page component that imports all children."""
-        page_name = page.get("name", "Page").replace(" ", "")
+        raw_page_name = page.get("name", "Page").replace(" ", "")
+        # Use "Page" if name contains non-ASCII chars (e.g. Chinese Figma page names)
+        page_name = raw_page_name if raw_page_name.isascii() else "Page"
         page_layout = page.get("layout", {})
         layout_type = page_layout.get("type", "stack")
         device = page.get("device", {})
@@ -1894,7 +1896,7 @@ class CodeGenNode(BaseNodeImpl):
 export default function {page_name}() {{
   return (
     <div className="w-[{width}px] min-h-[{height}px] {layout_classes} mx-auto overflow-hidden bg-white">
-      {chr(10) + "      ".join(f"<{name} />" for name in component_refs)}
+      {(chr(10) + "      ").join(f"<{name} />" for name in component_refs)}
     </div>
   );
 }}
