@@ -558,6 +558,9 @@ function DesignToCodeContent() {
                         <DesignOverview
                           currentJob={currentJob}
                           stats={stats}
+                          components={designSpec?.components}
+                          events={events}
+                          tokenUsage={tokenUsage}
                         />
                         {/* Action buttons */}
                         <div className="mt-4 flex gap-2">

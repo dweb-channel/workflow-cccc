@@ -12,7 +12,7 @@ import type {
   InteractionSpec,
 } from "@/lib/types/design-spec";
 import { isTokenColor, resolveColor, resolveSpacing } from "@/lib/types/design-spec";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ArrowRight } from "lucide-react";
 
 // ================================================================
 // SpecCard — Displays full ComponentSpec details in collapsible sections
@@ -58,6 +58,9 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
           <span>{Math.round(component.bounds.width)} x {Math.round(component.bounds.height)}</span>
           <span>id: {component.id}</span>
         </div>
+
+        {/* Quality indicators */}
+        <QualityIndicators component={component} />
       </div>
 
       {/* Sections */}
@@ -114,6 +117,80 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ================================================================
+// Quality Indicators — per-component header metrics
+// ================================================================
+
+function QualityIndicators({ component }: { component: ComponentSpec }) {
+  // Count descendant description coverage
+  let totalDesc = 0;
+  let filledDesc = 0;
+  function walkDesc(node: ComponentSpec) {
+    if (node.children) {
+      for (const child of node.children) {
+        totalDesc++;
+        if (child.description && child.description.trim()) filledDesc++;
+        walkDesc(child);
+      }
+    }
+  }
+  walkDesc(component);
+
+  const hasAnalysis = !!component.design_analysis;
+  const hasInteraction = !!(component.interaction?.behaviors?.length || component.interaction?.states?.length);
+  const coveragePercent = totalDesc > 0 ? Math.round((filledDesc / totalDesc) * 100) : null;
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {/* Design analysis indicator */}
+      <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+        hasAnalysis ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700/50 text-slate-500"
+      }`}>
+        {hasAnalysis ? "\u2713" : "\u2717"} 设计解读
+      </span>
+
+      {/* Interaction indicator */}
+      {hasInteraction && (
+        <span className="inline-flex items-center gap-1 rounded bg-orange-500/10 px-1.5 py-0.5 text-[10px] text-orange-400">
+          \u2713 交互
+        </span>
+      )}
+
+      {/* Children description coverage */}
+      {coveragePercent !== null && (
+        <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
+          coveragePercent >= 80
+            ? "bg-emerald-500/10 text-emerald-400"
+            : coveragePercent >= 50
+              ? "bg-yellow-500/10 text-yellow-400"
+              : "bg-red-500/10 text-red-400"
+        }`}>
+          <span className="font-mono">{filledDesc}/{totalDesc}</span> 子描述
+          <span className="ml-0.5 inline-block h-1 w-8 rounded-full bg-slate-700 overflow-hidden">
+            <span
+              className={`block h-full rounded-full ${
+                coveragePercent >= 80
+                  ? "bg-emerald-500"
+                  : coveragePercent >= 50
+                    ? "bg-yellow-500"
+                    : "bg-red-500"
+              }`}
+              style={{ width: `${coveragePercent}%` }}
+            />
+          </span>
+        </span>
+      )}
+
+      {/* Role "other" warning */}
+      {component.role === "other" && (
+        <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-400">
+          ⚠ role=other
+        </span>
+      )}
     </div>
   );
 }
@@ -536,11 +613,6 @@ function InteractionSection({ interaction }: { interaction: InteractionSpec }) {
 }
 
 function DesignAnalysisSection({ text }: { text: string }) {
-  // Render markdown-like text with basic formatting:
-  // - Lines starting with ## become bold headers
-  // - Lines starting with - become list items
-  // - **bold** markers rendered as bold
-  // - Everything else as regular text
   const lines = text.split("\n");
 
   return (
@@ -552,44 +624,61 @@ function DesignAnalysisSection({ text }: { text: string }) {
         // ## Header
         if (trimmed.startsWith("## ")) {
           return (
-            <div key={i} className="font-semibold text-white text-[12px] mt-1">
-              {renderBold(trimmed.slice(3))}
+            <div key={i} className="font-semibold text-white text-[12px] mt-2 first:mt-0">
+              {renderInline(trimmed.slice(3))}
             </div>
           );
         }
         // ### Sub-header
         if (trimmed.startsWith("### ")) {
           return (
-            <div key={i} className="font-medium text-slate-200 mt-0.5">
-              {renderBold(trimmed.slice(4))}
+            <div key={i} className="font-medium text-slate-200 text-[11px] mt-1.5">
+              {renderInline(trimmed.slice(4))}
             </div>
           );
         }
-        // - List item
+        // - List item (unordered)
         if (trimmed.startsWith("- ")) {
           return (
             <div key={i} className="flex gap-1.5 pl-2">
-              <span className="text-slate-500 shrink-0">-</span>
-              <span>{renderBold(trimmed.slice(2))}</span>
+              <span className="text-slate-500 shrink-0">•</span>
+              <span>{renderInline(trimmed.slice(2))}</span>
+            </div>
+          );
+        }
+        // 1. Numbered list item
+        const numberedMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
+        if (numberedMatch) {
+          return (
+            <div key={i} className="flex gap-1.5 pl-2">
+              <span className="text-slate-500 shrink-0 tabular-nums">{numberedMatch[1]}.</span>
+              <span>{renderInline(numberedMatch[2])}</span>
             </div>
           );
         }
         // Regular line
-        return <div key={i}>{renderBold(trimmed)}</div>;
+        return <div key={i}>{renderInline(trimmed)}</div>;
       })}
     </div>
   );
 }
 
-/** Render **bold** markers within a string */
-function renderBold(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+/** Render inline formatting: **bold** and `code` */
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
   if (parts.length === 1) return text;
   return (
     <>
       {parts.map((part, i) => {
         if (part.startsWith("**") && part.endsWith("**")) {
           return <strong key={i} className="text-white font-medium">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith("`") && part.endsWith("`")) {
+          return (
+            <code key={i} className="rounded bg-slate-700/80 px-1 py-0.5 text-[10px] font-mono text-emerald-400">
+              {part.slice(1, -1)}
+            </code>
+          );
         }
         return <span key={i}>{part}</span>;
       })}
@@ -625,14 +714,14 @@ function ChildrenSection({
         <button
           key={child.id}
           onClick={() => onNavigate?.(child.id)}
-          className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left hover:bg-slate-700/40 transition-colors"
+          className="group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-violet-500/10 border border-transparent hover:border-violet-500/20 transition-colors"
         >
           <div className="flex items-center gap-1.5 w-full">
-            <span className="text-[11px] text-slate-300 truncate flex-1">
+            <span className="text-[11px] text-slate-300 truncate flex-1 group-hover:text-white transition-colors">
               {getChildDisplayName(child)}
             </span>
             <RoleBadge role={child.role} small />
-            <span className="text-[10px] text-violet-400">&rarr;</span>
+            <ArrowRight className="h-3 w-3 text-slate-600 group-hover:text-violet-400 transition-colors" />
           </div>
           {child.description && (
             <div className="text-[10px] text-slate-500 truncate leading-tight">

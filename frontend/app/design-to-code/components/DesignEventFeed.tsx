@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import type { PipelineEvent } from "../types";
 
 /* ================================================================
    DesignEventFeed — Real-time pipeline event stream display.
    Shows node transitions, component loop iterations, and results.
+   Features: event type filtering, compact summary mode, noise reduction.
    ================================================================ */
 
 interface DesignEventFeedProps {
@@ -46,6 +47,40 @@ const EVENT_CONFIG: Record<string, { tagBg: string; tagColor: string; label: str
   spec_complete: { tagBg: "rgba(34,197,94,0.15)", tagColor: "#4ade80", label: "规格完成" },
 };
 
+// Filter categories mapping event types to filter groups
+type FilterCategory = "all" | "node" | "spec" | "loop" | "error";
+
+const FILTER_BUTTONS: { key: FilterCategory; label: string; icon: string }[] = [
+  { key: "all", label: "全部", icon: "" },
+  { key: "node", label: "节点", icon: "\u2699\uFE0F" },
+  { key: "spec", label: "分析", icon: "\uD83D\uDD0D" },
+  { key: "loop", label: "循环", icon: "\uD83D\uDD04" },
+  { key: "error", label: "错误", icon: "\u26A0\uFE0F" },
+];
+
+const EVENT_CATEGORY_MAP: Record<string, FilterCategory> = {
+  node_started: "node",
+  node_completed: "node",
+  node_output: "node",
+  workflow_start: "node",
+  workflow_complete: "node",
+  job_status: "node",
+  job_done: "node",
+  figma_fetch_start: "spec",
+  figma_fetch_complete: "spec",
+  frame_decomposed: "spec",
+  spec_analyzed: "spec",
+  spec_complete: "spec",
+  ai_thinking: "spec",
+  loop_iteration: "loop",
+  loop_terminated: "loop",
+  workflow_error: "error",
+};
+
+function getEventCategory(eventType: string): FilterCategory {
+  return EVENT_CATEGORY_MAP[eventType] ?? "node";
+}
+
 function getNodeLabel(nodeId: string) {
   return NODE_LABELS[nodeId] ?? { icon: "\u2699\uFE0F", label: nodeId };
 }
@@ -57,6 +92,7 @@ export function DesignEventFeed({
   jobStatus,
 }: DesignEventFeedProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [activeFilter, setActiveFilter] = useState<FilterCategory>("all");
 
   // Auto-scroll to bottom on new events
   useEffect(() => {
@@ -67,6 +103,71 @@ export function DesignEventFeed({
 
   const isRunning =
     jobStatus === "running" || jobStatus === "started";
+  const isCompleted =
+    jobStatus === "completed" || jobStatus === "failed";
+
+  // Compute filter counts
+  const filterCounts = useMemo(() => {
+    const counts: Record<FilterCategory, number> = {
+      all: events.length,
+      node: 0,
+      spec: 0,
+      loop: 0,
+      error: 0,
+    };
+    for (const evt of events) {
+      const cat = getEventCategory(evt.event_type);
+      counts[cat]++;
+    }
+    return counts;
+  }, [events]);
+
+  // Filter events
+  const filteredEvents = useMemo(() => {
+    if (activeFilter === "all") return events;
+    return events.filter(
+      (evt) => getEventCategory(evt.event_type) === activeFilter
+    );
+  }, [events, activeFilter]);
+
+  // Compact summary for completed pipelines
+  const completionSummary = useMemo(() => {
+    if (!isCompleted) return null;
+    const specEvents = events.filter(
+      (e) => e.event_type === "spec_analyzed"
+    );
+    const errors = events.filter(
+      (e) =>
+        e.event_type === "workflow_error" ||
+        (e.event_type === "workflow_complete" &&
+          e.data?.status === "failed")
+    );
+    const startEvt = events.find(
+      (e) => e.event_type === "workflow_start"
+    );
+    const endEvt = events.findLast(
+      (e) =>
+        e.event_type === "workflow_complete" ||
+        e.event_type === "job_done"
+    );
+    let durationStr = "";
+    if (startEvt && endEvt) {
+      const ms =
+        new Date(endEvt.timestamp).getTime() -
+        new Date(startEvt.timestamp).getTime();
+      durationStr =
+        ms >= 60000
+          ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`
+          : `${Math.round(ms / 1000)}s`;
+    }
+    return {
+      componentsAnalyzed: specEvents.length,
+      errorCount: errors.length,
+      totalEvents: events.length,
+      duration: durationStr,
+      status: jobStatus,
+    };
+  }, [events, isCompleted, jobStatus]);
 
   return (
     <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
@@ -91,6 +192,41 @@ export function DesignEventFeed({
         )}
       </div>
 
+      {/* ---- Filter Bar ---- */}
+      {events.length > 0 && (
+        <div className="flex items-center gap-1 border-b border-slate-700 bg-slate-900/50 px-3 py-1.5">
+          {FILTER_BUTTONS.map((btn) => {
+            const count = filterCounts[btn.key];
+            const isActive = activeFilter === btn.key;
+            return (
+              <button
+                key={btn.key}
+                onClick={() => setActiveFilter(btn.key)}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                  isActive
+                    ? "bg-slate-600 text-white"
+                    : "text-slate-400 hover:bg-slate-700/50 hover:text-slate-300"
+                }`}
+              >
+                {btn.icon && <span className="text-[10px]">{btn.icon}</span>}
+                {btn.label}
+                {count > 0 && (
+                  <span
+                    className={`ml-0.5 rounded-full px-1.5 text-[10px] ${
+                      isActive
+                        ? "bg-slate-500 text-white"
+                        : "bg-slate-700 text-slate-500"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* ---- SSE Disconnect Banner ---- */}
       {!sseConnected && isRunning && (
         <div className="flex items-center gap-2 bg-[#fef2f2] border-b border-[#fecaca] px-4 py-2">
@@ -99,6 +235,11 @@ export function DesignEventFeed({
             连接已断开，正在重连...
           </span>
         </div>
+      )}
+
+      {/* ---- Completion Summary Banner ---- */}
+      {completionSummary && (
+        <CompletionSummary summary={completionSummary} />
       )}
 
       {/* ---- Feed Body ---- */}
@@ -118,9 +259,15 @@ export function DesignEventFeed({
               </span>
             )}
           </div>
+        ) : filteredEvents.length === 0 ? (
+          <div className="flex items-center justify-center px-4 py-8">
+            <span className="text-xs text-slate-500">
+              没有匹配「{FILTER_BUTTONS.find((b) => b.key === activeFilter)?.label}」的事件
+            </span>
+          </div>
         ) : (
-          events.map((evt, i) => (
-            <EventRow key={i} event={evt} />
+          filteredEvents.map((evt, i) => (
+            <EventRow key={`${evt.event_type}-${evt.timestamp}-${i}`} event={evt} />
           ))
         )}
       </div>
@@ -150,9 +297,62 @@ export function DesignEventFeed({
         )}
         <div className="flex-1" />
         <span className="font-mono text-[11px] text-slate-500">
-          {events.length} 条事件
+          {activeFilter !== "all"
+            ? `${filteredEvents.length}/${events.length} 条事件`
+            : `${events.length} 条事件`}
         </span>
       </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   CompletionSummary — Compact summary shown after pipeline completes
+   ================================================================ */
+
+function CompletionSummary({
+  summary,
+}: {
+  summary: {
+    componentsAnalyzed: number;
+    errorCount: number;
+    totalEvents: number;
+    duration: string;
+    status?: string;
+  };
+}) {
+  const isFailed = summary.status === "failed";
+  return (
+    <div
+      className={`flex items-center gap-3 border-b px-4 py-2.5 ${
+        isFailed
+          ? "border-red-500/30 bg-red-500/5"
+          : "border-green-500/30 bg-green-500/5"
+      }`}
+    >
+      <span
+        className={`text-xs font-semibold ${
+          isFailed ? "text-red-400" : "text-green-400"
+        }`}
+      >
+        {isFailed ? "Pipeline 失败" : "Pipeline 完成"}
+      </span>
+      <span className="text-[11px] text-slate-400">
+        {summary.componentsAnalyzed} 组件分析
+      </span>
+      {summary.errorCount > 0 && (
+        <span className="text-[11px] text-red-400">
+          {summary.errorCount} 错误
+        </span>
+      )}
+      {summary.duration && (
+        <span className="text-[11px] text-slate-500">
+          耗时 {summary.duration}
+        </span>
+      )}
+      <span className="ml-auto text-[11px] text-slate-600">
+        {summary.totalEvents} 条事件
+      </span>
     </div>
   );
 }
@@ -168,9 +368,10 @@ function EventRow({ event }: { event: PipelineEvent }) {
     label: event.event_type,
   };
 
-  const isNodeEvent =
-    event.event_type === "node_started" ||
-    event.event_type === "node_completed";
+  // ai_thinking — collapsed by default, minimal noise
+  if (event.event_type === "ai_thinking") {
+    return <AiThinkingRow event={event} cfg={cfg} />;
+  }
 
   // Node separator style for node transitions
   if (event.event_type === "node_started" && event.node_id) {
@@ -302,7 +503,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
     );
   }
 
-  // node_output — show compact summary, expandable for raw data
+  // node_output — show compact summary with key fields only
   if (event.event_type === "node_output") {
     return <NodeOutputRow event={event} cfg={cfg} />;
   }
@@ -327,7 +528,53 @@ function EventRow({ event }: { event: PipelineEvent }) {
 }
 
 /* ================================================================
-   NodeOutputRow — Compact node output with expandable raw data
+   AiThinkingRow — Collapsed by default to reduce noise
+   ================================================================ */
+
+function AiThinkingRow({
+  event,
+  cfg,
+}: {
+  event: PipelineEvent;
+  cfg: { tagBg: string; tagColor: string; label: string };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const content = (event.data?.content as string) || "AI 正在分析...";
+  const preview = content.slice(0, 60) + (content.length > 60 ? "..." : "");
+
+  return (
+    <div className="border-b border-slate-700">
+      <button
+        onClick={() => setExpanded((p) => !p)}
+        className="flex w-full items-center gap-2 px-4 py-1 text-left hover:bg-slate-700/30 transition-colors"
+      >
+        <span
+          className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 opacity-60"
+          style={{ backgroundColor: cfg.tagBg, color: cfg.tagColor }}
+        >
+          {cfg.label}
+        </span>
+        <span className="text-[10px] text-slate-500 truncate flex-1">
+          {preview}
+        </span>
+        <span className="text-[10px] text-slate-600 shrink-0">
+          {expanded ? "▼" : "▶"}
+        </span>
+        <span className="shrink-0 font-mono text-[10px] text-slate-600">
+          {formatTime(event.timestamp)}
+        </span>
+      </button>
+      {expanded && (
+        <div className="bg-slate-900/60 px-4 py-2 text-[11px] text-slate-400 whitespace-pre-wrap max-h-[150px] overflow-y-auto">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+   NodeOutputRow — Compact node output with key fields only
    ================================================================ */
 
 function NodeOutputRow({
@@ -339,6 +586,7 @@ function NodeOutputRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const summary = summarizeNodeOutput(event);
+  const keyFields = extractKeyFields(event);
 
   return (
     <div className="border-b border-slate-700">
@@ -355,6 +603,18 @@ function NodeOutputRow({
         <span className="text-[11px] text-slate-400 truncate flex-1">
           {summary}
         </span>
+        {keyFields.length > 0 && (
+          <span className="hidden sm:flex items-center gap-1 shrink-0">
+            {keyFields.map((kf, i) => (
+              <span
+                key={i}
+                className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] text-slate-500"
+              >
+                {kf}
+              </span>
+            ))}
+          </span>
+        )}
         <span className="text-[10px] text-slate-600 shrink-0">
           {expanded ? "▼" : "▶"}
         </span>
@@ -430,6 +690,23 @@ function formatTime(ts: string): string {
   }
 }
 
+function extractKeyFields(event: PipelineEvent): string[] {
+  const fields: string[] = [];
+  const data = event.data;
+  if (!data) return fields;
+
+  if (typeof data.components_count === "number") {
+    fields.push(`${data.components_count} 组件`);
+  }
+  if (typeof data.succeeded === "number" && typeof data.total === "number") {
+    fields.push(`${data.succeeded}/${data.total}`);
+  }
+  if (data.design_file) {
+    fields.push(String(data.design_file).split("/").pop() || "");
+  }
+  return fields.slice(0, 3);
+}
+
 function summarizeNodeOutput(event: PipelineEvent): string {
   const nodeId = event.node_id || (event.data?.node as string) || "";
   const { label } = getNodeLabel(nodeId);
@@ -452,7 +729,6 @@ function summarizeNodeOutput(event: PipelineEvent): string {
 function describeEvent(event: PipelineEvent): string {
   switch (event.event_type) {
     case "loop_iteration": {
-      // Handle both backend field formats: iteration/max_iterations (current) and current_index/total (future)
       const idx = event.data?.iteration ?? event.data?.current_index;
       const total = event.data?.max_iterations ?? event.data?.total;
       return idx != null && total != null
