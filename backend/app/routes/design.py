@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -374,12 +374,13 @@ async def run_spec_pipeline(
     # Parse Figma URL
     file_key, node_id = _parse_figma_url(payload.figma_url)
 
-    # Create output directory
-    output_dir = os.path.abspath(payload.output_dir)
+    # Create job ID first, then isolate output under job-specific subdirectory
+    job_id = f"spec_{uuid.uuid4().hex[:12]}"
+    base_dir = os.path.abspath(payload.output_dir)
+    output_dir = os.path.join(base_dir, job_id)
     os.makedirs(output_dir, exist_ok=True)
 
     # Create job in DB
-    job_id = f"spec_{uuid.uuid4().hex[:12]}"
     spec_path = os.path.join(output_dir, "design_spec.json")
     repo = DesignJobRepository(session)
     job = await repo.create(
@@ -569,6 +570,61 @@ async def get_design_job_files(
         files=files,
     )
 
+
+# Allowed image extensions for screenshot serving
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+@router.get("/{job_id}/screenshots/{filename}")
+async def get_screenshot(
+    job_id: str,
+    filename: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Serve a component screenshot image for a design job.
+
+    Screenshots are downloaded from Figma during pipeline execution and stored
+    at {output_dir}/screenshots/{node_id}.png.
+
+    Security: filename is validated to prevent path traversal — only bare
+    filenames with image extensions are allowed (no slashes, no '..').
+
+    Usage:
+        GET /api/v2/design/{job_id}/screenshots/16650_539.png
+        → PNG image response
+    """
+    # Path traversal protection: reject any path separators or '..'
+    if ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Only serve image files
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    screenshot_path = os.path.join(job.output_dir, "screenshots", filename)
+
+    if not os.path.isfile(screenshot_path):
+        raise HTTPException(status_code=404, detail=f"Screenshot not found: {filename}")
+
+    # Content-type mapping
+    media_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }
+
+    return FileResponse(
+        screenshot_path,
+        media_type=media_types.get(ext, "image/png"),
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 

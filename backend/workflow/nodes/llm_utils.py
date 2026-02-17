@@ -193,10 +193,69 @@ async def invoke_claude_cli(
     )
 
 
+def _sanitize_llm_json(text: str) -> str:
+    """Sanitize common LLM JSON errors before parsing.
+
+    Fixes (in order):
+    1. Control characters (except tab/newline/cr)
+    2. Chinese/smart quotes → ASCII quotes
+    3. Trailing commas in objects/arrays
+    4. Truncated JSON auto-closing (unmatched braces/brackets)
+    """
+    # 1. Strip control characters (keep \t \n \r)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+
+    # 2. Replace Chinese/smart quotes with ASCII equivalents
+    text = text.replace("\u201c", '"').replace("\u201d", '"')  # "" → "
+    text = text.replace("\u2018", "'").replace("\u2019", "'")  # '' → '
+    text = text.replace("\u300c", '"').replace("\u300d", '"')  # 「」→ "
+    text = text.replace("\u300e", '"').replace("\u300f", '"')  # 『』→ "
+
+    # 3. Remove trailing commas before } or ]
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+
+    # 4. Auto-close truncated JSON (unmatched { and [)
+    # Use a stack to track nesting order so closers are appended correctly.
+    # Simple counting (e.g. `"}" * open_braces`) gets the order wrong for
+    # nested structures like `{"children": [{"id": "a"` which needs `}]}`.
+    in_string = False
+    escape = False
+    stack: list[str] = []
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in ("{", "["):
+            stack.append(ch)
+        elif ch == "}" and stack and stack[-1] == "{":
+            stack.pop()
+        elif ch == "]" and stack and stack[-1] == "[":
+            stack.pop()
+    if stack:
+        text = text.rstrip()
+        for opener in reversed(stack):
+            text += "}" if opener == "{" else "]"
+
+    return text
+
+
 def parse_llm_json(raw: str, caller: str = "LLM") -> Optional[Dict]:
     """Parse JSON from LLM response, handling markdown fences and preamble.
 
-    Tries in order: direct parse -> strip leading fence -> regex fence -> outermost braces.
+    Pipeline:
+    1. Direct parse
+    2. Strip leading markdown fence → parse
+    3. Regex extract from non-leading fence → parse
+    4. Sanitize (smart quotes, trailing commas, control chars, truncation) → parse
+    5. Extract outermost { ... } → sanitize → parse
     """
     if not raw:
         return None
@@ -225,14 +284,26 @@ def parse_llm_json(raw: str, caller: str = "LLM") -> Optional[Dict]:
         except json.JSONDecodeError:
             pass
 
-    # Fallback: extract outermost { ... }
-    brace_start = text.find("{")
-    brace_end = text.rfind("}")
+    # Sanitize and retry
+    sanitized = _sanitize_llm_json(text)
+    try:
+        return json.loads(sanitized)
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: extract outermost { ... } then sanitize
+    brace_start = sanitized.find("{")
+    brace_end = sanitized.rfind("}")
     if brace_start >= 0 and brace_end > brace_start:
+        extracted = sanitized[brace_start:brace_end + 1]
         try:
-            return json.loads(text[brace_start:brace_end + 1])
+            return json.loads(extracted)
         except json.JSONDecodeError:
-            pass
+            # Last resort: sanitize the extracted portion again
+            try:
+                return json.loads(_sanitize_llm_json(extracted))
+            except json.JSONDecodeError:
+                pass
 
     logger.error("%s: JSON parse error, raw[:500]: %s", caller, text[:500])
     return None

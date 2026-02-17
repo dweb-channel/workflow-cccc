@@ -1,7 +1,11 @@
-"""Node 2: SpecAnalyzerNode — LLM vision analysis for semantic fields.
+"""Node 2: SpecAnalyzerNode — Two-pass LLM analysis for semantic fields.
 
-Uses Claude CLI with vision to fill semantic fields (role, description,
-interaction) in ComponentSpecs.
+Two-pass architecture:
+  Pass 1: Screenshot + structural spec → free-form design analysis (Chinese markdown)
+  Pass 2: Pass 1 analysis + spec → small JSON metadata (role, name, interaction, etc.)
+
+design_analysis comes from Pass 1 (never serialized as JSON).
+Structured fields come from Pass 2 (small JSON, sanitize + retry safety net).
 """
 
 import json
@@ -12,11 +16,12 @@ from .registry import BaseNodeImpl, register_node_type
 from .llm_utils import invoke_claude_cli as _invoke_claude_cli
 from .llm_utils import parse_llm_json as _parse_llm_json
 
-# Import prompt templates and merger
+# Import two-pass prompt templates and merger
 from ..spec.spec_analyzer_prompt import (
-    SPEC_ANALYZER_OUTPUT_SCHEMA,
-    SPEC_ANALYZER_SYSTEM_PROMPT,
-    SPEC_ANALYZER_USER_PROMPT,
+    PASS1_SYSTEM_PROMPT,
+    PASS1_USER_PROMPT,
+    PASS2_SYSTEM_PROMPT,
+    PASS2_USER_PROMPT,
 )
 from ..spec.spec_merger import merge_analyzer_output
 
@@ -245,6 +250,71 @@ class SpecAnalyzerNode(BaseNodeImpl):
             "token_usage": token_totals,
         }
 
+    async def _retry_with_error_feedback(
+        self,
+        claude_bin: str,
+        raw_text: str,
+        cwd: str,
+        model: str,
+        component_name: str,
+    ) -> dict | None:
+        """Retry JSON parse by feeding the error back to Claude CLI.
+
+        Sends the malformed output + parse error to Claude, asking it to
+        return only the corrected JSON. Single retry, no screenshot needed
+        since the model already has context from the original response.
+        """
+        # Try to get a specific parse error message
+        import json as _json
+        parse_error = "Could not parse as JSON"
+        try:
+            _json.loads(raw_text)
+        except _json.JSONDecodeError as e:
+            parse_error = str(e)
+
+        # Truncate raw_text to avoid hitting token limits
+        truncated = raw_text[:3000] if len(raw_text) > 3000 else raw_text
+
+        correction_prompt = (
+            "Your previous response could not be parsed as valid JSON.\n\n"
+            f"Parse error: {parse_error}\n\n"
+            f"Your previous output (may be truncated):\n{truncated}\n\n"
+            "Please return ONLY the corrected valid JSON object. "
+            "The first character must be { and the last must be }. "
+            "No markdown, no code fences, no explanation. "
+            "Fix any escaping issues in string values "
+            "(use \\n for newlines, \\\" for quotes inside strings)."
+        )
+
+        try:
+            correction_result = await _invoke_claude_cli(
+                claude_bin=claude_bin,
+                system_prompt="You are a JSON repair assistant. Return only valid JSON.",
+                user_prompt=correction_prompt,
+                base_dir=cwd,
+                model=model,
+                timeout=120.0,
+                max_retries=0,  # no further retries for the correction call
+                component_name=f"{component_name}_json_fix",
+                caller=f"SpecAnalyzerNode [{self.node_id}] retry",
+            )
+            corrected = _parse_llm_json(
+                correction_result["text"],
+                caller=f"SpecAnalyzerNode [{self.node_id}] retry",
+            )
+            if corrected:
+                logger.info(
+                    "SpecAnalyzerNode [%s]: retry succeeded for %s",
+                    self.node_id, component_name,
+                )
+            return corrected
+        except Exception as e:
+            logger.error(
+                "SpecAnalyzerNode [%s]: retry failed for %s: %s",
+                self.node_id, component_name, e,
+            )
+            return None
+
     async def _analyze_single_component(
         self,
         claude_bin: str,
@@ -258,51 +328,131 @@ class SpecAnalyzerNode(BaseNodeImpl):
         model: str,
         max_retries: int = 2,
     ) -> Dict:
-        """Analyze a single component using Claude CLI subprocess."""
+        """Analyze a single component using two-pass Claude CLI architecture.
+
+        Pass 1: Screenshot + structural spec → free-form design analysis text
+        Pass 2: Pass 1 text + spec → small JSON (role, name, interaction, etc.)
+        """
+        import time as _time
+        _start_time = _time.monotonic()
+
+        comp_name = component.get("name", "?")
+
         # Build partial spec (structural data only)
         partial_spec = _strip_semantic_fields(component)
         partial_spec_json = json.dumps(partial_spec, ensure_ascii=False, indent=2)
         tokens_json = json.dumps(design_tokens, ensure_ascii=False, indent=2)
+        sibling_names_str = ", ".join(sibling_names)
 
-        user_text = SPEC_ANALYZER_USER_PROMPT.format(
+        # Token usage accumulator for both passes
+        total_tokens: Dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        total_retries = 0
+
+        # ---- Pass 1: Free-form design analysis (with screenshot) ----
+        pass1_user = PASS1_USER_PROMPT.format(
             device_type=device.get("type", "mobile"),
             device_width=device.get("width", 393),
             device_height=device.get("height", 852),
             responsive_strategy=page.get("responsive_strategy", "fixed-width"),
             page_layout_type=page_layout.get("type", "flex"),
-            sibling_names=", ".join(sibling_names),
+            sibling_names=sibling_names_str,
             design_tokens_json=tokens_json,
             partial_spec_json=partial_spec_json,
         )
 
-        cli_result = await _invoke_claude_cli(
+        pass1_result = await _invoke_claude_cli(
             claude_bin=claude_bin,
-            system_prompt=SPEC_ANALYZER_SYSTEM_PROMPT,
-            user_prompt=user_text,
+            system_prompt=PASS1_SYSTEM_PROMPT,
+            user_prompt=pass1_user,
             screenshot_path=component.get("screenshot_path", ""),
             base_dir=cwd,
             model=model,
             timeout=300.0,
             max_retries=max_retries,
-            component_name=component.get("name", "?"),
+            component_name=f"{comp_name}_pass1",
             caller=f"SpecAnalyzerNode [{self.node_id}]",
         )
 
-        raw_text = cli_result["text"]
-        analyzer_output = _parse_llm_json(
-            raw_text, caller=f"SpecAnalyzerNode [{self.node_id}]",
+        design_analysis_text = pass1_result["text"]
+        total_retries += pass1_result.get("retry_count", 0)
+        if pass1_result["token_usage"]:
+            total_tokens["input_tokens"] += pass1_result["token_usage"].get("input_tokens", 0)
+            total_tokens["output_tokens"] += pass1_result["token_usage"].get("output_tokens", 0)
+
+        logger.info(
+            "SpecAnalyzerNode [%s]: Pass 1 complete for %s (%d chars)",
+            self.node_id, comp_name, len(design_analysis_text),
         )
+
+        # ---- Pass 2: Structured metadata extraction (no screenshot) ----
+        pass2_user = PASS2_USER_PROMPT.format(
+            design_analysis_text=design_analysis_text,
+            sibling_names=sibling_names_str,
+            partial_spec_json=partial_spec_json,
+        )
+
+        pass2_result = await _invoke_claude_cli(
+            claude_bin=claude_bin,
+            system_prompt=PASS2_SYSTEM_PROMPT,
+            user_prompt=pass2_user,
+            base_dir=cwd,  # no screenshot needed for extraction
+            model=model,
+            timeout=120.0,  # shorter timeout — extraction is simpler
+            max_retries=max_retries,
+            component_name=f"{comp_name}_pass2",
+            caller=f"SpecAnalyzerNode [{self.node_id}]",
+        )
+
+        total_retries += pass2_result.get("retry_count", 0)
+        if pass2_result["token_usage"]:
+            total_tokens["input_tokens"] += pass2_result["token_usage"].get("input_tokens", 0)
+            total_tokens["output_tokens"] += pass2_result["token_usage"].get("output_tokens", 0)
+
+        # Parse Pass 2 JSON (with sanitize safety net from T134)
+        raw_pass2 = pass2_result["text"]
+        analyzer_output = _parse_llm_json(
+            raw_pass2, caller=f"SpecAnalyzerNode [{self.node_id}] pass2",
+        )
+
+        # Retry with error feedback if Pass 2 parse failed
         if not analyzer_output:
-            raise ValueError(
-                f"JSON parse failed for {component.get('name')}, "
-                f"raw[:300]: {raw_text[:300]}"
+            logger.warning(
+                "SpecAnalyzerNode [%s]: Pass 2 JSON parse failed for %s, "
+                "attempting retry with error feedback",
+                self.node_id, comp_name,
             )
+            analyzer_output = await self._retry_with_error_feedback(
+                claude_bin=claude_bin,
+                raw_text=raw_pass2,
+                cwd=cwd,
+                model=model,
+                component_name=f"{comp_name}_pass2",
+            )
+
+        if not analyzer_output:
+            # Pass 2 failed completely — preserve design_analysis from Pass 1
+            # with safe defaults for structured fields
+            logger.error(
+                "SpecAnalyzerNode [%s]: Pass 2 failed for %s, "
+                "using Pass 1 analysis with default structured fields",
+                self.node_id, comp_name,
+            )
+            analyzer_output = {
+                "role": "section",  # safe default
+                "description": "",
+                "suggested_name": comp_name,
+            }
+
+        # Inject design_analysis from Pass 1 directly (never serialized as JSON)
+        analyzer_output["design_analysis"] = design_analysis_text
 
         # Merge LLM output into component using spec_merger
         merged = merge_analyzer_output(component, analyzer_output)
-        # Attach token usage + retry info (not part of spec, used for tracking)
-        if cli_result["token_usage"]:
-            merged["_token_usage"] = cli_result["token_usage"]
-        merged["_retry_count"] = cli_result.get("retry_count", 0)
-        merged["_duration_ms"] = cli_result.get("duration_ms", 0)
+
+        # Attach tracking metadata (both passes combined)
+        duration_ms = int((_time.monotonic() - _start_time) * 1000)
+        if total_tokens["input_tokens"] > 0 or total_tokens["output_tokens"] > 0:
+            merged["_token_usage"] = total_tokens
+        merged["_retry_count"] = total_retries
+        merged["_duration_ms"] = duration_ms
         return merged

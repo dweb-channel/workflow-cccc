@@ -193,9 +193,10 @@ function buildPreviewStyle(component: ComponentSpec): React.CSSProperties {
 // ================================================================
 
 function getScreenshotUrl(path: string, jobId?: string): string {
-  // Screenshots are served relative to the job output directory
+  // Extract bare filename from screenshot_path (e.g. "screenshots/16650_539.png" → "16650_539.png")
+  const filename = path.split("/").pop() || path;
   if (jobId) {
-    return `/api/v2/design/${jobId}/screenshots/${encodeURIComponent(path)}`;
+    return `/api/v2/design/${jobId}/screenshots/${encodeURIComponent(filename)}`;
   }
   return path;
 }

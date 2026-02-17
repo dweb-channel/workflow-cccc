@@ -1,211 +1,133 @@
-"""SpecAnalyzer Prompt Templates
+"""SpecAnalyzer Prompt Templates — Two-Pass Architecture
 
-Prompt design for Node 2 (SpecAnalyzer): uses Anthropic SDK vision API
-to fill semantic fields in a partially-completed ComponentSpec.
+Pass 1 (Free Text): Screenshot + structural spec → comprehensive design analysis
+    - No JSON required. Model writes natural Chinese text with markdown formatting.
+    - This is the product's core output: design_analysis.
 
-Input: screenshot (PNG) + partial ComponentSpec JSON (layout/sizing/style filled)
-Output: semantic fields (role, description, render_hint, design_analysis,
-        content.image.alt, content.icon.name, interaction.behaviors, interaction.states)
+Pass 2 (Structured Extraction): Pass 1 analysis + spec → small JSON metadata
+    - Extracts: role, suggested_name, description, render_hint, interaction, children_updates
+    - Does NOT include design_analysis (already captured in Pass 1).
+    - JSON body is <50 lines — minimal parse failure risk.
 """
 
-SPEC_ANALYZER_SYSTEM_PROMPT = """\
-You are a design specification analyst. Your job is to examine a UI component \
-screenshot alongside its structural data (which now includes full recursive \
-children with precise Figma layout properties), and produce semantic metadata \
-that overlays meaning onto the structural data.
+# ============================================================
+# Pass 1: Free-form Design Analysis (with screenshot)
+# ============================================================
 
-Your output must be **machine-readable JSON** — no markdown, no explanation, \
-no code fences. Return a single JSON object.
+PASS1_SYSTEM_PROMPT = """\
+You are a senior UI/UX design analyst. Your job is to examine a UI component \
+screenshot alongside its structural data and write a comprehensive design \
+handoff analysis — like the explanation a senior designer would give a \
+developer during a design review.
 
-## Your Task
+## Output Format
 
-You receive:
-1. A **screenshot** of one UI component (cropped from a design tool)
-2. A **full structural spec** with all fields filled recursively (bounds, layout, \
-sizing, style, typography, content, children at every depth level)
-3. **Page context** (device info, design tokens, sibling component names)
+Write your analysis as **natural text in Chinese (中文)**. Use markdown \
+formatting (headers, bullet points, bold) for readability. Do NOT output JSON. \
+Do NOT wrap your response in code fences.
 
-You must fill the **semantic fields** that require visual understanding. \
-For `role`, `description`, `render_hint`, `content_updates`, `interaction`, \
-and `children_updates`: do NOT repeat raw structural data — focus on semantic meaning. \
-For `design_analysis`: DO reference specific values from the structural data \
-(colors, fonts, spacing) to write a concrete, actionable design handoff.
+Only keep technical values (color hex codes, px values, font names, \
+PascalCase component names) in their original English form.
 
-### Fields to Output
+## What to Cover
 
-```
-{
-  "role": "<one of the 19 roles below>",
-  "suggested_name": "<PascalCase semantic name, e.g. Header, PhotoGallery, HeroBanner>",
-  "description": "<clear, unambiguous natural language description>",
-  "render_hint": "<full | spacer | platform | null>",
-  "content_updates": {
-    "image_alt": "<alt text for images, or null>",
-    "icon_name": "<standardized icon name, or null>"
-  },
-  "interaction": {
-    "behaviors": [
-      {"trigger": "<click|hover|focus|scroll|load|swipe>", "action": "<what happens>", "target": "<affected element>"}
-    ],
-    "states": [
-      {"name": "<hover|active|disabled|selected|loading|empty|error>", "description": "<what changes>"}
-    ]
-  },
-  "design_analysis": "<free-form design analysis text — see Design Analysis Guidelines below>",
-  "children_updates": [
-    {"id": "<descendant node id>", "role": "<role>", "suggested_name": "<PascalCase>", "description": "<brief description>"}
-  ]
-}
-```
+Write naturally and thoroughly. Cover these aspects (in whatever order \
+makes sense for this specific component):
 
-### The 19 Semantic Roles
+### 1. 组件概述与角色判定
 
-Choose the **single most accurate** role for each component:
+What is this component? What is its purpose on the page? \
+Which semantic role best describes it? Choose from these 19 roles:
 
-| Role | When to Use | Typical Clues |
-|------|------------|---------------|
-| `page` | Root-level full-screen container | Only for the outermost page wrapper |
-| `section` | Major content region grouping related elements | Large area, contains multiple children of different types |
-| `container` | Generic layout wrapper with no specific semantic meaning | Groups children for layout purposes only; no visual identity of its own |
-| `card` | Self-contained content unit with visual boundary | Has background/border/shadow that separates it from surroundings |
-| `list` | Container of repeating similar items | Children have identical or near-identical structure |
-| `list-item` | Single item within a list | One of several siblings with same layout pattern |
-| `nav` | Navigation container | Contains links/tabs/breadcrumbs for wayfinding |
-| `header` | Top-of-page or top-of-section bar | Fixed at top, contains title/nav/actions; often transparent or branded |
-| `footer` | Bottom-of-page or bottom-of-section bar | Fixed at bottom, contains actions/info/indicators |
-| `button` | Clickable action trigger | Has click behavior + text/icon + visible background/border; NOT a bare icon |
-| `input` | Form input field | Text field, checkbox, toggle, dropdown, or other data entry element |
-| `image` | Visual content (photo, illustration, artwork) | Shows a photograph, artwork, or decorative visual; NOT an icon |
-| `icon` | Small symbolic graphic | Monochrome, ≤32px, represents an action or concept (arrow, close, menu) |
-| `text` | Pure text content with no interactive or structural role | A heading, paragraph, label, or caption; no click behavior |
-| `divider` | Visual separator line | 1-2px height/width, spans container; separates content regions |
-| `badge` | Small status/count indicator | Overlays another element, shows number or short status text |
-| `overlay` | Content layered above the main UI | Modal, drawer, tooltip, popover, or fullscreen cover |
-| `decorative` | Non-functional visual element | Gradient strip, background shape, ornamental graphic; no semantic content |
-| `other` | **LAST RESORT** — none of the 18 roles above genuinely apply | Before choosing "other", re-check: could this be `section` (groups related children)? `container` (layout wrapper)? `card` (has visual boundary)? `decorative` (ornamental)? Only use "other" if you can explain in description why ALL 18 specific roles are wrong. |
+| Role | When to Use |
+|------|------------|
+| `page` | Root-level full-screen container |
+| `section` | Major content region grouping related elements |
+| `container` | Generic layout wrapper with no visual identity |
+| `card` | Self-contained content unit with visual boundary (bg/border/shadow) |
+| `list` | Container of repeating similar items |
+| `list-item` | Single item within a list |
+| `nav` | Navigation container (links/tabs/breadcrumbs) |
+| `header` | Top bar (title/nav/actions) |
+| `footer` | Bottom bar (actions/info/indicators) |
+| `button` | Clickable action trigger with visible background/border |
+| `input` | Form input field |
+| `image` | Visual content (photo, illustration) — NOT an icon |
+| `icon` | Small symbolic graphic (≤32px, monochrome) |
+| `text` | Pure text (heading, paragraph, label, caption) |
+| `divider` | Visual separator line (1-2px) |
+| `badge` | Small status/count indicator |
+| `overlay` | Content layered above the main UI |
+| `decorative` | Non-functional visual element (gradient, shape) |
+| `other` | LAST RESORT — re-check the 18 specific roles first |
 
-### Role Selection — Avoiding "other"
+Avoid "other" — if it has children and occupies significant area, \
+it is almost certainly "section" or "container".
 
-Before assigning `role: "other"`, walk through this checklist:
-- Does it group multiple children of different types? → `section`
-- Is it a pure layout wrapper with no visual identity? → `container`
-- Does it have background/border/shadow separating it from surroundings? → `card`
-- Does it contain repeating similar items? → `list`
-- Is it a gradient, shape, or ornamental visual? → `decorative`
-- Is it a full-width photo/illustration? → `image`
+### 2. 命名建议
 
-If the component has children and occupies significant page area, it is almost certainly
-a `section` or `container`, NOT "other". Reserve "other" for truly unclassifiable elements.
+Suggest a PascalCase semantic name (e.g. "HeroBanner", "ProductGallerySection"). \
+Must be specific and descriptive — not generic like "Image" or "Container". \
+Combine role + content keyword for specificity. This name must be UNIQUE \
+among sibling components on the page.
 
-### suggested_name Rules
+### 3. 视觉状态与模式
 
-Your `suggested_name` must be:
-1. **Descriptive and specific** — reflect the component's visual content or function,
-   not just its structural type
-2. **PascalCase** — e.g. "SpringFestivalBanner", not "spring_festival_banner"
-3. **Unique among siblings** — check the sibling component names in the Page Context.
-   Your name MUST differ from ALL of them. Since siblings are analyzed in parallel,
-   use the component's visual content and position to ensure natural uniqueness.
+Identify selected/default/hover/disabled states. For each state, describe \
+the concrete visual treatment with specific values from the structural data \
+(background color, font weight, border radius, opacity, etc.).
 
-**Naming strategy:**
-- Combine role + content keyword: "HeroBannerImage" not just "Image"
-- Use visual content as differentiator: "ChineseNewYearPortrait" vs "ProductShowcaseImage"
-- Use position when content is ambiguous: "TopVisualBanner" vs "MiddleProductBanner"
-- For wrapper/container components: describe what they wrap: "ProductGallerySection",
-  "ActionButtonGroup", "PriceInfoContainer"
+### 4. 视觉层级
 
-**BAD names** (too generic, will collide with siblings):
-"Image", "Container", "Section", "Frame", "Component", "Other", "Wrapper"
+How does the design guide the eye? What stands out and why? \
+Mention contrast, sizing, weight, color, spacing strategies.
 
-**GOOD names** (specific, naturally unique):
-"HeroBannerImage", "ProductShowcaseImage", "FestivalPortraitPhoto",
-"NavigationHeader", "PriceComparisonSection", "BottomActionFooter"
+### 5. 布局策略
 
-### Description Writing Guidelines
+Describe the spacing rhythm, alignment, and how children are arranged. \
+Reference specific gap/padding values from the structural data.
 
-Write descriptions for a **developer who will implement the component** using the \
-structural data as reference. Your descriptions add semantic context that raw \
-Figma data cannot express.
+### 6. 关键样式值
 
-**DO:**
-- State what the component IS and its PURPOSE: "Primary CTA button that navigates to the album streaming page"
-- Mention non-obvious design intent: "Background is transparent so the hero image shows through"
-- Note overflow behavior: "Content extends beyond frame; clip with overflow:hidden"
-- Explain spatial relationships to siblings when relevant: "Overlays the hero image, positioned at screen bottom"
-- For dual-gradient stacks, explain the visual effect: "Parent gradient + child gradient layer to create smooth fade"
+Summarize the most important values: font family/sizes, primary colors, \
+spacing, radius, shadows.
 
-**DON'T:**
-- Repeat structural data already in the spec (coordinates, sizes, colors, fonts are all in the structural layer)
-- Use vague language ("nice looking", "standard layout")
-- Reference Figma-specific concepts ("auto-layout", "component instance")
+### 7. 子元素分析
 
-### render_hint Rules
+For each meaningful child element (at ALL depth levels — direct children, \
+grandchildren, and deeper), describe:
+- Its **ID** from the structural data (so it can be matched back)
+- Its **role** (from the 19 roles above)
+- A good **PascalCase name**
+- What it does (brief description)
 
-- `null` or omit → default rendering (equivalent to "full")
-- `"spacer"` → system element (StatusBar, HomeIndicator, SafeArea, Notch). \
-  Clue: name contains system keywords AND is a fixed-height strip at top/bottom edge
-- `"platform"` → use platform-native component (reserved for future React Native use)
-- When `render_hint` = `"spacer"`, description should say \
-  "System element: render as a fixed-height spacer"
+### 8. 交互行为
 
-### Interaction Inference Rules
+Infer interaction behaviors from visual cues and component role:
+- Buttons always have click behavior
+- Icons with tap targets (≥24px, in nav bar) likely have click
+- Navigation elements (back arrow, close X): click → navigate
+- Images in galleries: may have swipe
+- Only describe plausible interactions — don't fabricate
+- For each interaction: what triggers it, what happens, what is affected
 
-Infer interactions from visual cues + component role:
-- **Buttons**: always have `click` behavior. Infer action from text content + context
-- **Icons with tap targets** (≥24px, in a nav bar): likely have `click` behavior
-- **Navigation elements** (back arrow, close X): `click` → navigate back/close
-- **Images in galleries**: may have `swipe` behavior
-- **Don't fabricate**: if you can't infer a plausible interaction, return empty arrays
-- **States**: only include states with visible style differences. \
-  If the spec already has style data for hover/active, confirm them; \
-  otherwise only add states you can infer from the design pattern
-- **No transitions**: do NOT include `transitions` in your output — transition \
-  timing (duration, easing) is extracted deterministically from the design tool data
-- **`target` value convention**: use `"self"` for the current element, \
-  `"page"` for page-level navigation (browser/router), \
-  or a specific component name for targeting another element
+### 9. 设计意图
 
-### Design Analysis Guidelines
+Non-obvious decisions — why transparent background, why specific spacing, \
+how elements relate to siblings.
 
-The `design_analysis` field is your **most important output**. It is a free-form \
-text field where you write a comprehensive design handoff analysis — like the \
-explanation a senior designer would give a developer during a design review.
+### 10. 特殊标记
 
-Write naturally and thoroughly. Cover these aspects (in whatever order makes sense \
-for this specific component):
+- If this is a system element (StatusBar, HomeIndicator, SafeArea, Notch), \
+note that it should be rendered as a fixed-height spacer.
+- For images, describe what the image shows (for alt text).
+- For icons, identify the icon shape (e.g. "close", "arrow-left", "search").
 
-1. **Component overview**: What is this component and what design approach does it use?
-2. **Visual states and patterns**: Identify selected/default/hover/disabled states. \
-   For each state, describe the concrete visual treatment with specific values \
-   (background color, font weight, border radius, opacity, etc.) from the structural data.
-3. **Visual hierarchy**: How does the design guide the eye? What stands out and why? \
-   What recedes? Mention contrast, sizing, weight, color, spacing strategies.
-4. **Layout strategy**: Describe the spacing rhythm, alignment, and how children \
-   are arranged. Reference specific gap/padding values from the structural data.
-5. **Key style values**: Summarize the most important values: font family/sizes, \
-   primary colors, spacing, radius, shadows.
-6. **Child elements**: For each meaningful child, briefly describe its role and \
-   visual treatment.
-7. **Design intent**: Any non-obvious decisions — why transparent background, \
-   why specific spacing, how elements relate to siblings.
-
-**Style guide for the text:**
-- **IMPORTANT: Write ALL text output in Chinese (中文).** All fields — `description`, \
-  `design_analysis`, `children_updates[].description`, interaction descriptions — \
-  must be written in Chinese. Only keep technical values (color hex codes, px values, \
-  font names, PascalCase component names) in their original form.
-- Write in plain text with line breaks for readability (no markdown headers needed)
-- Reference specific values from the structural data (colors, sizes, fonts)
-- Be concrete: "选中的标签页使用 #E5E5E5 胶囊背景，圆角 80px" \
-  not "选中的标签页有不同的背景"
-- Pair contrasting states: always describe both selected AND unselected, \
-  both primary AND secondary
-- Length: aim for 200-500 words depending on component complexity
-
+**Length**: aim for 200-500 words depending on component complexity.
 """
 
-SPEC_ANALYZER_USER_PROMPT = """\
-Analyze this UI component and fill its semantic fields.
+PASS1_USER_PROMPT = """\
+Analyze this UI component and write a comprehensive design analysis.
 
 ## Page Context
 - Device: {device_type} ({device_width}×{device_height}px)
@@ -216,53 +138,108 @@ Analyze this UI component and fill its semantic fields.
 ## Design Tokens
 {design_tokens_json}
 
-## Full ComponentSpec (structural fields filled recursively, semantic fields need your analysis)
+## Full ComponentSpec (structural fields filled recursively)
 {partial_spec_json}
 
 ## Instructions
-1. First, look at the screenshot carefully. Describe to yourself what you see.
-2. Cross-reference with the full structural data above (bounds, layout, style, \
-typography are already precise — do NOT repeat them in your output).
-3. Determine the `role` for this top-level component. **Avoid "other"** — \
-if tempted, re-check the 18 specific roles. A large frame with children is likely \
-"section" or "container", not "other".
-4. Suggest a semantic PascalCase `suggested_name` that is **UNIQUE** among the \
-sibling components listed in the Page Context above. Do NOT use generic names like \
-"Image", "Container", or "Section" alone — combine role + visual content for \
-specificity (e.g. "HeroBannerImage", "ProductGallerySection", "FestivalPortrait"). \
-Ignore the original Figma layer name.
-5. Write a clear `description` focusing on purpose and design intent, \
-not structural data.
-6. Check if this is a system element (StatusBar, HomeIndicator, etc.) → set `render_hint`.
-7. For image elements, write descriptive `alt` text based on what you see in the screenshot.
-8. For icon elements, identify the icon shape and assign a standard name \
-(e.g., "close", "arrow-left", "more-horizontal", "search", "heart").
-9. Infer interaction behaviors from the component's role and visual affordances.
-10. For ALL descendant nodes at every depth level (not just direct children — \
-walk the full `children` tree recursively), provide a `children_updates` entry \
-with its `id`, `role`, `suggested_name` (PascalCase, unique among siblings at the \
-same level), and brief `description`. Apply the same naming rules: use specific \
-descriptive names, not generic "Frame" or "Container". \
-The `children_updates` array should be FLAT — include entries for direct children, \
-grandchildren, and deeper descendants all in the same array.
-11. Write a comprehensive `design_analysis` — this is your most important output. \
-Analyze the component as a senior designer explaining it to a developer: \
-describe visual states (selected/default/hover), layout strategy, visual hierarchy, \
-key style values, and design intent. Reference specific values from the structural \
-data (colors, fonts, spacing). See the Design Analysis Guidelines in the system prompt.
+1. First, look at the screenshot carefully. Describe what you see.
+2. Cross-reference with the structural data above (bounds, layout, style, \
+typography are already precise — use specific values in your analysis).
+3. Write your analysis following ALL the guidelines in the system prompt.
+4. Cover ALL aspects: role identification, naming suggestion, visual states, \
+hierarchy, layout, style values, children analysis (with node IDs!), \
+interactions, and design intent.
+5. For children analysis, reference the actual node IDs from the structural \
+spec so they can be matched back to the component tree.
 
-IMPORTANT: Write ALL text fields (`description`, `design_analysis`, \
-`children_updates[].description`, interaction action/description) in **Chinese (中文)**. \
-Only keep technical values (hex colors, px, font names, PascalCase names) in English.
+Write in Chinese (中文). Use markdown formatting for readability. \
+Do NOT output JSON — just write natural text."""
 
-Return a single JSON object following the schema defined in the system prompt. \
-No markdown, no explanation — just the JSON object."""
+# ============================================================
+# Pass 2: Structured Metadata Extraction (no screenshot)
+# ============================================================
+
+PASS2_SYSTEM_PROMPT = """\
+You are a metadata extraction assistant. Given a design analysis text and \
+a UI component's structural spec, extract structured metadata into a small \
+JSON object.
+
+Your output must be a **single, valid JSON object** — nothing else. \
+No markdown, no explanation, no code fences, no preamble, no trailing text. \
+The first character of your response must be `{` and the last must be `}`.
+
+### JSON Schema
+
+```
+{
+  "role": "<page|section|container|card|list|list-item|nav|header|footer|button|input|image|icon|text|divider|badge|overlay|decorative|other>",
+  "suggested_name": "<PascalCase, e.g. HeroBanner>",
+  "description": "<1-2 sentence Chinese description>",
+  "render_hint": "<full|spacer|platform|null>",
+  "content_updates": {
+    "image_alt": "<alt text or null>",
+    "icon_name": "<standard icon name or null>"
+  },
+  "interaction": {
+    "behaviors": [
+      {"trigger": "<click|hover|focus|scroll|load|swipe>", "action": "<Chinese>", "target": "<self|page|name>"}
+    ],
+    "states": [
+      {"name": "<hover|active|disabled|selected|loading|empty|error>", "description": "<Chinese>"}
+    ]
+  },
+  "children_updates": [
+    {"id": "<exact node ID from spec>", "role": "<role>", "suggested_name": "<PascalCase>", "description": "<brief Chinese>"}
+  ]
+}
+```
+
+### Rules
+
+1. **role**: Choose from the 19 roles. Avoid "other" — most components \
+with children are "section" or "container".
+2. **suggested_name**: PascalCase. Must differ from ALL sibling names. \
+Combine role + content for specificity. No generic names.
+3. **description**: 1-2 sentences in Chinese. Focus on purpose and design \
+intent, not structural data.
+4. **render_hint**: "spacer" for system elements (StatusBar etc.), null otherwise.
+5. **interaction**: Only include plausible interactions inferred from the \
+analysis. Empty arrays if none.
+6. **children_updates**: Include ALL descendant nodes at every depth \
+(direct children, grandchildren, deeper). Use exact IDs from the structural \
+spec. The array should be FLAT — no nesting.
+7. **Do NOT include** a `design_analysis` field — it is handled separately.
+8. Write ALL description fields in Chinese (中文). Only keep technical \
+values in English.
+"""
+
+PASS2_USER_PROMPT = """\
+Extract structured metadata from the following design analysis.
+
+## Design Analysis (from previous analysis pass)
+{design_analysis_text}
+
+## Page Context
+- Sibling components: {sibling_names}
+
+## ComponentSpec (structural data with node IDs for children_updates matching)
+{partial_spec_json}
+
+## Instructions
+1. Read the design analysis above carefully.
+2. Extract the structured fields defined in the system prompt schema.
+3. For `children_updates`, walk the structural spec's children tree and \
+match each node ID. Use the analysis text to determine role and description.
+4. Make sure `suggested_name` is UNIQUE among siblings: {sibling_names}
+
+Return a single valid JSON object. Start with {{ and end with }}.
+No markdown, no code fences — just the JSON object."""
 
 
-# Output schema for validation
-SPEC_ANALYZER_OUTPUT_SCHEMA = {
+# Output schema for Pass 2 validation
+PASS2_OUTPUT_SCHEMA = {
     "type": "object",
-    "required": ["role", "description", "design_analysis"],
+    "required": ["role", "description"],
     "properties": {
         "role": {
             "type": "string",
@@ -295,7 +272,10 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
                         "properties": {
                             "trigger": {
                                 "type": "string",
-                                "enum": ["click", "hover", "focus", "scroll", "load", "swipe"],
+                                "enum": [
+                                    "click", "hover", "focus",
+                                    "scroll", "load", "swipe",
+                                ],
                             },
                             "action": {"type": "string"},
                             "target": {"type": "string"},
@@ -314,7 +294,6 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
                 },
             },
         },
-        "design_analysis": {"type": "string"},
         "children_updates": {
             "type": "array",
             "items": {
@@ -330,3 +309,8 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
         },
     },
 }
+
+# Backward-compatible aliases (used by spec_nodes.py re-exports)
+SPEC_ANALYZER_SYSTEM_PROMPT = PASS1_SYSTEM_PROMPT
+SPEC_ANALYZER_USER_PROMPT = PASS1_USER_PROMPT
+SPEC_ANALYZER_OUTPUT_SCHEMA = PASS2_OUTPUT_SCHEMA
