@@ -269,6 +269,39 @@ function EventRow({ event }: { event: PipelineEvent }) {
     );
   }
 
+  // spec_complete — show validation result
+  if (event.event_type === "spec_complete") {
+    const validation = event.data?.validation as Record<string, unknown> | undefined;
+    const compliant = validation?.auto_layout_compliant === true;
+    const inferredNodes = (validation?.inferred_nodes ?? []) as Array<{ name: string; path: string; children_count: number }>;
+    const borderColor = compliant ? "#22c55e" : "#f59e0b";
+    return (
+      <div
+        className="border-b border-slate-700 border-l-[3px] px-4 py-3"
+        style={{ borderLeftColor: borderColor }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium"
+            style={{ backgroundColor: compliant ? "rgba(34,197,94,0.15)" : "rgba(245,158,11,0.15)", color: compliant ? "#4ade80" : "#fbbf24" }}
+          >
+            {compliant ? "规格完成" : "规格警告"}
+          </span>
+          <span className="text-xs text-slate-300">
+            {event.data?.components_succeeded as number ?? 0}/{event.data?.components_count as number ?? 0} 组件
+            {!compliant && ` — ${inferredNodes.length} 个节点缺少 auto-layout`}
+          </span>
+          <span className="ml-auto font-mono text-[11px] text-slate-500">
+            {formatTime(event.timestamp)}
+          </span>
+        </div>
+        {!compliant && inferredNodes.length > 0 && (
+          <ValidationWarning nodes={inferredNodes} />
+        )}
+      </div>
+    );
+  }
+
   // node_output — show compact summary, expandable for raw data
   if (event.event_type === "node_output") {
     return <NodeOutputRow event={event} cfg={cfg} />;
@@ -339,6 +372,47 @@ function NodeOutputRow({
 }
 
 /* ================================================================
+   ValidationWarning — Expandable auto-layout compliance warning
+   ================================================================ */
+
+function ValidationWarning({
+  nodes,
+}: {
+  nodes: Array<{ name: string; path: string; children_count: number }>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+      <button
+        onClick={() => setExpanded((p) => !p)}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <span className="text-xs text-amber-400">
+          ⚠ {nodes.length} 个节点缺少 auto-layout，需要在 Figma 中补充
+        </span>
+        <span className="ml-auto text-[10px] text-amber-500/60">
+          {expanded ? "收起" : "展开"}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+          {nodes.map((n, i) => (
+            <div key={i} className="flex items-center gap-2 text-[11px]">
+              <span className="text-amber-400/80">•</span>
+              <span className="text-amber-300 font-medium">{n.name}</span>
+              <span className="text-amber-500/60 truncate">{n.path}</span>
+              <span className="ml-auto text-amber-500/50 shrink-0">
+                {n.children_count} children
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
    Helpers
    ================================================================ */
 
@@ -398,6 +472,22 @@ function describeEvent(event: PipelineEvent): string {
       return "正在从 Figma 获取设计数据...";
     case "figma_fetch_complete":
       return "Figma 设计数据获取完成";
+    case "frame_decomposed": {
+      const count = event.data?.components_count as number;
+      const pageName = (event.data?.page as Record<string, unknown>)?.name as string;
+      return pageName
+        ? `页面「${pageName}」已拆解为 ${count ?? "?"} 个组件`
+        : `结构拆解完成，共 ${count ?? "?"} 个组件`;
+    }
+    case "spec_analyzed": {
+      const compName = event.data?.component_name as string;
+      const role = event.data?.role as string;
+      const idx = event.data?.index as number;
+      const total = event.data?.total as number;
+      const progress = idx != null && total ? `(${idx + 1}/${total}) ` : "";
+      const roleBadge = role ? `[${role}] ` : "";
+      return `${progress}${roleBadge}${compName || "组件"} 语义分析完成`;
+    }
     case "ai_thinking":
       return (event.data?.content as string)?.slice(0, 80) || "AI 正在分析...";
     default:

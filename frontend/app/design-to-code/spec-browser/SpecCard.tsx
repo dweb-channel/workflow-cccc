@@ -4,19 +4,15 @@ import { useState } from "react";
 import type {
   ComponentSpec,
   ColorValue,
-  SpacingValue,
   LayoutSpec,
   SizingSpec,
   StyleSpec,
   TypographySpec,
   ContentSpec,
   InteractionSpec,
-  BackgroundSpec,
-  ShadowSpec,
-  GradientStop,
 } from "@/lib/types/design-spec";
-import { isTokenColor, resolveColor, isTokenSpacing, resolveSpacing } from "@/lib/types/design-spec";
-import { ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
+import { isTokenColor, resolveColor, resolveSpacing } from "@/lib/types/design-spec";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 // ================================================================
 // SpecCard — Displays full ComponentSpec details in collapsible sections
@@ -66,40 +62,46 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
 
       {/* Sections */}
       <div className="flex-1 p-2 space-y-1">
-        <Section title="Layout" icon="layout" defaultOpen>
+        {component.design_analysis && (
+          <Section title="设计解读" icon="analysis" defaultOpen>
+            <DesignAnalysisSection text={component.design_analysis} />
+          </Section>
+        )}
+
+        <Section title="布局" icon="layout" defaultOpen>
           <LayoutSection layout={component.layout} />
         </Section>
 
         {component.sizing && (
-          <Section title="Sizing" icon="sizing" defaultOpen>
+          <Section title="尺寸约束" icon="sizing" defaultOpen>
             <SizingSection sizing={component.sizing} />
           </Section>
         )}
 
-        <Section title="Style" icon="style" defaultOpen>
+        <Section title="样式" icon="style" defaultOpen>
           <StyleSection style={component.style} />
         </Section>
 
         {component.typography && !isSpacer && (
-          <Section title="Typography" icon="typography">
+          <Section title="文字" icon="typography">
             <TypographySection typography={component.typography} />
           </Section>
         )}
 
         {component.content && !isSpacer && (
-          <Section title="Content" icon="content">
+          <Section title="内容" icon="content">
             <ContentSection content={component.content} />
           </Section>
         )}
 
         {component.interaction && !isSpacer && (
-          <Section title="Interaction" icon="interaction">
+          <Section title="交互" icon="interaction">
             <InteractionSection interaction={component.interaction} />
           </Section>
         )}
 
         {component.children && component.children.length > 0 && (
-          <Section title={`Children (${component.children.length})`} icon="children">
+          <Section title={`子组件 (${component.children.length})`} icon="children">
             <ChildrenSection children={component.children} onNavigate={onNavigate} />
           </Section>
         )}
@@ -107,7 +109,7 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
         {component.children_collapsed != null && component.children_collapsed > 0 && (
           <div className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2">
             <span className="text-[11px] text-slate-500">
-              {component.children_collapsed} child nodes collapsed (depth=0 layout skeleton)
+              {component.children_collapsed} 个子节点已折叠（骨架层）
             </span>
           </div>
         )}
@@ -121,6 +123,7 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
 // ================================================================
 
 const SECTION_ICONS: Record<string, string> = {
+  analysis: "\uD83D\uDCA1",
   layout: "\uD83D\uDCD0",
   sizing: "\uD83D\uDCCF",
   style: "\uD83C\uDFA8",
@@ -169,146 +172,300 @@ function Section({
 // ================================================================
 
 function LayoutSection({ layout }: { layout: LayoutSpec }) {
+  const DIRECTION_ZH: Record<string, string> = { row: "水平排列", column: "纵向排列" };
+  const JUSTIFY_ZH: Record<string, string> = {
+    start: "靠前", center: "居中", end: "靠后",
+    "space-between": "两端对齐", "space-around": "均匀分布",
+  };
+  const ALIGN_ZH: Record<string, string> = {
+    start: "顶部对齐", center: "居中对齐", end: "底部对齐",
+    stretch: "拉伸", baseline: "基线对齐",
+  };
+
+  const lines: string[] = [];
+  if (layout.type === "flex") {
+    const dir = DIRECTION_ZH[layout.direction || "row"] || layout.direction || "水平排列";
+    lines.push(dir);
+    if (layout.gap != null) {
+      lines[0] += `，间距 ${resolveSpacing(layout.gap)}px`;
+    }
+    if (layout.justify && layout.justify !== "start") {
+      lines.push(`主轴: ${JUSTIFY_ZH[layout.justify] || layout.justify}`);
+    }
+    if (layout.align && layout.align !== "start") {
+      lines.push(`交叉轴: ${ALIGN_ZH[layout.align] || layout.align}`);
+    }
+  } else if (layout.type === "absolute") {
+    lines.push("绝对定位");
+  } else if (layout.type === "grid") {
+    lines.push("网格布局");
+  } else if (layout.type === "stack") {
+    lines.push("层叠布局");
+  } else if (layout.type) {
+    lines.push(layout.type);
+  }
+
+  if (layout.padding) {
+    const p = layout.padding.map((v) => resolveSpacing(v));
+    if (p.some((v) => v !== 0)) {
+      const unique = [...new Set(p)];
+      if (unique.length === 1) {
+        lines.push(`内边距: ${unique[0]}px`);
+      } else {
+        lines.push(`内边距: 上${p[0]} 右${p[1]} 下${p[2]} 左${p[3]}px`);
+      }
+    }
+  }
+  if (layout.wrap) lines.push("允许换行");
+  if (layout.overflow && layout.overflow !== "visible") lines.push(`溢出: ${layout.overflow === "hidden" ? "隐藏" : "滚动"}`);
+
   return (
-    <div className="space-y-1">
-      {layout.type && <PropRow label="type" value={layout.type} />}
-      {layout.direction && <PropRow label="direction" value={layout.direction} />}
-      {layout.justify && <PropRow label="justify" value={layout.justify} />}
-      {layout.align && <PropRow label="align" value={layout.align} />}
-      {layout.gap != null && (
-        <PropRow label="gap" value={<SpacingDisplay value={layout.gap} />} />
-      )}
-      {layout.padding && (
-        <PropRow
-          label="padding"
-          value={
-            <span className="font-mono">
-              [{layout.padding.map((p) => resolveSpacing(p)).join(", ")}]
-            </span>
-          }
-        />
-      )}
-      {layout.wrap != null && <PropRow label="wrap" value={String(layout.wrap)} />}
-      {layout.overflow && <PropRow label="overflow" value={layout.overflow} />}
+    <div className="space-y-0.5">
+      {lines.map((line, i) => (
+        <div key={i} className="text-[11px] text-slate-300">{line}</div>
+      ))}
     </div>
   );
 }
 
 function SizingSection({ sizing }: { sizing: SizingSpec }) {
+  const SIZING_ZH: Record<string, string> = {
+    fill: "撑满父容器",
+    "fill_container": "撑满父容器",
+    hug: "自适应内容",
+    "hug_contents": "自适应内容",
+  };
+
+  function humanize(v: string | undefined): string {
+    if (!v) return "";
+    // Check for known keywords
+    for (const [key, zh] of Object.entries(SIZING_ZH)) {
+      if (v.toLowerCase().includes(key.toLowerCase())) return zh;
+    }
+    return v;
+  }
+
+  const lines: string[] = [];
+  if (sizing.width) lines.push(`宽度: ${humanize(sizing.width)}`);
+  if (sizing.height) lines.push(`高度: ${humanize(sizing.height)}`);
+  if (sizing.min_width != null) lines.push(`最小宽度: ${sizing.min_width}px`);
+  if (sizing.max_width != null) lines.push(`最大宽度: ${sizing.max_width}px`);
+  if (sizing.min_height != null) lines.push(`最小高度: ${sizing.min_height}px`);
+  if (sizing.max_height != null) lines.push(`最大高度: ${sizing.max_height}px`);
+  if (sizing.aspect_ratio) lines.push(`宽高比: ${sizing.aspect_ratio}`);
+
   return (
-    <div className="space-y-1">
-      {sizing.width && <PropRow label="width" value={sizing.width} />}
-      {sizing.height && <PropRow label="height" value={sizing.height} />}
-      {sizing.min_width != null && <PropRow label="min-width" value={`${sizing.min_width}px`} />}
-      {sizing.max_width != null && <PropRow label="max-width" value={`${sizing.max_width}px`} />}
-      {sizing.min_height != null && <PropRow label="min-height" value={`${sizing.min_height}px`} />}
-      {sizing.max_height != null && <PropRow label="max-height" value={`${sizing.max_height}px`} />}
-      {sizing.aspect_ratio && <PropRow label="aspect-ratio" value={sizing.aspect_ratio} />}
+    <div className="space-y-0.5">
+      {lines.map((line, i) => (
+        <div key={i} className="text-[11px] text-slate-300">{line}</div>
+      ))}
     </div>
   );
 }
 
 function StyleSection({ style }: { style: StyleSpec }) {
+  const BORDER_STYLE_ZH: Record<string, string> = {
+    solid: "实线", dashed: "虚线", dotted: "点线", none: "无",
+  };
+  const BORDER_SIDES_ZH: Record<string, string> = {
+    all: "四边", top: "上", bottom: "下", left: "左", right: "右",
+    "top-bottom": "上下", "left-right": "左右",
+  };
+
+  const lines: Array<{ text: string; color?: string }> = [];
+
+  // Background
+  if (style.background) {
+    const bg = style.background;
+    if (bg.type === "none") {
+      lines.push({ text: "背景: 透明" });
+    } else if (bg.type === "solid" && bg.color) {
+      const hex = resolveColor(bg.color);
+      lines.push({ text: `背景: ${hex}`, color: hex });
+    } else if (bg.type === "gradient-linear" && bg.gradient) {
+      const stops = bg.gradient.stops?.map((s) => resolveColor(s.color)).join(" → ") || "";
+      lines.push({ text: `背景: 线性渐变 ${bg.gradient.angle ?? 0}° ${stops}` });
+    } else if (bg.type === "gradient-radial" && bg.gradient) {
+      const stops = bg.gradient.stops?.map((s) => resolveColor(s.color)).join(" → ") || "";
+      lines.push({ text: `背景: 径向渐变 ${stops}` });
+    } else if (bg.type === "image") {
+      const fit = bg.image?.fit ? ` (${bg.image.fit})` : "";
+      lines.push({ text: `背景: 图片${fit}` });
+    }
+  }
+
+  // Border
+  if (style.border && style.border.width != null && style.border.width > 0) {
+    const b = style.border;
+    const parts: string[] = [`${b.width}px`];
+    if (b.style) parts.push(BORDER_STYLE_ZH[b.style] || b.style);
+    if (b.color) parts.push(resolveColor(b.color));
+    if (b.sides && b.sides !== "all") parts.push(BORDER_SIDES_ZH[b.sides] || b.sides);
+    const hex = b.color ? resolveColor(b.color) : undefined;
+    lines.push({ text: `边框: ${parts.join(" ")}`, color: hex });
+  }
+
+  // Corner radius
+  if (style.corner_radius != null) {
+    const cr = style.corner_radius;
+    if (typeof cr === "number") {
+      if (cr > 0) lines.push({ text: `圆角: ${cr}px` });
+    } else {
+      const unique = [...new Set(cr)];
+      if (unique.length === 1 && unique[0] > 0) {
+        lines.push({ text: `圆角: ${unique[0]}px` });
+      } else if (cr.some((v) => v > 0)) {
+        lines.push({ text: `圆角: 左上${cr[0]} 右上${cr[1]} 右下${cr[2]} 左下${cr[3]}px` });
+      }
+    }
+  }
+
+  // Shadow
+  if (style.shadow && style.shadow.length > 0) {
+    for (const s of style.shadow) {
+      const type = s.type === "inner" ? "内阴影" : "阴影";
+      const parts = [`x=${s.x ?? 0}`, `y=${s.y ?? 0}`, `模糊=${s.blur ?? 0}`];
+      if (s.spread) parts.push(`扩展=${s.spread}`);
+      const hex = s.color ? resolveColor(s.color) : undefined;
+      if (hex) parts.push(hex);
+      lines.push({ text: `${type}: ${parts.join(" ")}`, color: hex });
+    }
+  }
+
+  // Opacity
+  if (style.opacity != null && style.opacity !== 1) {
+    lines.push({ text: `透明度: ${Math.round(style.opacity * 100)}%` });
+  }
+
+  // Blur
+  if (style.blur) {
+    const type = style.blur.type === "background" ? "背景模糊" : "模糊";
+    lines.push({ text: `${type}: ${style.blur.radius || 0}px` });
+  }
+
   return (
-    <div className="space-y-1">
-      {style.background && <BackgroundDisplay bg={style.background} />}
-      {style.border && (
-        <>
-          {style.border.width != null && (
-            <PropRow label="border-width" value={`${style.border.width}px`} />
+    <div className="space-y-0.5">
+      {lines.map((line, i) => (
+        <div key={i} className="flex items-center gap-1.5 text-[11px] text-slate-300">
+          {line.color && (
+            <span
+              className="inline-block h-3 w-3 shrink-0 rounded border border-slate-600"
+              style={{ backgroundColor: line.color }}
+            />
           )}
-          {style.border.color && (
-            <PropRow label="border-color" value={<ColorDisplay value={style.border.color} />} />
-          )}
-          {style.border.style && <PropRow label="border-style" value={style.border.style} />}
-          {style.border.sides && <PropRow label="border-sides" value={style.border.sides} />}
-        </>
-      )}
-      {style.corner_radius != null && (
-        <PropRow
-          label="corner-radius"
-          value={
-            typeof style.corner_radius === "number"
-              ? `${style.corner_radius}px`
-              : `[${style.corner_radius.join(", ")}]px`
-          }
-        />
-      )}
-      {style.shadow && style.shadow.length > 0 && (
-        <div>
-          <span className="text-[10px] text-slate-500">shadow:</span>
-          {style.shadow.map((s, i) => (
-            <ShadowDisplay key={i} shadow={s} />
-          ))}
+          <span>{line.text}</span>
         </div>
-      )}
-      {style.opacity != null && style.opacity !== 1 && (
-        <PropRow label="opacity" value={String(style.opacity)} />
-      )}
-      {style.blur && (
-        <PropRow
-          label="blur"
-          value={`${style.blur.type || "layer"} ${style.blur.radius || 0}px`}
-        />
+      ))}
+      {lines.length === 0 && (
+        <div className="text-[11px] text-slate-500">无样式</div>
       )}
     </div>
   );
 }
 
 function TypographySection({ typography }: { typography: TypographySpec }) {
+  const WEIGHT_NAMES: Record<number, string> = {
+    100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular",
+    500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black",
+  };
+  const ALIGN_ZH: Record<string, string> = {
+    left: "左对齐", center: "居中", right: "右对齐", justify: "两端对齐",
+  };
+  const DECORATION_ZH: Record<string, string> = {
+    underline: "下划线", strikethrough: "删除线",
+  };
+  const TRANSFORM_ZH: Record<string, string> = {
+    uppercase: "全大写", lowercase: "全小写", capitalize: "首字母大写",
+  };
+  const OVERFLOW_ZH: Record<string, string> = {
+    ellipsis: "省略号截断", clip: "裁剪", visible: "可见",
+  };
+
+  // Build a compact one-line font summary: "PingFang SC Medium 14px/20px #333333"
+  const fontParts: string[] = [];
+  if (typography.font_family) fontParts.push(typography.font_family);
+  if (typography.font_weight != null) fontParts.push(WEIGHT_NAMES[typography.font_weight] || String(typography.font_weight));
+  if (typography.font_size != null) {
+    let sizeStr = `${typography.font_size}px`;
+    if (typography.line_height != null) sizeStr += `/${typography.line_height}px`;
+    fontParts.push(sizeStr);
+  }
+
+  const details: string[] = [];
+  if (typography.letter_spacing != null && typography.letter_spacing !== 0) {
+    details.push(`字间距 ${typography.letter_spacing}px`);
+  }
+  if (typography.align) details.push(ALIGN_ZH[typography.align] || typography.align);
+  if (typography.decoration && typography.decoration !== "none") {
+    details.push(DECORATION_ZH[typography.decoration] || typography.decoration);
+  }
+  if (typography.transform && typography.transform !== "none") {
+    details.push(TRANSFORM_ZH[typography.transform] || typography.transform);
+  }
+  if (typography.overflow) details.push(OVERFLOW_ZH[typography.overflow] || typography.overflow);
+  if (typography.max_lines != null) details.push(`最多 ${typography.max_lines} 行`);
+
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
+      {/* Text content preview */}
       {typography.content && (
-        <div className="rounded bg-slate-900 px-2 py-1.5 mb-2">
+        <div className="rounded bg-slate-900 px-2 py-1.5">
           <span className="text-[11px] text-slate-300">
             &ldquo;{typography.content}&rdquo;
           </span>
         </div>
       )}
-      {typography.font_family && <PropRow label="font-family" value={typography.font_family} />}
-      {typography.font_size != null && <PropRow label="font-size" value={`${typography.font_size}px`} />}
-      {typography.font_weight != null && <PropRow label="font-weight" value={String(typography.font_weight)} />}
-      {typography.line_height != null && <PropRow label="line-height" value={`${typography.line_height}px`} />}
-      {typography.letter_spacing != null && typography.letter_spacing !== 0 && (
-        <PropRow label="letter-spacing" value={`${typography.letter_spacing}px`} />
+      {/* Font summary line */}
+      {fontParts.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-slate-300">{fontParts.join(" ")}</span>
+          {typography.color && <ColorDisplay value={typography.color} />}
+        </div>
       )}
-      {typography.color && (
-        <PropRow label="color" value={<ColorDisplay value={typography.color} />} />
+      {/* Additional details */}
+      {details.length > 0 && (
+        <div className="text-[11px] text-slate-400">{details.join("  |  ")}</div>
       )}
-      {typography.align && <PropRow label="text-align" value={typography.align} />}
-      {typography.decoration && typography.decoration !== "none" && (
-        <PropRow label="decoration" value={typography.decoration} />
-      )}
-      {typography.transform && typography.transform !== "none" && (
-        <PropRow label="transform" value={typography.transform} />
-      )}
-      {typography.overflow && <PropRow label="overflow" value={typography.overflow} />}
-      {typography.max_lines != null && <PropRow label="max-lines" value={String(typography.max_lines)} />}
     </div>
   );
 }
 
 function ContentSection({ content }: { content: ContentSpec }) {
+  const FIT_ZH: Record<string, string> = {
+    cover: "裁剪填充", contain: "完整显示", fill: "拉伸填充", none: "原始尺寸",
+  };
+  const PLACEHOLDER_ZH: Record<string, string> = {
+    blur: "模糊占位", color: "色块占位", skeleton: "骨架屏", none: "无占位",
+  };
+
   return (
     <div className="space-y-2">
       {content.image && (
         <div className="space-y-1">
-          <span className="text-[10px] font-medium text-slate-400">Image</span>
-          {content.image.src && <PropRow label="src" value={content.image.src} />}
-          {content.image.alt && <PropRow label="alt" value={content.image.alt} />}
-          {content.image.fit && <PropRow label="fit" value={content.image.fit} />}
-          {content.image.aspect_ratio && <PropRow label="aspect-ratio" value={content.image.aspect_ratio} />}
-          {content.image.placeholder && <PropRow label="placeholder" value={content.image.placeholder} />}
+          <span className="text-[10px] font-medium text-slate-400">图片</span>
+          {content.image.alt && (
+            <div className="text-[11px] text-slate-300">描述: {content.image.alt}</div>
+          )}
+          {content.image.src && (
+            <div className="text-[10px] text-slate-500 truncate">来源: {content.image.src}</div>
+          )}
+          <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+            {content.image.fit && <span>{FIT_ZH[content.image.fit] || content.image.fit}</span>}
+            {content.image.aspect_ratio && <span>比例 {content.image.aspect_ratio}</span>}
+            {content.image.placeholder && (
+              <span>{PLACEHOLDER_ZH[content.image.placeholder] || content.image.placeholder}</span>
+            )}
+          </div>
         </div>
       )}
       {content.icon && (
         <div className="space-y-1">
-          <span className="text-[10px] font-medium text-slate-400">Icon</span>
-          {content.icon.name && <PropRow label="name" value={content.icon.name} />}
-          {content.icon.size != null && <PropRow label="size" value={`${content.icon.size}px`} />}
-          {content.icon.color && (
-            <PropRow label="color" value={<ColorDisplay value={content.icon.color} />} />
-          )}
+          <span className="text-[10px] font-medium text-slate-400">图标</span>
+          <div className="flex items-center gap-2 text-[11px] text-slate-300">
+            {content.icon.name && <span>{content.icon.name}</span>}
+            {content.icon.size != null && <span>{content.icon.size}px</span>}
+            {content.icon.color && <ColorDisplay value={content.icon.color} />}
+          </div>
         </div>
       )}
     </div>
@@ -316,15 +473,20 @@ function ContentSection({ content }: { content: ContentSpec }) {
 }
 
 function InteractionSection({ interaction }: { interaction: InteractionSpec }) {
+  const TRIGGER_ZH: Record<string, string> = {
+    click: "点击", hover: "悬停", focus: "聚焦",
+    scroll: "滚动", load: "加载时", swipe: "滑动",
+  };
+
   return (
     <div className="space-y-2">
       {interaction.behaviors && interaction.behaviors.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">Behaviors</span>
+          <span className="text-[10px] font-medium text-slate-400">行为</span>
           {interaction.behaviors.map((b, i) => (
             <div key={i} className="mt-1 rounded bg-slate-900 px-2 py-1.5 text-[11px]">
-              <span className="text-orange-400">{b.trigger}</span>
-              <span className="text-slate-500"> &rarr; </span>
+              <span className="text-orange-400">{TRIGGER_ZH[b.trigger || "click"] || b.trigger}</span>
+              <span className="text-slate-500"> → </span>
               <span className="text-slate-300">{b.action}</span>
               {b.target && (
                 <span className="ml-1 text-slate-500">({b.target})</span>
@@ -335,7 +497,7 @@ function InteractionSection({ interaction }: { interaction: InteractionSpec }) {
       )}
       {interaction.states && interaction.states.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">States</span>
+          <span className="text-[10px] font-medium text-slate-400">状态变化</span>
           {interaction.states.map((s, i) => (
             <div key={i} className="mt-1 rounded bg-slate-900 px-2 py-1.5">
               <div className="flex items-center gap-2">
@@ -355,21 +517,83 @@ function InteractionSection({ interaction }: { interaction: InteractionSpec }) {
       )}
       {interaction.transitions && interaction.transitions.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">Transitions</span>
+          <span className="text-[10px] font-medium text-slate-400">过渡动画</span>
           {interaction.transitions.map((t, i) => (
-            <div key={i} className="mt-1 text-[11px] text-slate-400 font-mono">
-              {t.property} {t.duration_ms}ms {t.easing}
+            <div key={i} className="mt-1 text-[11px] text-slate-400">
+              {t.property} {t.duration_ms}ms {t.easing || "ease"}
             </div>
           ))}
         </div>
       )}
       {interaction.raw_notes && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">Raw Notes</span>
+          <span className="text-[10px] font-medium text-slate-400">备注</span>
           <p className="mt-1 text-[11px] text-slate-500 italic">{interaction.raw_notes}</p>
         </div>
       )}
     </div>
+  );
+}
+
+function DesignAnalysisSection({ text }: { text: string }) {
+  // Render markdown-like text with basic formatting:
+  // - Lines starting with ## become bold headers
+  // - Lines starting with - become list items
+  // - **bold** markers rendered as bold
+  // - Everything else as regular text
+  const lines = text.split("\n");
+
+  return (
+    <div className="space-y-1 text-[11px] leading-relaxed text-slate-300">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-1" />;
+
+        // ## Header
+        if (trimmed.startsWith("## ")) {
+          return (
+            <div key={i} className="font-semibold text-white text-[12px] mt-1">
+              {renderBold(trimmed.slice(3))}
+            </div>
+          );
+        }
+        // ### Sub-header
+        if (trimmed.startsWith("### ")) {
+          return (
+            <div key={i} className="font-medium text-slate-200 mt-0.5">
+              {renderBold(trimmed.slice(4))}
+            </div>
+          );
+        }
+        // - List item
+        if (trimmed.startsWith("- ")) {
+          return (
+            <div key={i} className="flex gap-1.5 pl-2">
+              <span className="text-slate-500 shrink-0">-</span>
+              <span>{renderBold(trimmed.slice(2))}</span>
+            </div>
+          );
+        }
+        // Regular line
+        return <div key={i}>{renderBold(trimmed)}</div>;
+      })}
+    </div>
+  );
+}
+
+/** Render **bold** markers within a string */
+function renderBold(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  if (parts.length === 1) return text;
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return <strong key={i} className="text-white font-medium">{part.slice(2, -2)}</strong>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
   );
 }
 
@@ -380,19 +604,47 @@ function ChildrenSection({
   children: ComponentSpec[];
   onNavigate?: (id: string) => void;
 }) {
+  const ROLE_NAMES_ZH: Record<string, string> = {
+    page: "页面", section: "区块", container: "容器", nav: "导航",
+    header: "头部", footer: "底部", button: "按钮", input: "输入框",
+    card: "卡片", list: "列表", "list-item": "列表项", image: "图片",
+    icon: "图标", text: "文本", badge: "徽章", divider: "分割线",
+    overlay: "遮罩", decorative: "装饰",
+  };
+  const genericNames = new Set(["Frame", "Rectangle", "Group", "Vector", "Ellipse", "Line", "Component"]);
+
+  function getChildDisplayName(child: ComponentSpec): string {
+    if (child.name && !genericNames.has(child.name)) return child.name;
+    const roleZh = ROLE_NAMES_ZH[child.role] || child.role;
+    return `${roleZh} ${Math.round(child.bounds.width)}×${Math.round(child.bounds.height)}`;
+  }
+
   return (
-    <div className="space-y-1">
+    <div className="space-y-0.5">
       {children.map((child) => (
         <button
           key={child.id}
           onClick={() => onNavigate?.(child.id)}
-          className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-slate-700/40 transition-colors"
+          className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left hover:bg-slate-700/40 transition-colors"
         >
-          <span className="text-[11px] text-slate-300 truncate flex-1">
-            {child.name}
-          </span>
-          <RoleBadge role={child.role} small />
-          <span className="text-[10px] text-violet-400">&rarr;</span>
+          <div className="flex items-center gap-1.5 w-full">
+            <span className="text-[11px] text-slate-300 truncate flex-1">
+              {getChildDisplayName(child)}
+            </span>
+            <RoleBadge role={child.role} small />
+            <span className="text-[10px] text-violet-400">&rarr;</span>
+          </div>
+          {child.description && (
+            <div className="text-[10px] text-slate-500 truncate leading-tight">
+              {child.description.slice(0, 80)}{child.description.length > 80 ? "..." : ""}
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+            <span>{Math.round(child.bounds.width)} × {Math.round(child.bounds.height)}</span>
+            {child.children && child.children.length > 0 && (
+              <span className="text-slate-600">{child.children.length} 子组件</span>
+            )}
+          </div>
         </button>
       ))}
     </div>
@@ -402,23 +654,6 @@ function ChildrenSection({
 // ================================================================
 // Shared display components
 // ================================================================
-
-function PropRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
-  return (
-    <div className="flex items-baseline gap-2 py-0.5">
-      <span className="shrink-0 text-[10px] text-slate-500 w-24 text-right font-mono">
-        {label}
-      </span>
-      <span className="text-[11px] text-slate-300 font-mono break-all">{value}</span>
-    </div>
-  );
-}
 
 function ColorDisplay({ value }: { value: ColorValue }) {
   const hex = resolveColor(value);
@@ -437,76 +672,6 @@ function ColorDisplay({ value }: { value: ColorValue }) {
         </span>
       )}
     </span>
-  );
-}
-
-function SpacingDisplay({ value }: { value: SpacingValue }) {
-  const px = resolveSpacing(value);
-  const token = isTokenSpacing(value) ? value.token : undefined;
-
-  return (
-    <span className="inline-flex items-center gap-1.5 font-mono">
-      <span>{px}px</span>
-      {token && (
-        <span className="rounded bg-cyan-500/15 px-1 py-0.5 text-[9px] text-cyan-400">
-          {token}
-        </span>
-      )}
-    </span>
-  );
-}
-
-function BackgroundDisplay({ bg }: { bg: BackgroundSpec }) {
-  if (bg.type === "none") {
-    return <PropRow label="background" value="none" />;
-  }
-  if (bg.type === "solid" && bg.color) {
-    return <PropRow label="background" value={<ColorDisplay value={bg.color} />} />;
-  }
-  if ((bg.type === "gradient-linear" || bg.type === "gradient-radial") && bg.gradient) {
-    return (
-      <div>
-        <PropRow label="background" value={bg.type} />
-        {bg.gradient.angle != null && (
-          <PropRow label="  angle" value={`${bg.gradient.angle}deg`} />
-        )}
-        {bg.gradient.stops?.map((stop, i) => (
-          <PropRow
-            key={i}
-            label={`  stop[${i}]`}
-            value={
-              <span className="inline-flex items-center gap-1.5">
-                <ColorDisplay value={stop.color} />
-                <span className="text-slate-500">@ {(stop.position * 100).toFixed(0)}%</span>
-              </span>
-            }
-          />
-        ))}
-      </div>
-    );
-  }
-  if (bg.type === "image" && bg.image) {
-    return (
-      <div>
-        <PropRow label="background" value="image" />
-        {bg.image.url && <PropRow label="  url" value={bg.image.url} />}
-        {bg.image.fit && <PropRow label="  fit" value={bg.image.fit} />}
-      </div>
-    );
-  }
-  return <PropRow label="background" value={bg.type} />;
-}
-
-function ShadowDisplay({ shadow }: { shadow: ShadowSpec }) {
-  return (
-    <div className="ml-4 text-[10px] text-slate-400 font-mono py-0.5">
-      {shadow.type || "drop"} {shadow.x ?? 0} {shadow.y ?? 0} {shadow.blur ?? 0} {shadow.spread ?? 0}
-      {shadow.color && (
-        <span className="ml-1">
-          <ColorDisplay value={shadow.color} />
-        </span>
-      )}
-    </div>
   );
 }
 

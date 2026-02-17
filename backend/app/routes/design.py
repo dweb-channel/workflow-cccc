@@ -1565,6 +1565,8 @@ async def _execute_spec_pipeline(
     components_total = 0
     components_completed = 0
     components_failed = 0
+    figma_last_modified = ""
+    token_usage: Dict[str, int] = {}
 
     try:
         # Update status to running
@@ -1607,6 +1609,7 @@ async def _execute_spec_pipeline(
             # 1a. Fetch raw node tree
             nodes_resp = await client.get_file_nodes(file_key, [node_id])
             file_name = nodes_resp.get("name", "")
+            figma_last_modified = nodes_resp.get("lastModified", "")
             nodes_data = nodes_resp.get("nodes", {})
             page_data = nodes_data.get(node_id, {})
             page_doc = page_data.get("document", {})
@@ -1700,6 +1703,7 @@ async def _execute_spec_pipeline(
                 "cwd": output_dir,
                 "model": model or "",
                 "max_tokens": 4096,
+                "max_retries": 2,
             },
         )
         analyzer_result = await analyzer.execute({
@@ -1712,6 +1716,7 @@ async def _execute_spec_pipeline(
 
         analyzed_components = analyzer_result.get("components", components)
         analysis_stats = analyzer_result.get("analysis_stats", {})
+        token_usage = analyzer_result.get("token_usage", {})
         components_completed = analysis_stats.get("succeeded", 0)
         components_failed = analysis_stats.get("failed", 0)
 
@@ -1761,16 +1766,21 @@ async def _execute_spec_pipeline(
             "design_tokens": schema_tokens,
             "source": source_meta,
             "output_dir": output_dir,
+            "token_usage": token_usage,
+            "figma_last_modified": figma_last_modified,
         })
 
         spec_path = assembler_result.get("spec_path", "")
         spec_document = assembler_result.get("spec_document", {})
+        validation = assembler_result.get("validation", {})
 
         push_node_event(job_id, "spec_complete", {
             "spec_path": spec_path,
             "components_count": components_total,
             "components_succeeded": components_completed,
             "components_failed": components_failed,
+            "validation": validation,
+            "token_usage": token_usage,
         })
 
         final_status = "completed"
@@ -1787,6 +1797,8 @@ async def _execute_spec_pipeline(
                     "spec_path": spec_path,
                     "analysis_stats": analysis_stats,
                     "components_count": components_total,
+                    "validation": validation,
+                    "token_usage": token_usage,
                 },
                 components_total=components_total,
                 components_completed=components_completed,

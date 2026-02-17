@@ -38,6 +38,8 @@ export function useDesignJob() {
   const [currentNode, setCurrentNode] = useState<string | null>(null);
   const [designSpec, setDesignSpec] = useState<DesignSpec | null>(null);
   const [specComplete, setSpecComplete] = useState(false);
+  const [validation, setValidation] = useState<Record<string, unknown> | null>(null);
+  const [tokenUsage, setTokenUsage] = useState<{ input_tokens: number; output_tokens: number } | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryCountRef = useRef(0);
@@ -271,7 +273,7 @@ export function useDesignJob() {
       });
 
       // spec_analyzed: Node 2 finished one component's semantic analysis
-      // Backend payload: { component_id, component_name, role, description, index, total }
+      // Backend payload: { component_id, component_name, suggested_name, role, description, index, total, tokens_used? }
       es.addEventListener("spec_analyzed", (e) => {
         const data = safeParse(e.data) as Record<string, unknown> | null;
         if (!data) return;
@@ -279,8 +281,10 @@ export function useDesignJob() {
         if (componentId) {
           const update: ComponentUpdate = {
             id: componentId,
+            name: (data.suggested_name as string | undefined) || undefined,
             role: data.role as SemanticRole | undefined,
             description: data.description as string | undefined,
+            design_analysis: data.design_analysis as string | undefined,
           };
           setDesignSpec((prev) => {
             if (!prev) return prev;
@@ -290,15 +294,34 @@ export function useDesignJob() {
             };
           });
         }
+        // Accumulate per-component token usage
+        const compTokens = data.tokens_used as { input_tokens?: number; output_tokens?: number } | undefined;
+        if (compTokens) {
+          setTokenUsage((prev) => ({
+            input_tokens: (prev?.input_tokens ?? 0) + (compTokens.input_tokens ?? 0),
+            output_tokens: (prev?.output_tokens ?? 0) + (compTokens.output_tokens ?? 0),
+          }));
+        }
         pushEvent("spec_analyzed", data);
       });
 
       // spec_complete: Node 3 finished — spec file written
-      // Backend payload: { spec_path, components_count, components_succeeded, components_failed }
+      // Backend payload: { spec_path, components_count, components_succeeded, components_failed, validation, token_usage? }
       es.addEventListener("spec_complete", (e) => {
         const data = safeParse(e.data) as Record<string, unknown> | null;
         if (!data) return;
         setSpecComplete(true);
+        if (data.validation) {
+          setValidation(data.validation as Record<string, unknown>);
+        }
+        // Use authoritative total from backend (replaces incremental accumulation)
+        const totalTokens = data.token_usage as { input_tokens?: number; output_tokens?: number } | undefined;
+        if (totalTokens) {
+          setTokenUsage({
+            input_tokens: totalTokens.input_tokens ?? 0,
+            output_tokens: totalTokens.output_tokens ?? 0,
+          });
+        }
         pushEvent("spec_complete", data);
       });
 
@@ -447,6 +470,8 @@ export function useDesignJob() {
     currentNode,
     designSpec,
     specComplete,
+    validation,
+    tokenUsage,
     submit,
     cancel,
   };

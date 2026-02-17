@@ -4,14 +4,15 @@ Prompt design for Node 2 (SpecAnalyzer): uses Anthropic SDK vision API
 to fill semantic fields in a partially-completed ComponentSpec.
 
 Input: screenshot (PNG) + partial ComponentSpec JSON (layout/sizing/style filled)
-Output: semantic fields (role, description, render_hint, content.image.alt,
-        content.icon.name, interaction.behaviors, interaction.states)
+Output: semantic fields (role, description, render_hint, design_analysis,
+        content.image.alt, content.icon.name, interaction.behaviors, interaction.states)
 """
 
 SPEC_ANALYZER_SYSTEM_PROMPT = """\
 You are a design specification analyst. Your job is to examine a UI component \
-screenshot alongside its structural data, and produce precise semantic metadata \
-that will be consumed by a downstream code-generation LLM.
+screenshot alongside its structural data (which now includes full recursive \
+children with precise Figma layout properties), and produce semantic metadata \
+that overlays meaning onto the structural data.
 
 Your output must be **machine-readable JSON** — no markdown, no explanation, \
 no code fences. Return a single JSON object.
@@ -20,11 +21,15 @@ no code fences. Return a single JSON object.
 
 You receive:
 1. A **screenshot** of one UI component (cropped from a design tool)
-2. A **partial spec** with structural fields already filled (bounds, layout, \
-sizing, style, typography, content)
+2. A **full structural spec** with all fields filled recursively (bounds, layout, \
+sizing, style, typography, content, children at every depth level)
 3. **Page context** (device info, design tokens, sibling component names)
 
-You must fill the **semantic fields** that require visual understanding:
+You must fill the **semantic fields** that require visual understanding. \
+For `role`, `description`, `render_hint`, `content_updates`, `interaction`, \
+and `children_updates`: do NOT repeat raw structural data — focus on semantic meaning. \
+For `design_analysis`: DO reference specific values from the structural data \
+(colors, fonts, spacing) to write a concrete, actionable design handoff.
 
 ### Fields to Output
 
@@ -45,7 +50,11 @@ You must fill the **semantic fields** that require visual understanding:
     "states": [
       {"name": "<hover|active|disabled|selected|loading|empty|error>", "description": "<what changes>"}
     ]
-  }
+  },
+  "design_analysis": "<free-form design analysis text — see Design Analysis Guidelines below>",
+  "children_updates": [
+    {"id": "<descendant node id>", "role": "<role>", "suggested_name": "<PascalCase>", "description": "<brief description>"}
+  ]
 }
 ```
 
@@ -77,17 +86,19 @@ Choose the **single most accurate** role for each component:
 
 ### Description Writing Guidelines
 
-Write descriptions for a **downstream LLM that will generate code**, not for a human designer:
+Write descriptions for a **developer who will implement the component** using the \
+structural data as reference. Your descriptions add semantic context that raw \
+Figma data cannot express.
 
 **DO:**
 - State what the component IS and its PURPOSE: "Primary CTA button that navigates to the album streaming page"
 - Mention non-obvious design intent: "Background is transparent so the hero image shows through"
-- Note overflow behavior if bounds exceed parent: "Image extends beyond frame edge (412px > 393px device width); clip with overflow:hidden"
+- Note overflow behavior: "Content extends beyond frame; clip with overflow:hidden"
 - Explain spatial relationships to siblings when relevant: "Overlays the hero image, positioned at screen bottom"
 - For dual-gradient stacks, explain the visual effect: "Parent gradient + child gradient layer to create smooth fade"
 
 **DON'T:**
-- Repeat structural data already in the spec (don't say "393px wide" — that's in bounds)
+- Repeat structural data already in the spec (coordinates, sizes, colors, fonts are all in the structural layer)
 - Use vague language ("nice looking", "standard layout")
 - Reference Figma-specific concepts ("auto-layout", "component instance")
 
@@ -117,6 +128,43 @@ Infer interactions from visual cues + component role:
   `"page"` for page-level navigation (browser/router), \
   or a specific component name for targeting another element
 
+### Design Analysis Guidelines
+
+The `design_analysis` field is your **most important output**. It is a free-form \
+text field where you write a comprehensive design handoff analysis — like the \
+explanation a senior designer would give a developer during a design review.
+
+Write naturally and thoroughly. Cover these aspects (in whatever order makes sense \
+for this specific component):
+
+1. **Component overview**: What is this component and what design approach does it use?
+2. **Visual states and patterns**: Identify selected/default/hover/disabled states. \
+   For each state, describe the concrete visual treatment with specific values \
+   (background color, font weight, border radius, opacity, etc.) from the structural data.
+3. **Visual hierarchy**: How does the design guide the eye? What stands out and why? \
+   What recedes? Mention contrast, sizing, weight, color, spacing strategies.
+4. **Layout strategy**: Describe the spacing rhythm, alignment, and how children \
+   are arranged. Reference specific gap/padding values from the structural data.
+5. **Key style values**: Summarize the most important values: font family/sizes, \
+   primary colors, spacing, radius, shadows.
+6. **Child elements**: For each meaningful child, briefly describe its role and \
+   visual treatment.
+7. **Design intent**: Any non-obvious decisions — why transparent background, \
+   why specific spacing, how elements relate to siblings.
+
+**Style guide for the text:**
+- **IMPORTANT: Write ALL text output in Chinese (中文).** All fields — `description`, \
+  `design_analysis`, `children_updates[].description`, interaction descriptions — \
+  must be written in Chinese. Only keep technical values (color hex codes, px values, \
+  font names, PascalCase component names) in their original form.
+- Write in plain text with line breaks for readability (no markdown headers needed)
+- Reference specific values from the structural data (colors, sizes, fonts)
+- Be concrete: "选中的标签页使用 #E5E5E5 胶囊背景，圆角 80px" \
+  not "选中的标签页有不同的背景"
+- Pair contrasting states: always describe both selected AND unselected, \
+  both primary AND secondary
+- Length: aim for 200-500 words depending on component complexity
+
 """
 
 SPEC_ANALYZER_USER_PROMPT = """\
@@ -131,19 +179,37 @@ Analyze this UI component and fill its semantic fields.
 ## Design Tokens
 {design_tokens_json}
 
-## Partial ComponentSpec (structural fields filled, semantic fields need your analysis)
+## Full ComponentSpec (structural fields filled recursively, semantic fields need your analysis)
 {partial_spec_json}
 
 ## Instructions
 1. First, look at the screenshot carefully. Describe to yourself what you see.
-2. Cross-reference with the structural data above (bounds, layout, style, typography).
-3. Determine the `role` for this component.
-4. Suggest a semantic PascalCase `suggested_name` based on what you see (e.g. "Header", "PhotoGallery", "HeroBanner"). Ignore the original Figma layer name.
-5. Write a clear `description` for this component.
+2. Cross-reference with the full structural data above (bounds, layout, style, \
+typography are already precise — do NOT repeat them in your output).
+3. Determine the `role` for this top-level component.
+4. Suggest a semantic PascalCase `suggested_name` based on what you see \
+(e.g. "Header", "PhotoGallery", "HeroBanner"). Ignore the original Figma layer name.
+5. Write a clear `description` focusing on purpose and design intent, \
+not structural data.
 6. Check if this is a system element (StatusBar, HomeIndicator, etc.) → set `render_hint`.
 7. For image elements, write descriptive `alt` text based on what you see in the screenshot.
-8. For icon elements, identify the icon shape and assign a standard name (e.g., "close", "arrow-left", "more-horizontal", "search", "heart").
+8. For icon elements, identify the icon shape and assign a standard name \
+(e.g., "close", "arrow-left", "more-horizontal", "search", "heart").
 9. Infer interaction behaviors from the component's role and visual affordances.
+10. For ALL descendant nodes at every depth level (not just direct children — \
+walk the full `children` tree recursively), provide a `children_updates` entry \
+with its `id`, `role`, `suggested_name` (PascalCase), and brief `description`. \
+The `children_updates` array should be FLAT — include entries for direct children, \
+grandchildren, and deeper descendants all in the same array.
+11. Write a comprehensive `design_analysis` — this is your most important output. \
+Analyze the component as a senior designer explaining it to a developer: \
+describe visual states (selected/default/hover), layout strategy, visual hierarchy, \
+key style values, and design intent. Reference specific values from the structural \
+data (colors, fonts, spacing). See the Design Analysis Guidelines in the system prompt.
+
+IMPORTANT: Write ALL text fields (`description`, `design_analysis`, \
+`children_updates[].description`, interaction action/description) in **Chinese (中文)**. \
+Only keep technical values (hex colors, px, font names, PascalCase names) in English.
 
 Return a single JSON object following the schema defined in the system prompt. \
 No markdown, no explanation — just the JSON object."""
@@ -152,7 +218,7 @@ No markdown, no explanation — just the JSON object."""
 # Output schema for validation
 SPEC_ANALYZER_OUTPUT_SCHEMA = {
     "type": "object",
-    "required": ["role", "description"],
+    "required": ["role", "description", "design_analysis"],
     "properties": {
         "role": {
             "type": "string",
@@ -201,6 +267,20 @@ SPEC_ANALYZER_OUTPUT_SCHEMA = {
                             "description": {"type": "string"},
                         },
                     },
+                },
+            },
+        },
+        "design_analysis": {"type": "string"},
+        "children_updates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "role": {"type": "string"},
+                    "suggested_name": {"type": "string"},
+                    "description": {"type": "string"},
                 },
             },
         },

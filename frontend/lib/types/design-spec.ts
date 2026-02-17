@@ -103,12 +103,24 @@ export type CornerRadius = number | [number, number, number, number];
 
 // ---- Top-level document ----
 
+/** Token usage statistics from LLM analysis */
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface DesignSpec {
   version: "1.0";
+  /** Schema structure version (semver, e.g. "1.0.0") */
+  spec_version?: string;
+  /** Analyzer prompt/logic version (semver, e.g. "1.1.0") */
+  analyzer_version?: string;
   source: SpecSource;
   page: SpecPage;
   design_tokens?: DesignTokens;
   components: ComponentSpec[];
+  /** Aggregate LLM token usage for this spec run */
+  token_usage?: TokenUsage;
 }
 
 // ---- Source ----
@@ -118,6 +130,8 @@ export interface SpecSource {
   file_key: string;
   file_name?: string;
   exported_at?: string;
+  /** ISO timestamp of last Figma file modification (from Figma API) */
+  figma_last_modified?: string;
 }
 
 // ---- Page ----
@@ -181,6 +195,8 @@ export interface ComponentSpec {
   typography?: TypographySpec;
   content?: ContentSpec;
   interaction?: InteractionSpec;
+  /** LLM-generated free-form design analysis (markdown text) */
+  design_analysis?: string;
   children?: ComponentSpec[];
   children_collapsed?: number;
   screenshot_path?: string;
@@ -380,9 +396,11 @@ export interface CodeGenOutput {
 /** Partial component update from spec_analyzed SSE event */
 export interface ComponentUpdate {
   id: string;
+  name?: string;
   role?: SemanticRole;
   description?: string;
   interaction?: InteractionSpec;
+  design_analysis?: string;
   render_hint?: RenderHint;
   children_updates?: ComponentUpdate[];
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import type { ComponentSpec, SemanticRole } from "@/lib/types/design-spec";
-import { resolveSpacing } from "@/lib/types/design-spec";
 
 // ---- Role badge colors (5 groups) ----
 
@@ -72,7 +71,7 @@ export function SpecTree({ components, selectedId, onSelect }: SpecTreeProps) {
   );
 }
 
-// ---- Component row (flat, layout-focused) ----
+// ---- Component row ----
 
 function ComponentRow({
   component,
@@ -86,7 +85,7 @@ function ComponentRow({
   const isSpacer = component.render_hint === "spacer";
   const isPlatform = component.render_hint === "platform";
   const roleColor = getRoleColor(component.role);
-  const layoutSummary = getLayoutSummary(component);
+  const displayName = getDisplayName(component);
 
   return (
     <button
@@ -106,7 +105,7 @@ function ComponentRow({
                 : "text-slate-300"
           }`}
         >
-          {component.name}
+          {displayName}
         </span>
 
         {/* Role badge */}
@@ -118,18 +117,22 @@ function ComponentRow({
         </span>
       </div>
 
-      {/* Bottom line: size + layout summary */}
+      {/* Description line (truncated) */}
+      {component.description && (
+        <div className="text-[10px] text-slate-500 truncate leading-tight">
+          {component.description.slice(0, 60)}{component.description.length > 60 ? "..." : ""}
+        </div>
+      )}
+
+      {/* Bottom line: size */}
       <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
-        <span>{Math.round(component.bounds.width)}x{Math.round(component.bounds.height)}</span>
-        {layoutSummary && (
-          <>
-            <span className="text-slate-600">|</span>
-            <span className="truncate text-slate-400">{layoutSummary}</span>
-          </>
+        <span>{Math.round(component.bounds.width)} × {Math.round(component.bounds.height)}</span>
+        {component.children && component.children.length > 0 && (
+          <span className="text-slate-600">{component.children.length} 子组件</span>
         )}
         {component.children_collapsed != null && component.children_collapsed > 0 && (
-          <span className="ml-auto shrink-0 text-slate-600">
-            {component.children_collapsed} nodes
+          <span className="text-slate-600">
+            {component.children_collapsed} 节点
           </span>
         )}
       </div>
@@ -139,38 +142,35 @@ function ComponentRow({
 
 // ---- Helpers ----
 
-function getLayoutSummary(component: ComponentSpec): string {
-  const parts: string[] = [];
-  const layout = component.layout;
+const ROLE_NAMES_ZH: Record<string, string> = {
+  page: "页面",
+  section: "区块",
+  container: "容器",
+  nav: "导航",
+  header: "头部",
+  footer: "底部",
+  button: "按钮",
+  input: "输入框",
+  card: "卡片",
+  list: "列表",
+  "list-item": "列表项",
+  image: "图片",
+  icon: "图标",
+  text: "文本",
+  badge: "徽章",
+  divider: "分割线",
+  overlay: "遮罩",
+  decorative: "装饰",
+};
 
-  if (layout.type) {
-    if (layout.type === "flex") {
-      parts.push(`flex ${layout.direction || "row"}`);
-    } else {
-      parts.push(layout.type);
-    }
+/** Get a human-readable display name for a component */
+function getDisplayName(component: ComponentSpec): string {
+  // If name is meaningful (not "Frame" / "Rectangle" / "Group" etc.), use it
+  const genericNames = new Set(["Frame", "Rectangle", "Group", "Vector", "Ellipse", "Line", "Component"]);
+  if (component.name && !genericNames.has(component.name)) {
+    return component.name;
   }
-
-  if (layout.gap != null) {
-    parts.push(`gap:${resolveSpacing(layout.gap)}`);
-  }
-
-  if (layout.padding) {
-    const p = layout.padding.map((v) => resolveSpacing(v));
-    // Only show if not all zeros
-    if (p.some((v) => v !== 0)) {
-      // Compact format: show unique values
-      const unique = [...new Set(p)];
-      if (unique.length === 1) {
-        parts.push(`p:${unique[0]}`);
-      } else {
-        parts.push(`p:[${p.join(",")}]`);
-      }
-    }
-  }
-
-  if (layout.align) parts.push(`align:${layout.align}`);
-  if (layout.justify && layout.justify !== "start") parts.push(`justify:${layout.justify}`);
-
-  return parts.join(" ");
+  // Fallback: use Chinese role name + dimensions
+  const roleZh = ROLE_NAMES_ZH[component.role] || component.role;
+  return `${roleZh} ${Math.round(component.bounds.width)}×${Math.round(component.bounds.height)}`;
 }

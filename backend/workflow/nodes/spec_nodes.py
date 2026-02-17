@@ -392,6 +392,9 @@ def figma_text_to_typography(node: Dict) -> Optional[Dict[str, Any]]:
         return None
 
     style = node.get("style", {})
+    # Fallback: some Figma exports use "typeStyle" instead of "style"
+    if not style.get("fontFamily"):
+        style = node.get("typeStyle", style)
     characters = node.get("characters", "")
 
     if not characters and not style:
@@ -447,8 +450,27 @@ def figma_text_to_typography(node: Dict) -> Optional[Dict[str, Any]]:
     return result if result else None
 
 
+_FIGMA_AUTO_NAME_RE = re.compile(
+    r"^(Frame|Group|Rectangle|Ellipse|Line|Vector|Component|Instance|Image|"
+    r"Union|Subtract|Intersect|Exclude|Mask\s*Group)"
+    r"\s*\d{2,}$",
+    re.IGNORECASE,
+)
+
+
 def _to_component_name(figma_name: str) -> str:
-    """Convert Figma layer name to PascalCase component name."""
+    """Convert Figma layer name to PascalCase component name.
+
+    Detects Figma auto-generated names (e.g. "Frame 1321317615",
+    "Rectangle 240648907") and strips the numeric ID, leaving just
+    the type name (e.g. "Frame", "Rectangle"). The dedup logic in
+    _rebuild_paths() will add _1, _2 suffixes for same-name siblings.
+    """
+    # Strip Figma auto-generated numeric IDs
+    m = _FIGMA_AUTO_NAME_RE.match(figma_name.strip())
+    if m:
+        figma_name = m.group(1).strip()
+
     name = re.sub(r"[^\x00-\x7f]", " ", figma_name)
     parts = re.split(r"[-_\s/]+", name)
     pascal = "".join(p.capitalize() for p in parts if p.strip())
@@ -460,9 +482,9 @@ def _to_component_name(figma_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 # Max depth for component tree recursion.
-# 0 = top-level components only (layout skeleton — padding/gap/flex)
-# 1 = one level of children (section internals visible)
-_MAX_COMPONENT_DEPTH = 0
+# 20 = deep recursion for fine-grained layout spec output
+# (was 0 for codegen-oriented skeleton; now expanded for layout spec)
+_MAX_COMPONENT_DEPTH = 20
 
 _VECTOR_TYPES = frozenset({
     "VECTOR", "LINE", "ELLIPSE", "STAR",
@@ -473,11 +495,11 @@ _VECTOR_TYPES = frozenset({
 def _should_recurse(node: Dict, width: float, height: float, depth: int) -> bool:
     """Determine if we should recursively expand a node's children.
 
-    Pruning rules for layout-focused spec generation:
+    Pruning rules for fine-grained layout spec:
     1. Vector/shape nodes — internal SVG paths irrelevant for layout
-    2. Small components (≤48px) — icon-level, no layout meaning
+    2. Small icons (≤24px) — leaf nodes, keep node but skip children
     3. Platform/spacer elements — system UI, skip internals
-    4. Depth limit — only layout skeleton, no component internals
+    4. Depth limit — safety cap to prevent infinite recursion
     """
     node_type = node.get("type", "")
     name = node.get("name", "")
@@ -486,15 +508,15 @@ def _should_recurse(node: Dict, width: float, height: float, depth: int) -> bool
     if node_type in _VECTOR_TYPES:
         return False
 
-    # Rule 2: Small components (icon-sized) — no layout to extract
-    if width <= 48 and height <= 48:
+    # Rule 2: Very small icons (≤24px) — keep as leaf, don't recurse
+    if width <= 24 and height <= 24:
         return False
 
     # Rule 3: Platform/spacer elements — system UI internals
     if detect_render_hint(name):
         return False
 
-    # Rule 4: Depth limit — layout skeleton only
+    # Rule 4: Depth safety cap
     if depth >= _MAX_COMPONENT_DEPTH:
         return False
 
@@ -532,6 +554,7 @@ def figma_node_to_component_spec(
     z_index: int = 0,
     reverse_map: Optional[Dict[str, str]] = None,
     depth: int = 0,
+    parent_path: str = "",
 ) -> Optional[Dict[str, Any]]:
     """Convert a raw Figma node to a PartialComponentSpec.
 
@@ -577,6 +600,20 @@ def figma_node_to_component_spec(
         "height": height,
     }
 
+    # --- Build path ---
+    component_name = _to_component_name(name)
+    current_path = f"{parent_path}/{component_name}" if parent_path else component_name
+
+    # --- Determine layoutSource ---
+    layout_mode = node.get("layoutMode")
+    has_children = bool(node.get("children"))
+    if layout_mode:
+        layout_source = "auto-layout"
+    elif has_children:
+        layout_source = "inferred"
+    else:
+        layout_source = "leaf"
+
     # --- Build children (with pruning) ---
     children_specs: List[Dict] = []
     children = node.get("children", [])
@@ -587,7 +624,7 @@ def figma_node_to_component_spec(
         for i, child in enumerate(children):
             child_spec = figma_node_to_component_spec(
                 child, z_index=i, reverse_map=reverse_map,
-                depth=depth + 1,
+                depth=depth + 1, parent_path=current_path,
             )
             if child_spec:
                 children_specs.append(child_spec)
@@ -687,15 +724,17 @@ def figma_node_to_component_spec(
             content["image"]["aspect_ratio"] = f"{int(width) // g}:{int(height) // g}"
 
     # --- Assemble spec ---
-    component_name = _to_component_name(name)
+    # component_name already computed above (for path building)
 
     spec: Dict[str, Any] = {
         "id": node_id,
         "name": component_name,
+        "path": current_path,
         "role": "other",        # Node 2 fills
         "description": "",      # Node 2 fills
         "bounds": bounds,
         "layout": layout,
+        "layoutSource": layout_source,
         "sizing": sizing,
         "style": style,
         "z_index": z_index,
@@ -713,14 +752,6 @@ def figma_node_to_component_spec(
         spec["content"] = content
     if children_specs:
         spec["children"] = children_specs
-    elif children:
-        # Not recursed — record how many children were collapsed
-        visible_count = sum(
-            1 for c in children
-            if c.get("visible", True) and c.get("opacity", 1.0) != 0
-        )
-        if visible_count > 0:
-            spec["children_collapsed"] = visible_count
 
     return spec
 
@@ -1027,33 +1058,220 @@ def _strip_semantic_fields(spec: Dict) -> Dict:
     return result
 
 
-def _parse_analyzer_json(raw: str) -> Optional[Dict]:
-    """Extract and parse JSON from LLM response.
+# ---------------------------------------------------------------------------
+# Shared Claude CLI invocation + JSON parsing
+# ---------------------------------------------------------------------------
 
-    Handles responses that may contain markdown code fences.
+
+async def _invoke_claude_cli(
+    *,
+    claude_bin: str,
+    system_prompt: str,
+    user_prompt: str,
+    screenshot_path: str = "",
+    base_dir: str = ".",
+    model: str = "",
+    timeout: float = 300.0,
+    max_retries: int = 2,
+    retry_base_delay: float = 5.0,
+    component_name: str = "unknown",
+    caller: str = "ClaudeCLI",
+) -> Dict[str, Any]:
+    """Invoke Claude CLI subprocess and return response text + token usage.
+
+    Handles screenshot path resolution, CLI prompt assembly, subprocess
+    execution with timeout, JSON envelope parsing, error detection,
+    and automatic retry with exponential backoff on transient failures.
+
+    Returns {"text": str, "token_usage": {...} | None, "retry_count": int}.
+    Raises RuntimeError on CLI failure, TimeoutError on timeout (after all retries exhausted).
     """
+    import asyncio
+
+    # Resolve screenshot absolute path
+    screenshot_abs = ""
+    if screenshot_path:
+        screenshot_abs = (
+            screenshot_path
+            if os.path.isabs(screenshot_path)
+            else os.path.join(base_dir, screenshot_path)
+        )
+        if not os.path.isfile(screenshot_abs):
+            logger.warning("%s: screenshot not found: %s", caller, screenshot_abs)
+            screenshot_abs = ""
+
+    # Build full CLI prompt: system + screenshot instruction + user
+    cli_prompt_parts = [system_prompt, ""]
+    if screenshot_abs:
+        cli_prompt_parts.append(
+            f"First, read the screenshot image at: {screenshot_abs}"
+        )
+        cli_prompt_parts.append(
+            "Use this screenshot as visual reference for your analysis."
+        )
+        cli_prompt_parts.append("")
+    cli_prompt_parts.append(user_prompt)
+    cli_prompt = "\n".join(cli_prompt_parts)
+
+    # Build CLI command
+    cmd = [
+        claude_bin,
+        "-p", cli_prompt,
+        "--output-format", "json",
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+    ]
+    if model:
+        cmd.extend(["--model", model])
+    if screenshot_abs:
+        cmd.extend(["--allowedTools", "Read"])
+    else:
+        cmd.extend(["--tools", ""])
+
+    # Inherit env but remove CLAUDECODE to avoid nested session detection
+    cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+    last_error: Optional[Exception] = None
+    attempts = 1 + max(0, max_retries)  # at least 1 attempt
+    import time as _time
+    _start_time = _time.monotonic()
+
+    for attempt in range(attempts):
+        if attempt > 0:
+            delay = retry_base_delay * (2 ** (attempt - 1))  # 5s, 10s, 20s, ...
+            logger.warning(
+                "%s: retry %d/%d for %s after %.1fs (previous error: %s)",
+                caller, attempt, max_retries, component_name, delay, last_error,
+            )
+            await asyncio.sleep(delay)
+
+        logger.info(
+            "%s: calling claude CLI for %s (attempt %d/%d)",
+            caller, component_name, attempt + 1, attempts,
+        )
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=cli_env,
+            )
+
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                last_error = TimeoutError(
+                    f"Claude CLI timed out ({timeout}s) for {component_name}"
+                )
+                continue  # retry
+
+            raw_text = stdout.decode("utf-8", errors="replace").strip()
+
+            # Parse CLI JSON envelope
+            cli_output = None
+            try:
+                cli_output = json.loads(raw_text)
+            except json.JSONDecodeError:
+                pass
+
+            # Check for CLI-level errors (non-zero exit or is_error in envelope)
+            if proc.returncode != 0 or (
+                isinstance(cli_output, dict) and cli_output.get("is_error")
+            ):
+                err_msg = stderr.decode("utf-8", errors="replace").strip()
+                if not err_msg and isinstance(cli_output, dict):
+                    err_msg = cli_output.get("result", "")
+                last_error = RuntimeError(
+                    f"Claude CLI failed (exit {proc.returncode}) for "
+                    f"{component_name}: {err_msg[:500]}"
+                )
+                continue  # retry
+
+            # Extract token usage from CLI JSON envelope (if available)
+            token_usage: Optional[Dict[str, int]] = None
+            if isinstance(cli_output, dict):
+                usage = cli_output.get("usage")
+                if isinstance(usage, dict):
+                    token_usage = {
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                    }
+
+            # Extract the actual text content from CLI JSON envelope
+            if isinstance(cli_output, dict) and "result" in cli_output:
+                raw_text = cli_output["result"]
+            elif isinstance(cli_output, dict) and "content" in cli_output:
+                raw_text = cli_output["content"]
+
+            duration_ms = int((_time.monotonic() - _start_time) * 1000)
+            return {
+                "text": raw_text,
+                "token_usage": token_usage,
+                "retry_count": attempt,
+                "duration_ms": duration_ms,
+            }
+
+        except (TimeoutError, RuntimeError):
+            raise  # already handled above via continue
+        except OSError as e:
+            # Subprocess spawn failure (e.g. claude binary missing mid-run)
+            last_error = RuntimeError(f"CLI spawn failed for {component_name}: {e}")
+            continue  # retry
+
+    # All retries exhausted
+    raise last_error or RuntimeError(
+        f"Claude CLI failed after {attempts} attempts for {component_name}"
+    )
+
+
+def _parse_llm_json(raw: str, caller: str = "LLM") -> Optional[Dict]:
+    """Parse JSON from LLM response, handling markdown fences and preamble.
+
+    Tries in order: direct parse -> strip leading fence -> regex fence -> outermost braces.
+    """
+    if not raw:
+        return None
+
     text = raw.strip()
-    # Strip markdown code fences
+
+    # Strip leading markdown code fence
     if text.startswith("```"):
         lines = text.split("\n")
-        # Remove first line (```json) and last line (```)
         lines = lines[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         text = "\n".join(lines).strip()
+
+    # Try direct parse
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Fallback: extract outermost { ... } (LLM may add preamble/epilogue)
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return json.loads(text[start:end + 1])
-            except json.JSONDecodeError:
-                pass
-        logger.error("SpecAnalyzerNode: JSON parse error, raw[:500]: %s", text[:500])
-        return None
+        pass
+
+    # Try extracting from non-leading markdown fence
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if fence_match:
+        try:
+            return json.loads(fence_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: extract outermost { ... }
+    brace_start = text.find("{")
+    brace_end = text.rfind("}")
+    if brace_start >= 0 and brace_end > brace_start:
+        try:
+            return json.loads(text[brace_start:brace_end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    logger.error("%s: JSON parse error, raw[:500]: %s", caller, text[:500])
+    return None
 
 
 @register_node_type(
@@ -1137,7 +1355,14 @@ class SpecAnalyzerNode(BaseNodeImpl):
                 "analysis_stats": {"error": "claude CLI not found in PATH"},
             }
 
-        stats = {"total": len(components), "succeeded": 0, "failed": 0}
+        # Read max_retries from config (passed through from API)
+        max_retries = self.config.get("max_retries", 2)
+
+        stats = {
+            "total": len(components), "succeeded": 0, "failed": 0,
+            "total_retries": 0,
+        }
+        token_totals = {"input_tokens": 0, "output_tokens": 0}
 
         # Concurrent analysis with semaphore to limit parallel CLI processes
         import asyncio
@@ -1163,20 +1388,40 @@ class SpecAnalyzerNode(BaseNodeImpl):
                         sibling_names=sibling_names,
                         cwd=cwd,
                         model=model,
+                        max_retries=max_retries,
                     )
                     stats["succeeded"] += 1
+
+                    # Track retries and duration
+                    retry_count = result.pop("_retry_count", 0)
+                    stats["total_retries"] += retry_count
+                    duration_ms = result.pop("_duration_ms", 0)
+
+                    # Accumulate token usage
+                    comp_tokens = result.pop("_token_usage", None)
+                    if comp_tokens:
+                        token_totals["input_tokens"] += comp_tokens.get("input_tokens", 0)
+                        token_totals["output_tokens"] += comp_tokens.get("output_tokens", 0)
 
                     # Push SSE event for this component
                     if run_id:
                         from ..sse import push_sse_event
-                        await push_sse_event(run_id, "spec_analyzed", {
+                        sse_payload: Dict[str, Any] = {
                             "component_id": comp_id,
                             "component_name": comp_name,
+                            "suggested_name": result.get("suggested_name"),
                             "role": result.get("role"),
                             "description": result.get("description", "")[:200],
+                            "design_analysis": result.get("design_analysis"),
                             "index": idx,
                             "total": len(components),
-                        })
+                            "duration_ms": duration_ms,
+                        }
+                        if comp_tokens:
+                            sse_payload["tokens_used"] = comp_tokens
+                        if retry_count > 0:
+                            sse_payload["retry_count"] = retry_count
+                        await push_sse_event(run_id, "spec_analyzed", sse_payload)
 
                     return result
                 except Exception as e:
@@ -1207,13 +1452,15 @@ class SpecAnalyzerNode(BaseNodeImpl):
                 analyzed_components.append(r)
 
         logger.info(
-            "SpecAnalyzerNode [%s]: done — %d/%d succeeded",
+            "SpecAnalyzerNode [%s]: done — %d/%d succeeded, tokens: %d in / %d out",
             self.node_id, stats["succeeded"], stats["total"],
+            token_totals["input_tokens"], token_totals["output_tokens"],
         )
 
         return {
             "components": analyzed_components,
             "analysis_stats": stats,
+            "token_usage": token_totals,
         }
 
     async def _analyze_single_component(
@@ -1227,18 +1474,14 @@ class SpecAnalyzerNode(BaseNodeImpl):
         sibling_names: List[str],
         cwd: str,
         model: str,
+        max_retries: int = 2,
     ) -> Dict:
         """Analyze a single component using Claude CLI subprocess."""
-        import asyncio
-
         # Build partial spec (structural data only)
         partial_spec = _strip_semantic_fields(component)
         partial_spec_json = json.dumps(partial_spec, ensure_ascii=False, indent=2)
-
-        # Build design tokens JSON
         tokens_json = json.dumps(design_tokens, ensure_ascii=False, indent=2)
 
-        # Format user prompt
         user_text = SPEC_ANALYZER_USER_PROMPT.format(
             device_type=device.get("type", "mobile"),
             device_width=device.get("width", 393),
@@ -1250,110 +1493,23 @@ class SpecAnalyzerNode(BaseNodeImpl):
             partial_spec_json=partial_spec_json,
         )
 
-        # Resolve screenshot absolute path for CLI Read tool
-        screenshot_path = component.get("screenshot_path", "")
-        screenshot_abs = ""
-        if screenshot_path:
-            screenshot_abs = (
-                screenshot_path
-                if os.path.isabs(screenshot_path)
-                else os.path.join(cwd, screenshot_path)
-            )
-            if not os.path.isfile(screenshot_abs):
-                logger.warning(
-                    "SpecAnalyzerNode: screenshot not found: %s", screenshot_abs
-                )
-                screenshot_abs = ""
-
-        # Build the full prompt for CLI: system prompt + screenshot ref + user prompt
-        cli_prompt_parts = [
-            SPEC_ANALYZER_SYSTEM_PROMPT,
-            "",
-        ]
-        if screenshot_abs:
-            cli_prompt_parts.append(
-                f"First, read the screenshot image at: {screenshot_abs}"
-            )
-            cli_prompt_parts.append(
-                "Use this screenshot as visual context for your analysis."
-            )
-            cli_prompt_parts.append("")
-        cli_prompt_parts.append(user_text)
-        cli_prompt = "\n".join(cli_prompt_parts)
-
-        # Build CLI command (no --model flag: use CLI's default)
-        cmd = [
-            claude_bin,
-            "-p", cli_prompt,
-            "--output-format", "json",
-            "--dangerously-skip-permissions",
-            "--no-session-persistence",
-        ]
-        if model:
-            cmd.extend(["--model", model])
-        if screenshot_abs:
-            cmd.extend(["--allowedTools", "Read"])
-        else:
-            cmd.extend(["--tools", ""])
-
-        # Build env: inherit current env but remove CLAUDECODE to avoid
-        # nested session detection
-        cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
-        logger.info(
-            "SpecAnalyzerNode [%s]: calling claude CLI for %s",
-            self.node_id, component.get("name", "?"),
+        cli_result = await _invoke_claude_cli(
+            claude_bin=claude_bin,
+            system_prompt=SPEC_ANALYZER_SYSTEM_PROMPT,
+            user_prompt=user_text,
+            screenshot_path=component.get("screenshot_path", ""),
+            base_dir=cwd,
+            model=model,
+            timeout=300.0,
+            max_retries=max_retries,
+            component_name=component.get("name", "?"),
+            caller=f"SpecAnalyzerNode [{self.node_id}]",
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=cli_env,
+        raw_text = cli_result["text"]
+        analyzer_output = _parse_llm_json(
+            raw_text, caller=f"SpecAnalyzerNode [{self.node_id}]",
         )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=300.0,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            raise TimeoutError(
-                f"Claude CLI timed out (300s) for {component.get('name')}"
-            )
-
-        raw_text = stdout.decode("utf-8", errors="replace").strip()
-
-        # --output-format json wraps the response in a JSON envelope
-        # with a "result" field containing the text
-        cli_output = None
-        try:
-            cli_output = json.loads(raw_text)
-        except json.JSONDecodeError:
-            pass
-
-        # Check for CLI-level errors (non-zero exit or is_error in envelope)
-        if proc.returncode != 0 or (
-            isinstance(cli_output, dict) and cli_output.get("is_error")
-        ):
-            # Extract error from envelope result (stderr is often empty)
-            err_msg = stderr.decode("utf-8", errors="replace").strip()
-            if not err_msg and isinstance(cli_output, dict):
-                err_msg = cli_output.get("result", "")
-            raise RuntimeError(
-                f"Claude CLI failed (exit {proc.returncode}) for "
-                f"{component.get('name')}: {err_msg[:500]}"
-            )
-
-        # Extract the actual text content from CLI JSON envelope
-        if isinstance(cli_output, dict) and "result" in cli_output:
-            raw_text = cli_output["result"]
-        elif isinstance(cli_output, dict) and "content" in cli_output:
-            raw_text = cli_output["content"]
-
-        # Parse JSON output — raise on failure so execute() counts it as failed
-        analyzer_output = _parse_analyzer_json(raw_text)
         if not analyzer_output:
             raise ValueError(
                 f"JSON parse failed for {component.get('name')}, "
@@ -1361,7 +1517,13 @@ class SpecAnalyzerNode(BaseNodeImpl):
             )
 
         # Merge LLM output into component using spec_merger
-        return merge_analyzer_output(component, analyzer_output)
+        merged = merge_analyzer_output(component, analyzer_output)
+        # Attach token usage + retry info (not part of spec, used for tracking)
+        if cli_result["token_usage"]:
+            merged["_token_usage"] = cli_result["token_usage"]
+        merged["_retry_count"] = cli_result.get("retry_count", 0)
+        merged["_duration_ms"] = cli_result.get("duration_ms", 0)
+        return merged
 
 
 # ---------------------------------------------------------------------------
@@ -1405,8 +1567,30 @@ class SpecAssemblerNode(BaseNodeImpl):
 
     1. Wraps page metadata, design_tokens, source info
     2. Orders components by z_index (bottom layer first)
-    3. Writes to {output_dir}/design_spec.json
+    3. Validates auto-layout compliance
+    4. Writes to {output_dir}/design_spec.json
     """
+
+    @staticmethod
+    def _collect_inferred_nodes(
+        node: Dict[str, Any], results: List[Dict[str, Any]],
+    ) -> None:
+        """Recursively collect nodes with layoutSource == 'inferred'.
+
+        Only flags nodes with >= 2 children, since single/zero-child
+        containers don't benefit from auto-layout (no gap to compute).
+        """
+        children = node.get("children", [])
+        if node.get("layoutSource") == "inferred" and len(children) >= 2:
+            results.append({
+                "id": node.get("id", ""),
+                "name": node.get("name", ""),
+                "path": node.get("path", ""),
+                "children_count": len(children),
+            })
+        for child in node.get("children", []):
+            if isinstance(child, dict):
+                SpecAssemblerNode._collect_inferred_nodes(child, results)
 
     async def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         components = inputs.get("components", [])
@@ -1420,11 +1604,14 @@ class SpecAssemblerNode(BaseNodeImpl):
             self.node_id, len(components),
         )
 
-        # Add exported_at timestamp
+        # Add exported_at timestamp + figma_last_modified passthrough
         source_with_ts = {
             **source,
             "exported_at": datetime.now(timezone.utc).isoformat(),
         }
+        # Preserve figma_last_modified if provided by upstream
+        if inputs.get("figma_last_modified"):
+            source_with_ts["figma_last_modified"] = inputs["figma_last_modified"]
 
         # Sort components by z_index (bottom layer first)
         sorted_components = sorted(
@@ -1432,14 +1619,53 @@ class SpecAssemblerNode(BaseNodeImpl):
             key=lambda c: c.get("z_index", 0),
         )
 
+        # --- Quality validation (merge reports + role/bounds/hint/naming) ---
+        from ..spec.spec_validator import run_all_validations
+        quality_report = run_all_validations(
+            sorted_components, page, node_id=self.node_id,
+        )
+
+        # --- Validate auto-layout compliance ---
+        inferred_nodes: List[Dict[str, Any]] = []
+        for comp in sorted_components:
+            self._collect_inferred_nodes(comp, inferred_nodes)
+
+        # Build combined validation report
+        validation: Dict[str, Any] = {
+            "auto_layout_compliant": len(inferred_nodes) == 0,
+            "inferred_node_count": len(inferred_nodes),
+            "inferred_nodes": inferred_nodes,
+            **quality_report,
+        }
+        if inferred_nodes:
+            validation["message"] = (
+                f"{len(inferred_nodes)} node(s) missing auto-layout. "
+                "These nodes have no precise gap/padding data from Figma. "
+                "Please add auto-layout in Figma and re-run the pipeline."
+            )
+            logger.warning(
+                "SpecAssemblerNode [%s]: %d node(s) missing auto-layout: %s",
+                self.node_id,
+                len(inferred_nodes),
+                ", ".join(n["name"] for n in inferred_nodes[:10]),
+            )
+
         # Assemble final document
+        # Token usage stats from SpecAnalyzer (if provided)
+        token_usage = inputs.get("token_usage")
+
         spec_document = {
             "version": "1.0",
+            "spec_version": "1.0.0",
+            "analyzer_version": "1.1.0",
             "source": source_with_ts,
             "page": page,
             "design_tokens": design_tokens,
             "components": sorted_components,
+            "validation": validation,
         }
+        if token_usage:
+            spec_document["token_usage"] = token_usage
 
         # Write to disk if output_dir provided
         spec_path = ""
@@ -1449,13 +1675,17 @@ class SpecAssemblerNode(BaseNodeImpl):
             with open(spec_path, "w", encoding="utf-8") as f:
                 json.dump(spec_document, f, ensure_ascii=False, indent=2)
             logger.info(
-                "SpecAssemblerNode [%s]: wrote %s (%d components)",
+                "SpecAssemblerNode [%s]: wrote %s (%d components, %d inferred, "
+                "%d quality warnings)",
                 self.node_id, spec_path, len(sorted_components),
+                len(inferred_nodes),
+                quality_report.get("quality_warning_count", 0),
             )
 
         return {
             "spec_path": spec_path,
             "spec_document": spec_document,
+            "validation": validation,
         }
 
 
@@ -1549,7 +1779,7 @@ class CodeGenNode(BaseNodeImpl):
 
         # Concurrent generation with semaphore
         import asyncio
-        _CLI_CONCURRENCY = 3
+        _CLI_CONCURRENCY = 6
         sem = asyncio.Semaphore(_CLI_CONCURRENCY)
 
         async def _gen_one(idx: int, component: Dict) -> Optional[Dict]:
@@ -1654,7 +1884,6 @@ class CodeGenNode(BaseNodeImpl):
         file_ext: str,
     ) -> Dict:
         """Generate code for a single component using Claude CLI."""
-        import asyncio
         from ..spec.codegen_prompt import (
             CODEGEN_SYSTEM_PROMPT,
             CODEGEN_USER_PROMPT,
@@ -1665,14 +1894,12 @@ class CodeGenNode(BaseNodeImpl):
                           if k != "screenshot_path" and not k.startswith("_")}
         spec_json = json.dumps(spec_for_prompt, ensure_ascii=False, indent=2)
 
-        # Build system prompt with tech stack injected
         system_prompt = CODEGEN_SYSTEM_PROMPT.format(
             tech_stack=stack_config["name"],
             tech_stack_guidelines=stack_config["guidelines"],
             file_ext=file_ext,
         )
 
-        # Build user prompt
         user_prompt = CODEGEN_USER_PROMPT.format(
             device_type=device.get("type", "mobile"),
             device_width=device.get("width", 393),
@@ -1682,103 +1909,22 @@ class CodeGenNode(BaseNodeImpl):
             component_spec_json=spec_json,
         )
 
-        # Resolve screenshot path
-        screenshot_path = component.get("screenshot_path", "")
-        screenshot_abs = ""
-        if screenshot_path:
-            screenshot_abs = (
-                screenshot_path
-                if os.path.isabs(screenshot_path)
-                else os.path.join(output_dir, screenshot_path)
-            )
-            if not os.path.isfile(screenshot_abs):
-                logger.warning(
-                    "CodeGenNode: screenshot not found: %s", screenshot_abs
-                )
-                screenshot_abs = ""
-
-        # Build full CLI prompt
-        cli_prompt_parts = [system_prompt, ""]
-        if screenshot_abs:
-            cli_prompt_parts.append(
-                f"First, read the screenshot image at: {screenshot_abs}"
-            )
-            cli_prompt_parts.append(
-                "Use this screenshot as the visual reference for your code generation."
-            )
-            cli_prompt_parts.append("")
-        cli_prompt_parts.append(user_prompt)
-        cli_prompt = "\n".join(cli_prompt_parts)
-
-        # Build CLI command
-        cmd = [
-            claude_bin,
-            "-p", cli_prompt,
-            "--output-format", "json",
-            "--dangerously-skip-permissions",
-            "--no-session-persistence",
-        ]
-        model = self.config.get("model", "")
-        if model:
-            cmd.extend(["--model", model])
-        if screenshot_abs:
-            cmd.extend(["--allowedTools", "Read"])
-        else:
-            cmd.extend(["--tools", ""])
-
-        cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
-        logger.info(
-            "CodeGenNode [%s]: calling claude CLI for %s",
-            self.node_id, component.get("name", "?"),
+        cli_result = await _invoke_claude_cli(
+            claude_bin=claude_bin,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            screenshot_path=component.get("screenshot_path", ""),
+            base_dir=output_dir,
+            model=self.config.get("model", ""),
+            timeout=600.0,
+            component_name=component.get("name", "?"),
+            caller=f"CodeGenNode [{self.node_id}]",
         )
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=cli_env,
+        raw_text = cli_result["text"]
+        codegen_output = _parse_llm_json(
+            raw_text, caller=f"CodeGenNode [{self.node_id}]",
         )
-
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=600.0,
-            )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            raise TimeoutError(
-                f"Claude CLI timed out (600s) for {component.get('name')}"
-            )
-
-        raw_text = stdout.decode("utf-8", errors="replace").strip()
-
-        # Parse CLI JSON envelope
-        cli_output = None
-        try:
-            cli_output = json.loads(raw_text)
-        except json.JSONDecodeError:
-            pass
-
-        if proc.returncode != 0 or (
-            isinstance(cli_output, dict) and cli_output.get("is_error")
-        ):
-            err_msg = stderr.decode("utf-8", errors="replace").strip()
-            if not err_msg and isinstance(cli_output, dict):
-                err_msg = cli_output.get("result", "")
-            raise RuntimeError(
-                f"Claude CLI failed (exit {proc.returncode}) for "
-                f"{component.get('name')}: {err_msg[:500]}"
-            )
-
-        # Extract text from CLI envelope
-        if isinstance(cli_output, dict) and "result" in cli_output:
-            raw_text = cli_output["result"]
-        elif isinstance(cli_output, dict) and "content" in cli_output:
-            raw_text = cli_output["content"]
-
-        # Parse the structured JSON output
-        codegen_output = self._parse_codegen_json(raw_text)
         if not codegen_output:
             raise ValueError(
                 f"JSON parse failed for {component.get('name')}, "
@@ -1809,41 +1955,6 @@ class CodeGenNode(BaseNodeImpl):
             )
 
         return codegen_output
-
-    def _parse_codegen_json(self, raw_text: str) -> Optional[Dict]:
-        """Parse JSON from LLM output, handling markdown fences."""
-        if not raw_text:
-            return None
-
-        # Try direct parse
-        try:
-            return json.loads(raw_text)
-        except json.JSONDecodeError:
-            pass
-
-        # Try extracting from markdown code fence
-        import re
-        fence_match = re.search(
-            r"```(?:json)?\s*\n(.*?)\n```",
-            raw_text,
-            re.DOTALL,
-        )
-        if fence_match:
-            try:
-                return json.loads(fence_match.group(1))
-            except json.JSONDecodeError:
-                pass
-
-        # Try finding first { ... } block
-        brace_start = raw_text.find("{")
-        brace_end = raw_text.rfind("}")
-        if brace_start != -1 and brace_end > brace_start:
-            try:
-                return json.loads(raw_text[brace_start:brace_end + 1])
-            except json.JSONDecodeError:
-                pass
-
-        return None
 
     def _assemble_page(
         self,

@@ -344,6 +344,66 @@ class TestChildrenUpdates:
         assert deep["role"] == "text"
         assert deep["description"] == "Deep text"
 
+    def test_deep_descendants_matched_without_intermediate_update(self):
+        """Key fix: deep descendants get updates even when their parent has none.
+
+        Structure: root > card (no update) > header (no update) > title (has update)
+        Old code would skip card entirely, never reaching title.
+        """
+        partial = {
+            "id": "root",
+            "style": {},
+            "children": [
+                {
+                    "id": "card-1",
+                    "name": "Card",
+                    "style": {},
+                    "children": [
+                        {
+                            "id": "header-1",
+                            "name": "Header",
+                            "style": {},
+                            "children": [
+                                {"id": "title-1", "name": "Title", "style": {}},
+                                {"id": "avatar-1", "name": "Avatar", "style": {}},
+                            ],
+                        },
+                    ],
+                },
+                {"id": "footer-1", "name": "Footer", "style": {}},
+            ],
+        }
+        output = {
+            "role": "container",
+            "description": "Root",
+            "children_updates": [
+                # Note: NO update for card-1 or header-1
+                {"id": "title-1", "role": "text", "suggested_name": "CardTitle", "description": "标题文字"},
+                {"id": "avatar-1", "role": "image", "suggested_name": "UserAvatar", "description": "用户头像"},
+                {"id": "footer-1", "role": "footer", "description": "页脚"},
+            ],
+        }
+        result = merge_analyzer_output(partial, output)
+
+        # Deep descendants should be matched
+        title = result["children"][0]["children"][0]["children"][0]
+        assert title["role"] == "text"
+        assert title["name"] == "CardTitle"
+        assert title["description"] == "标题文字"
+
+        avatar = result["children"][0]["children"][0]["children"][1]
+        assert avatar["role"] == "image"
+        assert avatar["name"] == "UserAvatar"
+
+        # Direct child should also work
+        footer = result["children"][1]
+        assert footer["role"] == "footer"
+
+        # Merge report should show 3/3 matched
+        report = result["_merge_report"]
+        assert report["children_updates_matched"] == 3
+        assert report["children_updates_unmatched"] == []
+
     def test_unmatched_children_update_ignored(self):
         partial = {
             "id": "root",

@@ -82,6 +82,8 @@ function DesignToCodeContent() {
     currentNode,
     designSpec,
     specComplete,
+    validation,
+    tokenUsage,
     submit,
     cancel,
   } = useDesignJob();
@@ -486,6 +488,29 @@ function DesignToCodeContent() {
                       {showLog ? "Hide Log" : "Show Log"}
                     </Button>
                   </div>
+
+                  {/* Token usage + validation banners */}
+                  {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
+                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-2 mb-3 shrink-0">
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        <span>Token 用量：</span>
+                        <span>输入 <span className="text-slate-200 font-mono">{tokenUsage.input_tokens.toLocaleString()}</span></span>
+                        <span>输出 <span className="text-slate-200 font-mono">{tokenUsage.output_tokens.toLocaleString()}</span></span>
+                        <span className="text-slate-500">|</span>
+                        <span>合计 <span className="text-slate-200 font-mono">{(tokenUsage.input_tokens + tokenUsage.output_tokens).toLocaleString()}</span></span>
+                      </div>
+                    </div>
+                  )}
+                  {validation && validation.auto_layout_compliant === false && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 mb-3 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 text-sm">⚠</span>
+                        <span className="text-xs text-amber-300">
+                          {(validation.inferred_node_count as number) ?? 0} 个节点缺少 auto-layout — 请在 Figma 中补充后重跑
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Main content: Log / SpecBrowser / CodePreview */}
                   {showLog ? (
