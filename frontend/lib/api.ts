@@ -615,21 +615,6 @@ export async function deleteWorkspace(id: string): Promise<void> {
 
 // ============ Design-to-Code API ============
 
-export interface DesignRunRequest {
-  design_file: string;
-  output_dir: string;
-  cwd?: string;
-  max_retries?: number;
-}
-
-export interface FigmaRunRequest {
-  figma_url: string;
-  output_dir: string;
-  cwd?: string;
-  max_retries?: number;
-  selected_screens?: { node_id: string; interaction_note_ids?: string[] }[];
-}
-
 // --- Figma Scan types ---
 
 export type FrameClassification = "ui_screen" | "interaction_spec" | "design_system" | "excluded";
@@ -689,24 +674,6 @@ export interface DesignJobStatusResponse {
   result?: Record<string, unknown>;
 }
 
-export async function submitDesignRun(payload: DesignRunRequest): Promise<DesignRunResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/design/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<DesignRunResponse>(response);
-}
-
-export async function submitFigmaRun(payload: FigmaRunRequest): Promise<DesignRunResponse> {
-  const response = await fetch(`${API_BASE}/api/v2/design/run-figma`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<DesignRunResponse>(response);
-}
-
 export interface SpecRunRequest {
   figma_url: string;
   output_dir: string;
@@ -738,17 +705,3 @@ export function getDesignJobStreamUrl(jobId: string): string {
   return `${API_BASE}/api/v2/design/${jobId}/stream`;
 }
 
-export interface DesignGeneratedFile {
-  path: string;
-  content: string;
-  size: number;
-}
-
-export async function getDesignJobFiles(jobId: string): Promise<{ files: DesignGeneratedFile[] }> {
-  const response = await fetch(`${API_BASE}/api/v2/design/${jobId}/files`);
-  return handleResponse<{ files: DesignGeneratedFile[] }>(response);
-}
-
-export function getDesignJobPreviewUrl(jobId: string): string {
-  return `${API_BASE}/api/v2/design/${jobId}/preview`;
-}

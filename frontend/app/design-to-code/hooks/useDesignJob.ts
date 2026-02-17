@@ -2,11 +2,9 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
-  submitDesignRun,
   submitSpecRun,
   getDesignJobStatus,
   getDesignJobStreamUrl,
-  type DesignRunRequest,
   type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
@@ -210,7 +208,7 @@ export function useDesignJob() {
         pushEvent("workflow_error", data);
       });
 
-      // Figma fetch events (run-figma pipeline)
+      // Figma fetch events (run-spec pipeline)
       es.addEventListener("figma_fetch_start", (e) => {
         const data = safeParse(e.data) as Record<string, unknown> | null;
         if (!data) return;
@@ -404,15 +402,12 @@ export function useDesignJob() {
   // --- Submit ---
   const submit = useCallback(
     async (
-      request: DesignRunRequest | SpecRunRequest
+      request: SpecRunRequest & Record<string, unknown>
     ): Promise<DesignRunResponse | null> => {
       setSubmitting(true);
       setSubmitError(null);
       try {
-        const isSpec = "figma_url" in request;
-        const response = isSpec
-          ? await submitSpecRun(request as SpecRunRequest)
-          : await submitDesignRun(request as DesignRunRequest);
+        const response = await submitSpecRun(request as SpecRunRequest);
         const job: DesignJob = {
           job_id: response.job_id,
           job_status: response.status,

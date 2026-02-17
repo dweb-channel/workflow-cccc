@@ -4,8 +4,11 @@
 from . import base  # noqa: F401 - registers data_source, data_processor, condition, output, http_request
 from . import agents  # noqa: F401 - registers llm_agent, verify
 from . import state  # noqa: F401 - registers get_current_item, update_state
-from . import design  # noqa: F401 - registers design_analyzer, skeleton_generator, component_generator, visual_diff, assembler
-from . import spec_nodes  # noqa: F401 - registers frame_decomposer, spec_assembler
+from . import design  # noqa: F401 - registers design_analyzer
+from . import frame_decomposer  # noqa: F401 - registers frame_decomposer
+from . import spec_analyzer  # noqa: F401 - registers spec_analyzer
+from . import spec_assembler  # noqa: F401 - registers spec_assembler
+from . import spec_nodes  # noqa: F401 - backward-compatible re-exports
 
 from .registry import (
     NODE_CLASSES,

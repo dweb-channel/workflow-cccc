@@ -12,7 +12,7 @@ import type {
   InteractionSpec,
 } from "@/lib/types/design-spec";
 import { isTokenColor, resolveColor, resolveSpacing } from "@/lib/types/design-spec";
-import { ChevronDown, ChevronRight, ArrowRight } from "lucide-react";
+import { ChevronDown, ChevronRight, ArrowRight, Copy, Check } from "lucide-react";
 
 // ================================================================
 // SpecCard — Displays full ComponentSpec details in collapsible sections
@@ -26,6 +26,23 @@ interface SpecCardProps {
 export function SpecCard({ component, onNavigate }: SpecCardProps) {
   const isSpacer = component.render_hint === "spacer";
   const isPlatform = component.render_hint === "platform";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySpec = async () => {
+    const text = formatComponentSpec(component);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -46,6 +63,18 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
               z-index: {component.z_index}
             </span>
           )}
+          <div className="flex-1" />
+          <button
+            onClick={handleCopySpec}
+            className="flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[10px] text-violet-300 hover:bg-violet-500/20 transition-colors shrink-0"
+            title="复制该组件 Spec（适合粘贴给 LLM）"
+          >
+            {copied ? (
+              <><Check className="h-3 w-3 text-green-400" /> 已复制</>
+            ) : (
+              <><Copy className="h-3 w-3" /> 复制 Spec</>
+            )}
+          </button>
         </div>
         {component.description && (
           <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
@@ -793,4 +822,67 @@ function RoleBadge({ role, small }: { role: string; small?: boolean }) {
       {role}
     </span>
   );
+}
+
+// ================================================================
+// formatComponentSpec — LLM-friendly text for single component copy
+// ================================================================
+
+function formatComponentSpec(comp: ComponentSpec): string {
+  const lines: string[] = [];
+
+  lines.push(`## ${comp.name}（${comp.role}）`);
+  if (comp.description) lines.push(comp.description);
+  lines.push("");
+
+  lines.push(`尺寸: ${Math.round(comp.bounds.width)} × ${Math.round(comp.bounds.height)}`);
+  lines.push(`位置: x=${Math.round(comp.bounds.x)}, y=${Math.round(comp.bounds.y)}`);
+  if (comp.z_index != null) lines.push(`层级: z-index ${comp.z_index}`);
+  lines.push("");
+
+  if (comp.layout?.type) {
+    const parts: string[] = [`布局: ${comp.layout.type}`];
+    if (comp.layout.direction) parts.push(comp.layout.direction);
+    lines.push(parts.join(" "));
+    if (comp.layout.justify) lines.push(`  对齐: justify=${comp.layout.justify}`);
+    if (comp.layout.align) lines.push(`  对齐: align=${comp.layout.align}`);
+    if (comp.layout.gap != null) {
+      const g = typeof comp.layout.gap === "object" ? (comp.layout.gap as { value: number }).value : comp.layout.gap;
+      lines.push(`  间距: gap=${g}px`);
+    }
+    lines.push("");
+  }
+
+  if (comp.sizing) {
+    if (comp.sizing.width) lines.push(`宽度: ${comp.sizing.width}`);
+    if (comp.sizing.height) lines.push(`高度: ${comp.sizing.height}`);
+    lines.push("");
+  }
+
+  if (comp.typography) {
+    const t = comp.typography;
+    lines.push("文字:");
+    if (t.content) lines.push(`  内容: "${t.content}"`);
+    if (t.font_family) lines.push(`  字体: ${t.font_family}`);
+    if (t.font_size) lines.push(`  字号: ${t.font_size}px`);
+    if (t.font_weight) lines.push(`  字重: ${t.font_weight}`);
+    if (t.line_height) lines.push(`  行高: ${t.line_height}px`);
+    if (t.color) lines.push(`  颜色: ${resolveColor(t.color)}`);
+    lines.push("");
+  }
+
+  if (comp.design_analysis) {
+    lines.push("设计解读:");
+    lines.push(comp.design_analysis);
+    lines.push("");
+  }
+
+  if (comp.children && comp.children.length > 0) {
+    lines.push(`子组件: ${comp.children.length} 个`);
+    for (const child of comp.children) {
+      lines.push(`  - ${child.name}（${child.role}）${Math.round(child.bounds.width)}×${Math.round(child.bounds.height)}`);
+    }
+  }
+
+  return lines.join("\n").trim();
 }

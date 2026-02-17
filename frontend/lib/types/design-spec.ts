@@ -358,38 +358,6 @@ export interface TransitionSpec {
 
 // ---- Code Generation types (Phase 3) ----
 
-/** Technology stack configuration for code generation */
-export interface TechStackConfig {
-  framework: "react" | "vue";
-  styling: "tailwind" | "css-modules" | "styled-components";
-  language: "typescript" | "javascript";
-}
-
-/** Code generation result for a single component */
-export interface CodeGenResult {
-  component_id: string;
-  component_name: string;
-  file_name: string;
-  code: string;
-  dependencies?: string[];
-  tailwind_classes_used?: string[];
-  error?: string;
-}
-
-/** Page assembly result (Phase 4) */
-export interface PageGenResult {
-  page_name: string;
-  file_name: string;
-  code: string;
-  component_imports: string[];
-}
-
-/** Full codegen output for a design spec */
-export interface CodeGenOutput {
-  tech_stack: TechStackConfig;
-  components: CodeGenResult[];
-  page?: PageGenResult;
-}
 
 // ---- SSE incremental update types ----
 

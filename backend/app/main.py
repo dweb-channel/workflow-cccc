@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     from workflow.config import FIGMA_TOKEN
     if not FIGMA_TOKEN:
         logger.warning(
-            "FIGMA_TOKEN not set — /api/v2/design/run-figma endpoint will be unavailable. "
+            "FIGMA_TOKEN not set — /api/v2/design/run-spec endpoint will be unavailable. "
             "Set FIGMA_TOKEN in .env or environment to enable Figma integration."
         )
 

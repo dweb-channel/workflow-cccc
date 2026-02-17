@@ -16,12 +16,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FileEdit, Play, Palette, Link, FileJson, Loader2 } from "lucide-react";
+import { FileEdit, Play, Palette, Link, Loader2 } from "lucide-react";
 
 import { useDesignJob } from "./hooks/useDesignJob";
 import { DesignEventFeed } from "./components/DesignEventFeed";
 import { DesignOverview } from "./components/DesignOverview";
-import { CodePreview } from "./components/CodePreview";
 import { ScanResults } from "./components/ScanResults";
 import { SpecBrowser } from "./spec-browser";
 import { SpecTree } from "./spec-browser";
@@ -34,10 +33,8 @@ import { scanFigma, type FigmaScanResponse } from "@/lib/api";
    Both tabs stay mounted (forceMount) to preserve SSE.
    ================================================================ */
 
-const LS_KEY_DESIGN_FILE = "design-to-code-design-file";
 const LS_KEY_OUTPUT_DIR = "design-to-code-output-dir";
 const LS_KEY_FIGMA_URL = "design-to-code-figma-url";
-const LS_KEY_INPUT_MODE = "design-to-code-input-mode";
 
 export default function DesignToCodePage() {
   return (
@@ -56,11 +53,8 @@ export default function DesignToCodePage() {
 function DesignToCodeContent() {
   // Form inputs — initialize empty to avoid SSR hydration mismatch,
   // then load from localStorage after mount.
-  const [inputMode, setInputMode] = useState<"figma" | "json">("figma");
   const [figmaUrl, setFigmaUrl] = useState("");
-  const [designFile, setDesignFile] = useState("");
   const [outputDir, setOutputDir] = useState("");
-  const [maxRetries, setMaxRetries] = useState(2);
 
   const [activeTab, setActiveTab] = useState<string>("config");
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -91,13 +85,9 @@ function DesignToCodeContent() {
   // Load persisted form values after mount (avoids SSR hydration mismatch)
   const didLoad = useRef(false);
   useEffect(() => {
-    const m = localStorage.getItem(LS_KEY_INPUT_MODE);
     const f = localStorage.getItem(LS_KEY_FIGMA_URL);
-    const d = localStorage.getItem(LS_KEY_DESIGN_FILE);
     const o = localStorage.getItem(LS_KEY_OUTPUT_DIR);
-    if (m === "figma" || m === "json") setInputMode(m);
     if (f) setFigmaUrl(f);
-    if (d) setDesignFile(d);
     if (o) setOutputDir(o);
     didLoad.current = true;
   }, []);
@@ -105,20 +95,9 @@ function DesignToCodeContent() {
   // Persist form values (skip initial empty state before localStorage load)
   useEffect(() => {
     if (!didLoad.current) return;
-    localStorage.setItem(LS_KEY_INPUT_MODE, inputMode);
-  }, [inputMode]);
-
-  useEffect(() => {
-    if (!didLoad.current) return;
     if (figmaUrl) localStorage.setItem(LS_KEY_FIGMA_URL, figmaUrl);
     else localStorage.removeItem(LS_KEY_FIGMA_URL);
   }, [figmaUrl]);
-
-  useEffect(() => {
-    if (!didLoad.current) return;
-    if (designFile) localStorage.setItem(LS_KEY_DESIGN_FILE, designFile);
-    else localStorage.removeItem(LS_KEY_DESIGN_FILE);
-  }, [designFile]);
 
   useEffect(() => {
     if (!didLoad.current) return;
@@ -153,10 +132,7 @@ function DesignToCodeContent() {
   }, [currentJob?.job_status, stats.completed, stats.total]);
 
   const canSubmit =
-    outputDir.trim().length > 0 &&
-    (inputMode === "figma"
-      ? figmaUrl.trim().length > 0
-      : designFile.trim().length > 0);
+    outputDir.trim().length > 0 && figmaUrl.trim().length > 0;
 
   // --- Scan Figma URL for frame classification ---
   const handleScan = useCallback(async () => {
@@ -175,25 +151,18 @@ function DesignToCodeContent() {
     }
   }, [figmaUrl]);
 
-  // --- Submit job (JSON mode direct, Figma mode after scan confirm) ---
+  // --- Submit spec pipeline ---
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
-    const request =
-      inputMode === "figma"
-        ? {
-            figma_url: figmaUrl.trim(),
-            output_dir: outputDir.trim(),
-          }
-        : {
-            design_file: designFile.trim(),
-            output_dir: outputDir.trim(),
-            max_retries: maxRetries,
-          };
+    const request = {
+      figma_url: figmaUrl.trim(),
+      output_dir: outputDir.trim(),
+    };
     const result = await submit(request);
     if (result) {
       setActiveTab("execution");
     }
-  }, [canSubmit, inputMode, figmaUrl, designFile, outputDir, maxRetries, submit]);
+  }, [canSubmit, figmaUrl, outputDir, submit]);
 
   // --- Figma scan confirm → submit with selected_screens ---
   const handleScanConfirm = useCallback(
@@ -201,7 +170,6 @@ function DesignToCodeContent() {
       const request = {
         figma_url: figmaUrl.trim(),
         output_dir: outputDir.trim(),
-        max_retries: maxRetries,
         selected_screens: selectedScreens,
       };
       const result = await submit(request);
@@ -211,7 +179,7 @@ function DesignToCodeContent() {
         setActiveTab("execution");
       }
     },
-    [figmaUrl, outputDir, maxRetries, submit]
+    [figmaUrl, outputDir, submit]
   );
 
   const handleScanBack = useCallback(() => {
@@ -237,7 +205,7 @@ function DesignToCodeContent() {
         <div className="shrink-0 bg-slate-800 px-6 pt-5 pb-3">
           <div className="flex items-center gap-3 flex-wrap">
             <Palette className="h-5 w-5 text-violet-400" />
-            <h1 className="text-lg font-semibold text-white">设计转代码</h1>
+            <h1 className="text-lg font-semibold text-white">设计转规格</h1>
             {currentJob && (
               <div className="ml-auto flex items-center gap-2">
                 <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 font-mono text-xs text-violet-400">
@@ -304,65 +272,19 @@ function DesignToCodeContent() {
                   <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2 max-w-2xl">
                     <Card>
                       <CardContent className="pt-4 pb-3 space-y-4">
-                        {/* Input mode toggle */}
                         <div className="space-y-2">
-                          <Label className="text-xs">输入方式</Label>
-                          <div className="flex gap-1 rounded-lg bg-slate-800 p-1 w-fit">
-                            <button
-                              onClick={() => setInputMode("figma")}
-                              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                inputMode === "figma"
-                                  ? "bg-violet-500 text-white shadow-sm"
-                                  : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              <Link className="h-3 w-3" /> Figma URL
-                            </button>
-                            <button
-                              onClick={() => setInputMode("json")}
-                              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                                inputMode === "json"
-                                  ? "bg-violet-500 text-white shadow-sm"
-                                  : "text-slate-400 hover:text-white"
-                              }`}
-                            >
-                              <FileJson className="h-3 w-3" /> JSON 文件
-                            </button>
-                          </div>
+                          <Label className="text-xs">Figma 设计稿 URL</Label>
+                          <Input
+                            value={figmaUrl}
+                            onChange={(e) => setFigmaUrl(e.target.value)}
+                            placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
+                            className="font-mono text-sm"
+                          />
+                          <p className="text-xs text-slate-400">
+                            粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
+                            格式。可带 node-id 参数指定具体节点。
+                          </p>
                         </div>
-
-                        {/* Figma URL input */}
-                        {inputMode === "figma" ? (
-                          <div className="space-y-2">
-                            <Label className="text-xs">Figma 设计稿 URL</Label>
-                            <Input
-                              value={figmaUrl}
-                              onChange={(e) => setFigmaUrl(e.target.value)}
-                              placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
-                              className="font-mono text-sm"
-                            />
-                            <p className="text-xs text-slate-400">
-                              粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
-                              格式。可带 node-id 参数指定具体节点。
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <Label className="text-xs">
-                              设计导出文件路径 (design_export.json)
-                            </Label>
-                            <Input
-                              value={designFile}
-                              onChange={(e) => setDesignFile(e.target.value)}
-                              placeholder="data/design_export/design_export.json"
-                              className="font-mono text-sm"
-                            />
-                            <p className="text-xs text-slate-400">
-                              Figma 设计稿导出的 JSON
-                              文件路径，包含组件列表、design tokens 和布局信息
-                            </p>
-                          </div>
-                        )}
 
                         <div className="space-y-2">
                           <Label className="text-xs">输出目录</Label>
@@ -376,30 +298,6 @@ function DesignToCodeContent() {
                             生成的 design_spec.json 将输出到此目录
                           </p>
                         </div>
-
-                        {/* Max retries — only for JSON/code pipeline mode */}
-                        {inputMode === "json" && (
-                          <div className="space-y-2">
-                            <Label className="text-xs">
-                              最大重试次数 (每个组件)
-                            </Label>
-                            <Input
-                              type="number"
-                              min={0}
-                              max={5}
-                              value={maxRetries}
-                              onChange={(e) =>
-                                setMaxRetries(
-                                  Math.min(5, Math.max(0, Number(e.target.value)))
-                                )
-                              }
-                              className="w-24 font-mono text-sm"
-                            />
-                            <p className="text-xs text-slate-400">
-                              组件视觉验证不通过时的最大重试次数（0-5）
-                            </p>
-                          </div>
-                        )}
                       </CardContent>
                     </Card>
 
@@ -416,7 +314,7 @@ function DesignToCodeContent() {
                       disabled={submitting || !canSubmit}
                     >
                       <Play className="mr-1.5 h-3.5 w-3.5" />
-                      {submitting ? "提交中..." : inputMode === "figma" ? "生成设计规格" : "开始生成"}
+                      {submitting ? "提交中..." : "生成设计规格"}
                     </Button>
                   </div>
 
@@ -512,7 +410,7 @@ function DesignToCodeContent() {
                     </div>
                   )}
 
-                  {/* Main content: Log / SpecBrowser / CodePreview */}
+                  {/* Main content: Log / SpecBrowser */}
                   {showLog ? (
                     <div className="flex-1 overflow-hidden">
                       <DesignEventFeed
@@ -530,11 +428,8 @@ function DesignToCodeContent() {
                       />
                     </div>
                   ) : (
-                    <div className="flex-1 overflow-hidden rounded-xl border border-slate-700">
-                      <CodePreview
-                        jobId={currentJob.job_id}
-                        jobStatus={currentJob.job_status}
-                      />
+                    <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+                      No design spec available.
                     </div>
                   )}
                 </div>
