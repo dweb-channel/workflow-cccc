@@ -82,7 +82,44 @@ Choose the **single most accurate** role for each component:
 | `badge` | Small status/count indicator | Overlays another element, shows number or short status text |
 | `overlay` | Content layered above the main UI | Modal, drawer, tooltip, popover, or fullscreen cover |
 | `decorative` | Non-functional visual element | Gradient strip, background shape, ornamental graphic; no semantic content |
-| `other` | None of the above apply | Use sparingly; explain why in description |
+| `other` | **LAST RESORT** — none of the 18 roles above genuinely apply | Before choosing "other", re-check: could this be `section` (groups related children)? `container` (layout wrapper)? `card` (has visual boundary)? `decorative` (ornamental)? Only use "other" if you can explain in description why ALL 18 specific roles are wrong. |
+
+### Role Selection — Avoiding "other"
+
+Before assigning `role: "other"`, walk through this checklist:
+- Does it group multiple children of different types? → `section`
+- Is it a pure layout wrapper with no visual identity? → `container`
+- Does it have background/border/shadow separating it from surroundings? → `card`
+- Does it contain repeating similar items? → `list`
+- Is it a gradient, shape, or ornamental visual? → `decorative`
+- Is it a full-width photo/illustration? → `image`
+
+If the component has children and occupies significant page area, it is almost certainly
+a `section` or `container`, NOT "other". Reserve "other" for truly unclassifiable elements.
+
+### suggested_name Rules
+
+Your `suggested_name` must be:
+1. **Descriptive and specific** — reflect the component's visual content or function,
+   not just its structural type
+2. **PascalCase** — e.g. "SpringFestivalBanner", not "spring_festival_banner"
+3. **Unique among siblings** — check the sibling component names in the Page Context.
+   Your name MUST differ from ALL of them. Since siblings are analyzed in parallel,
+   use the component's visual content and position to ensure natural uniqueness.
+
+**Naming strategy:**
+- Combine role + content keyword: "HeroBannerImage" not just "Image"
+- Use visual content as differentiator: "ChineseNewYearPortrait" vs "ProductShowcaseImage"
+- Use position when content is ambiguous: "TopVisualBanner" vs "MiddleProductBanner"
+- For wrapper/container components: describe what they wrap: "ProductGallerySection",
+  "ActionButtonGroup", "PriceInfoContainer"
+
+**BAD names** (too generic, will collide with siblings):
+"Image", "Container", "Section", "Frame", "Component", "Other", "Wrapper"
+
+**GOOD names** (specific, naturally unique):
+"HeroBannerImage", "ProductShowcaseImage", "FestivalPortraitPhoto",
+"NavigationHeader", "PriceComparisonSection", "BottomActionFooter"
 
 ### Description Writing Guidelines
 
@@ -186,9 +223,14 @@ Analyze this UI component and fill its semantic fields.
 1. First, look at the screenshot carefully. Describe to yourself what you see.
 2. Cross-reference with the full structural data above (bounds, layout, style, \
 typography are already precise — do NOT repeat them in your output).
-3. Determine the `role` for this top-level component.
-4. Suggest a semantic PascalCase `suggested_name` based on what you see \
-(e.g. "Header", "PhotoGallery", "HeroBanner"). Ignore the original Figma layer name.
+3. Determine the `role` for this top-level component. **Avoid "other"** — \
+if tempted, re-check the 18 specific roles. A large frame with children is likely \
+"section" or "container", not "other".
+4. Suggest a semantic PascalCase `suggested_name` that is **UNIQUE** among the \
+sibling components listed in the Page Context above. Do NOT use generic names like \
+"Image", "Container", or "Section" alone — combine role + visual content for \
+specificity (e.g. "HeroBannerImage", "ProductGallerySection", "FestivalPortrait"). \
+Ignore the original Figma layer name.
 5. Write a clear `description` focusing on purpose and design intent, \
 not structural data.
 6. Check if this is a system element (StatusBar, HomeIndicator, etc.) → set `render_hint`.
@@ -198,7 +240,9 @@ not structural data.
 9. Infer interaction behaviors from the component's role and visual affordances.
 10. For ALL descendant nodes at every depth level (not just direct children — \
 walk the full `children` tree recursively), provide a `children_updates` entry \
-with its `id`, `role`, `suggested_name` (PascalCase), and brief `description`. \
+with its `id`, `role`, `suggested_name` (PascalCase, unique among siblings at the \
+same level), and brief `description`. Apply the same naming rules: use specific \
+descriptive names, not generic "Frame" or "Container". \
 The `children_updates` array should be FLAT — include entries for direct children, \
 grandchildren, and deeper descendants all in the same array.
 11. Write a comprehensive `design_analysis` — this is your most important output. \

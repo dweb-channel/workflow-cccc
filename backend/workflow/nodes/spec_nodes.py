@@ -1073,7 +1073,7 @@ async def _invoke_claude_cli(
     model: str = "",
     timeout: float = 300.0,
     max_retries: int = 2,
-    retry_base_delay: float = 5.0,
+    retry_base_delay: float = 10.0,
     component_name: str = "unknown",
     caller: str = "ClaudeCLI",
 ) -> Dict[str, Any]:
@@ -1132,16 +1132,24 @@ async def _invoke_claude_cli(
     cli_env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
     last_error: Optional[Exception] = None
+    _is_rate_limited = False  # track if last error looked like rate limiting
     attempts = 1 + max(0, max_retries)  # at least 1 attempt
     import time as _time
+    import random as _random
     _start_time = _time.monotonic()
 
     for attempt in range(attempts):
         if attempt > 0:
-            delay = retry_base_delay * (2 ** (attempt - 1))  # 5s, 10s, 20s, ...
+            base = retry_base_delay * (2 ** (attempt - 1))  # 10s, 20s, 40s, ...
+            if _is_rate_limited:
+                base = max(base, 30.0)  # rate limit: at least 30s wait
+            # Add ±25% jitter to prevent thundering herd
+            delay = base * (1.0 + _random.uniform(-0.25, 0.25))
             logger.warning(
-                "%s: retry %d/%d for %s after %.1fs (previous error: %s)",
-                caller, attempt, max_retries, component_name, delay, last_error,
+                "%s: retry %d/%d for %s after %.1fs%s (previous error: %s)",
+                caller, attempt, max_retries, component_name, delay,
+                " [rate-limited]" if _is_rate_limited else "",
+                last_error,
             )
             await asyncio.sleep(delay)
 
@@ -1186,6 +1194,12 @@ async def _invoke_claude_cli(
                 err_msg = stderr.decode("utf-8", errors="replace").strip()
                 if not err_msg and isinstance(cli_output, dict):
                     err_msg = cli_output.get("result", "")
+                # Detect rate limit patterns for longer backoff
+                _err_lower = err_msg.lower()
+                _is_rate_limited = any(
+                    s in _err_lower
+                    for s in ("rate", "429", "overloaded", "too many", "throttl")
+                )
                 last_error = RuntimeError(
                     f"Claude CLI failed (exit {proc.returncode}) for "
                     f"{component_name}: {err_msg[:500]}"
@@ -1372,6 +1386,9 @@ class SpecAnalyzerNode(BaseNodeImpl):
         async def _analyze_one(idx: int, component: Dict) -> Dict:
             comp_name = component.get("name", f"component_{idx}")
             comp_id = component.get("id", "")
+            # Stagger launches by 2s per component to avoid hitting rate limits
+            if idx > 0:
+                await asyncio.sleep(idx * 2.0)
             logger.info(
                 "SpecAnalyzerNode [%s]: analyzing %s (%d/%d)",
                 self.node_id, comp_name, idx + 1, len(components),
@@ -1619,6 +1636,29 @@ class SpecAssemblerNode(BaseNodeImpl):
             key=lambda c: c.get("z_index", 0),
         )
 
+        # --- Deduplicate top-level component names ---
+        # Parallel LLM calls may independently pick the same suggested_name.
+        # Add position-based suffix to disambiguate (e.g. "Image" → "Image_Top", "Image_Bottom").
+        name_counts: Dict[str, int] = {}
+        for comp in sorted_components:
+            cname = comp.get("name", "Component")
+            name_counts[cname] = name_counts.get(cname, 0) + 1
+
+        name_seen: Dict[str, int] = {}
+        dedup_count = 0
+        for comp in sorted_components:
+            cname = comp.get("name", "Component")
+            if name_counts[cname] > 1:
+                idx = name_seen.get(cname, 0) + 1
+                name_seen[cname] = idx
+                comp["name"] = f"{cname}_{idx}"
+                dedup_count += 1
+        if dedup_count > 0:
+            logger.warning(
+                "SpecAssemblerNode [%s]: deduplicated %d top-level component names",
+                self.node_id, dedup_count,
+            )
+
         # --- Quality validation (merge reports + role/bounds/hint/naming) ---
         from ..spec.spec_validator import run_all_validations
         quality_report = run_all_validations(
@@ -1777,13 +1817,16 @@ class CodeGenNode(BaseNodeImpl):
 
         stats = {"total": len(components), "succeeded": 0, "failed": 0}
 
-        # Concurrent generation with semaphore
+        # Concurrent generation with semaphore (kept low to avoid rate limits)
         import asyncio
-        _CLI_CONCURRENCY = 6
+        _CLI_CONCURRENCY = 3
         sem = asyncio.Semaphore(_CLI_CONCURRENCY)
 
         async def _gen_one(idx: int, component: Dict) -> Optional[Dict]:
             comp_name = component.get("name", f"Component{idx}")
+            # Stagger launches by 2s per component to avoid hitting rate limits
+            if idx > 0:
+                await asyncio.sleep(idx * 2.0)
             logger.info(
                 "CodeGenNode [%s]: generating %s (%d/%d)",
                 self.node_id, comp_name, idx + 1, len(components),
