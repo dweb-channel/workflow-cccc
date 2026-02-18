@@ -195,8 +195,9 @@ function buildPreviewStyle(component: ComponentSpec): React.CSSProperties {
 function getScreenshotUrl(path: string, jobId?: string): string {
   // Extract bare filename from screenshot_path (e.g. "screenshots/16650_539.png" → "16650_539.png")
   const filename = path.split("/").pop() || path;
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   if (jobId) {
-    return `/api/v2/design/${jobId}/screenshots/${encodeURIComponent(filename)}`;
+    return `${apiBase}/api/v2/design/${jobId}/screenshots/${encodeURIComponent(filename)}`;
   }
   return path;
 }

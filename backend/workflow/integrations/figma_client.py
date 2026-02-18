@@ -98,6 +98,26 @@ class FigmaClient:
     # Core API methods
     # ------------------------------------------------------------------
 
+    async def get_file_version(self, file_key: str) -> Optional[str]:
+        """Fetch the current version of a Figma file.
+
+        GET /v1/files/:key (depth=1 to minimize payload)
+
+        Returns:
+            Version string, or None if fetch fails.
+        """
+        try:
+            data = await self._get(
+                f"/v1/files/{file_key}", params={"depth": "1"}
+            )
+            version = data.get("version")
+            if version:
+                logger.info(f"get_file_version: file={file_key}, version={version}")
+            return version
+        except FigmaClientError as e:
+            logger.warning(f"get_file_version: failed for {file_key}: {e}")
+            return None
+
     async def get_file_nodes(
         self,
         file_key: str,
@@ -128,25 +148,40 @@ class FigmaClient:
         node_ids: List[str],
         fmt: str = "png",
         scale: int = 2,
+        version: Optional[str] = None,
     ) -> Dict[str, Optional[str]]:
         """Render node screenshots via Figma's image export API.
 
-        GET /v1/images/:key?ids=...&format=png&scale=2
+        GET /v1/images/:key?ids=...&format=png&scale=2&version=...
 
         Args:
             file_key: Figma file key.
             node_ids: List of node IDs to render.
             fmt: Image format ('png', 'svg', 'jpg', 'pdf').
             scale: Render scale (1-4). Default 2 for retina.
+            version: File version string to bypass CDN cache.
+                     If None, auto-fetches the latest version.
 
         Returns:
             Dict mapping node_id → image URL (or None if render failed).
             URLs expire after 30 days.
         """
+        # Auto-fetch version to bypass Figma CDN cache
+        if version is None:
+            version = await self.get_file_version(file_key)
+
         ids_param = ",".join(node_ids)
+        params: Dict[str, str] = {
+            "ids": ids_param,
+            "format": fmt,
+            "scale": str(scale),
+        }
+        if version:
+            params["version"] = version
+
         data = await self._get(
             f"/v1/images/{file_key}",
-            params={"ids": ids_param, "format": fmt, "scale": str(scale)},
+            params=params,
         )
 
         if data.get("err"):
@@ -223,6 +258,7 @@ class FigmaClient:
         output_dir: str,
         fmt: str = "png",
         scale: int = 2,
+        version: Optional[str] = None,
     ) -> Dict[str, str]:
         """Download node screenshots to disk.
 
@@ -235,6 +271,7 @@ class FigmaClient:
             output_dir: Base output directory.
             fmt: Image format.
             scale: Render scale.
+            version: File version string to bypass CDN cache.
 
         Returns:
             Dict mapping node_id → relative file path (from output_dir).
@@ -242,8 +279,10 @@ class FigmaClient:
         screenshots_dir = os.path.join(output_dir, "screenshots")
         os.makedirs(screenshots_dir, exist_ok=True)
 
-        # Get render URLs
-        image_urls = await self.get_node_images(file_key, node_ids, fmt=fmt, scale=scale)
+        # Get render URLs (version param bypasses Figma CDN cache)
+        image_urls = await self.get_node_images(
+            file_key, node_ids, fmt=fmt, scale=scale, version=version,
+        )
 
         client = await self._get_client()
         downloaded: Dict[str, str] = {}

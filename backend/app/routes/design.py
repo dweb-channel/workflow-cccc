@@ -623,7 +623,7 @@ async def get_screenshot(
     return FileResponse(
         screenshot_path,
         media_type=media_types.get(ext, "image/png"),
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "no-cache"},
     )
 
 
