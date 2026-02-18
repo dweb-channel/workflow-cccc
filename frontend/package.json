@@ -2,6 +2,14 @@
   "name": "workflow-ui",
   "private": true,
   "version": "0.1.0",
+  "description": "Next.js frontend for Work-Flow: workflow canvas, batch bug fix dashboard, and design-to-spec browser",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/work-flow",
+    "directory": "frontend"
+  },
+  "keywords": ["workflow", "nextjs", "react", "dashboard"],
   "type": "module",
   "scripts": {
     "dev": "next dev",

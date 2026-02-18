@@ -1,34 +1,53 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
-echo "=== Workflow Backend Starting ==="
-echo "Database: configured"
-echo "Temporal: ${TEMPORAL_ADDRESS}"
-echo "API bind: ${API_HOST}:${API_PORT}"
+# ---- Work-Flow Backend Entrypoint ----
+# Runs DB migration, starts Temporal Worker (background), then FastAPI (foreground).
+# Handles SIGTERM for graceful shutdown.
 
-# Run database migrations (let stderr through for diagnostics)
-echo "Running database migrations..."
-cd /app
-alembic upgrade head || echo "⚠️ Alembic migration failed — check database connection"
+WORKER_PID=""
+API_PID=""
 
-# Graceful shutdown: forward signals to background worker
 cleanup() {
-    echo "Shutting down worker (PID $WORKER_PID)..."
-    kill "$WORKER_PID" 2>/dev/null
-    wait "$WORKER_PID" 2>/dev/null
-    echo "Worker stopped."
+    echo "[entrypoint] Shutting down..."
+    # Stop FastAPI first (stop accepting requests)
+    if [ -n "$API_PID" ] && kill -0 "$API_PID" 2>/dev/null; then
+        kill -TERM "$API_PID"
+        wait "$API_PID" 2>/dev/null || true
+    fi
+    # Then stop Worker (let in-flight activities finish)
+    if [ -n "$WORKER_PID" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+        kill -TERM "$WORKER_PID"
+        wait "$WORKER_PID" 2>/dev/null || true
+    fi
+    exit 0
 }
-trap cleanup SIGTERM SIGINT
 
-# Start Temporal worker in background
-echo "Starting Temporal worker (background)..."
+trap cleanup TERM INT
+
+# 1) Database migration
+echo "[entrypoint] Running database migrations..."
+python -m alembic upgrade head
+echo "[entrypoint] Migrations complete."
+
+# 2) Start Temporal Worker in background
+echo "[entrypoint] Starting Temporal Worker..."
 python -m workflow.temporal.worker &
 WORKER_PID=$!
+echo "[entrypoint] Worker started (PID=$WORKER_PID)"
 
-# Start FastAPI server (foreground, replaces shell)
-echo "Starting FastAPI server..."
-exec uvicorn app.main:app \
-    --host "${API_HOST}" \
-    --port "${API_PORT}" \
-    --log-level info \
-    --no-access-log
+# 3) Start FastAPI in background (shell stays PID 1 for signal handling)
+echo "[entrypoint] Starting FastAPI on ${API_HOST:-0.0.0.0}:${API_PORT:-8000}..."
+uvicorn app.main:app \
+    --host "${API_HOST:-0.0.0.0}" \
+    --port "${API_PORT:-8000}" \
+    --no-access-log &
+API_PID=$!
+echo "[entrypoint] FastAPI started (PID=$API_PID)"
+
+# Wait for the API server (primary process).
+# On SIGTERM: trap fires → cleanup kills both → exit 0.
+# On API crash: wait returns → cleanup kills worker → exit.
+wait "$API_PID" 2>/dev/null || true
+echo "[entrypoint] FastAPI exited, shutting down..."
+cleanup

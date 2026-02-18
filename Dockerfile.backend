@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/pyproject.toml ./
+# Create minimal package stubs so setuptools can resolve the project
+RUN mkdir -p app workflow && touch app/__init__.py workflow/__init__.py
 RUN pip install --no-cache-dir wheel && \
     pip wheel --no-cache-dir --wheel-dir /wheels . && \
     pip wheel --no-cache-dir --wheel-dir /wheels pyyaml

@@ -1,8 +1,28 @@
 [project]
 name = "workflow-backend"
 version = "0.1.0"
-description = "FastAPI backend for workflow operations"
+description = "Backend for Work-Flow: an open-source developer workflow orchestration platform powered by LangGraph and Temporal"
+readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [
+  {name = "Work-Flow Contributors"},
+]
+keywords = ["workflow", "orchestration", "langraph", "temporal", "fastapi"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: FastAPI",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+]
+
+[project.urls]
+Homepage = "https://github.com/user/work-flow"
+Repository = "https://github.com/user/work-flow"
+Issues = "https://github.com/user/work-flow/issues"
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",

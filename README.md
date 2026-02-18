@@ -1,4 +1,4 @@
-# Dynamic Workflow Platform
+# Work-Flow
 
 [English](#english) | [中文](#中文)
 
@@ -8,78 +8,176 @@
 
 ## English
 
-A visual workflow orchestration platform powered by **LangGraph** + **Temporal**, with a drag-and-drop editor and real-time execution monitoring.
+An open-source developer workflow platform that automates repetitive engineering tasks using **Claude AI** + **Temporal** + **LangGraph**.
 
-### Features
+### What It Does
 
-- Visual workflow editor (React Flow) with drag-and-drop node composition
-- Dual execution engine: LangGraph for dynamic DAG execution, Temporal for durable orchestration
-- Multiple node types: Data Source, Processor, HTTP Request, Condition, LLM Agent, CCCC Peer, Output
-- Loop support with configurable max iterations and graceful termination
-- Real-time SSE event streaming for execution status
-- Multi-agent collaboration via CCCC protocol
+**Two production pipelines:**
+
+| Pipeline | Input | Output | How It Works |
+|----------|-------|--------|--------------|
+| **Batch Bug Fix** | Jira URLs | Git PRs with fixes | Jira fetch → Claude CLI analysis → code fix → verification → Git branch + PR |
+| **Design-to-Spec** | Figma URL | `design_spec.json` | Figma API scan → frame classification → two-pass SpecAnalyzer (LLM vision) → structured spec |
+
+Both pipelines run as durable Temporal workflows with real-time SSE progress streaming.
 
 ### Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js, React Flow, shadcn/ui, Tailwind CSS |
-| Backend | FastAPI, SQLAlchemy (async), Alembic |
-| Workflow | LangGraph, Temporal |
-| Database | SQLite (aiosqlite) |
+| Frontend | Next.js 14, React Flow, shadcn/ui, Tailwind CSS |
+| Backend | FastAPI, SQLAlchemy (async), Pydantic v2 |
+| Orchestration | Temporal (durable workflows), LangGraph (DAG execution) |
+| AI | Claude CLI (code generation), Claude API (vision analysis) |
+| Database | SQLite (aiosqlite) — PostgreSQL ready |
+| Testing | pytest (624 tests), Vitest, Playwright |
 
 ### Quick Start
 
-**Prerequisites:** Python 3.10+, Node.js 18+, [Temporal CLI](https://docs.temporal.io/cli)
+#### Option A: Local Development
+
+**Prerequisites:** Python 3.11+, Node.js 18+, [Temporal CLI](https://docs.temporal.io/cli)
 
 ```bash
-# 1. Backend (Temporal + Worker + FastAPI, all-in-one)
+# Clone
+git clone https://github.com/your-org/work-flow.git
+cd work-flow
+
+# Backend
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
-make dev
+pip install -e ".[test]"
+make dev    # Starts Temporal + Worker + FastAPI on :8000
 
-# 2. Frontend (in a new terminal)
+# Frontend (new terminal)
 cd frontend
 npm install
-npm run dev
+npm run dev  # Starts Next.js on :3000
 ```
 
-Open http://localhost:3000 to access the workflow editor.
-
-To stop all backend services:
+#### Option B: Docker Compose
 
 ```bash
-cd backend
-make stop
+cp .env.example .env
+# Edit .env — set FIGMA_TOKEN, JIRA_* if needed
+docker compose up --build
 ```
+
+Services: backend `:8000`, frontend `:3000`, Temporal `:7233` (Web UI `:8080`)
+
+Open http://localhost:3000
+
+### Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | For AI features | Claude API key |
+| `FIGMA_TOKEN` | For Design-to-Spec | Figma Personal Access Token |
+| `JIRA_URL` | For Batch Bug Fix | Jira instance URL |
+| `JIRA_EMAIL` | For Batch Bug Fix | Jira account email |
+| `JIRA_API_TOKEN` | For Batch Bug Fix | Jira API token |
+| `CLAUDE_CLI_PATH` | Auto-detected | Path to `claude` CLI binary |
 
 ### Project Structure
 
 ```
-backend/     # FastAPI backend + workflow engine
-  app/               # FastAPI application (routes, models, DB)
-  workflow/           # Workflow engine core
-    engine/           # Graph builder, executor, expression evaluator
-    nodes/            # Node type registry (data_source, llm_agent, etc.)
-    temporal/         # Temporal workflows, activities, worker
-    agents/           # Agent integrations (LLM, CCCC)
-    sse/              # Server-Sent Events infrastructure
-frontend/            # Next.js workflow editor UI
+work-flow/
+├── backend/
+│   ├── app/                    # FastAPI application
+│   │   ├── routes/             # API endpoints (batch, design, workflows)
+│   │   ├── repositories/       # Data access layer
+│   │   ├── models/             # SQLAlchemy ORM models
+│   │   ├── database.py         # DB engine + session management
+│   │   ├── event_bus.py        # Unified SSE event infrastructure
+│   │   └── temporal_adapter.py # Temporal client singleton
+│   ├── workflow/
+│   │   ├── engine/             # LangGraph graph builder + executor
+│   │   ├── nodes/              # Node type registry (agents, spec_analyzer, etc.)
+│   │   ├── temporal/           # Temporal workflows + activities
+│   │   ├── integrations/       # Figma client, classifiers
+│   │   └── templates/          # Workflow JSON templates
+│   ├── tests/                  # 624 tests (pytest)
+│   ├── Makefile                # dev/stop/worker/api/temporal
+│   └── pyproject.toml
+├── frontend/
+│   ├── app/
+│   │   ├── batch-bugs/         # Batch Bug Fix UI
+│   │   ├── design-to-code/     # Design-to-Spec UI
+│   │   └── workflows/          # Visual workflow editor
+│   ├── components/             # Shared UI components (shadcn/ui)
+│   └── lib/                    # Hooks, utilities
+├── docker-compose.yml          # 3-service stack
+├── Dockerfile.backend          # Multi-stage Python build
+├── Dockerfile.frontend         # Next.js standalone build
+└── .env.example                # Environment template
 ```
 
 ### API Endpoints
 
+#### Batch Bug Fix
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v2/batch/bug-fix` | Create batch job (or dry-run with `dry_run: true`) |
+| GET | `/api/v2/batch/bug-fix` | List jobs (pagination, status filter) |
+| GET | `/api/v2/batch/bug-fix/{job_id}` | Job status + bug details |
+| GET | `/api/v2/batch/bug-fix/{job_id}/stream` | SSE event stream |
+| POST | `/api/v2/batch/bug-fix/{job_id}/cancel` | Cancel running job |
+| POST | `/api/v2/batch/bug-fix/{job_id}/retry/{bug_index}` | Retry failed bug |
+| DELETE | `/api/v2/batch/bug-fix/{job_id}` | Delete job |
+| GET | `/api/v2/batch/metrics/job/{job_id}` | Job metrics |
+| GET | `/api/v2/batch/metrics/global` | Global metrics |
+
+#### Design-to-Spec
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v2/design/scan-figma` | Scan Figma page, classify frames |
+| POST | `/api/v2/design/run-spec` | Start spec generation pipeline |
+| GET | `/api/v2/design/{job_id}` | Job status |
+| GET | `/api/v2/design/{job_id}/stream` | SSE event stream |
+| GET | `/api/v2/design/{job_id}/files` | Generated spec files |
+| GET | `/api/v2/design` | List jobs |
+| POST | `/api/v2/design/{job_id}/cancel` | Cancel job |
+
+#### Visual Workflows
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/v2/workflows` | List workflows |
-| GET | `/api/v2/workflows/{id}` | Get workflow detail |
 | POST | `/api/v2/workflows` | Create workflow |
-| PUT | `/api/v2/workflows/{id}` | Update workflow |
 | POST | `/api/v2/workflows/{id}/run` | Execute workflow |
-| GET | `/api/v2/workflows/{id}/runs` | List run history |
 | GET | `/api/v2/sse/stream/{run_id}` | SSE event stream |
+
+### Testing
+
+```bash
+cd backend
+
+# All tests
+python -m pytest tests/ -q
+
+# By module
+python -m pytest tests/test_routes_batch.py -q       # 34 route tests
+python -m pytest tests/test_routes_design.py -q       # 22 route tests
+python -m pytest tests/test_repository_batch_job.py -q # 28 repo tests
+python -m pytest tests/workflow/ -q                    # Workflow engine tests
+```
+
+### Architecture
+
+```
+[Browser] ──→ [Next.js :3000] ──→ [FastAPI :8000] ──→ [Temporal :7233]
+                                        │                     │
+                                   [SQLite DB]          [Worker Process]
+                                        │                     │
+                                   [EventBus] ←── SSE ──── [Activities]
+                                        │                     │
+                                   [SSE Stream] ←──────── [Claude CLI / Figma API]
+```
 
 ---
 
@@ -87,75 +185,140 @@ frontend/            # Next.js workflow editor UI
 
 ## 中文
 
-基于 **LangGraph** + **Temporal** 的可视化工作流编排平台，支持拖拽式编辑器和实时执行监控。
+开源的开发者工作流平台，使用 **Claude AI** + **Temporal** + **LangGraph** 自动化重复性工程任务。
 
-### 功能特性
+### 核心功能
 
-- 可视化工作流编辑器（React Flow），支持拖拽节点组合
-- 双引擎执行：LangGraph 负责动态 DAG 执行，Temporal 负责持久化编排
-- 多种节点类型：数据源、处理器、HTTP 请求、条件判断、LLM Agent、CCCC Peer、输出
-- 循环支持：可配置最大迭代次数，超限后优雅终止
-- 实时 SSE 事件流推送执行状态
-- 通过 CCCC 协议实现多智能体协作
+**两条生产管线：**
+
+| 管线 | 输入 | 输出 | 工作方式 |
+|------|------|------|----------|
+| **批量修 Bug** | Jira URL 列表 | Git PR（含修复） | Jira 获取 → Claude CLI 分析 → 代码修复 → 验证 → Git 分支 + PR |
+| **设计转 Spec** | Figma URL | `design_spec.json` | Figma API 扫描 → 帧分类 → 两轮 SpecAnalyzer（LLM 视觉分析） → 结构化规格 |
+
+两条管线均以 Temporal 持久化工作流运行，支持实时 SSE 进度推送。
 
 ### 技术栈
 
 | 层级 | 技术 |
 |------|-----|
-| 前端 | Next.js, React Flow, shadcn/ui, Tailwind CSS |
-| 后端 | FastAPI, SQLAlchemy (async), Alembic |
-| 工作流 | LangGraph, Temporal |
-| 数据库 | SQLite (aiosqlite) |
+| 前端 | Next.js 14, React Flow, shadcn/ui, Tailwind CSS |
+| 后端 | FastAPI, SQLAlchemy (async), Pydantic v2 |
+| 编排 | Temporal（持久化工作流）, LangGraph（DAG 执行） |
+| AI | Claude CLI（代码生成）, Claude API（视觉分析） |
+| 数据库 | SQLite (aiosqlite) — 可切换 PostgreSQL |
+| 测试 | pytest（624 个测试）, Vitest, Playwright |
 
 ### 快速启动
 
-**前置条件：** Python 3.10+、Node.js 18+、[Temporal CLI](https://docs.temporal.io/cli)
+#### 方式 A：本地开发
+
+**前置条件：** Python 3.11+、Node.js 18+、[Temporal CLI](https://docs.temporal.io/cli)
 
 ```bash
-# 1. 后端（Temporal + Worker + FastAPI 一键启动）
+# 克隆
+git clone https://github.com/your-org/work-flow.git
+cd work-flow
+
+# 后端
 cd backend
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
-make dev
+pip install -e ".[test]"
+make dev    # 一键启动 Temporal + Worker + FastAPI（:8000）
 
-# 2. 前端（新开一个终端）
+# 前端（新开终端）
 cd frontend
 npm install
-npm run dev
+npm run dev  # 启动 Next.js（:3000）
 ```
 
-打开 http://localhost:3000 即可访问工作流编辑器。
-
-停止所有后端服务：
+#### 方式 B：Docker Compose
 
 ```bash
-cd backend
-make stop
+cp .env.example .env
+# 编辑 .env — 按需设置 FIGMA_TOKEN、JIRA_* 等
+docker compose up --build
 ```
+
+服务：后端 `:8000`、前端 `:3000`、Temporal `:7233`（Web UI `:8080`）
+
+打开 http://localhost:3000
+
+### 配置说明
+
+将 `.env.example` 复制为 `.env` 并配置：
+
+| 变量 | 是否必需 | 说明 |
+|------|----------|------|
+| `ANTHROPIC_API_KEY` | AI 功能需要 | Claude API 密钥 |
+| `FIGMA_TOKEN` | 设计转 Spec 需要 | Figma 个人访问令牌 |
+| `JIRA_URL` | 批量修 Bug 需要 | Jira 实例地址 |
+| `JIRA_EMAIL` | 批量修 Bug 需要 | Jira 账号邮箱 |
+| `JIRA_API_TOKEN` | 批量修 Bug 需要 | Jira API 令牌 |
+| `CLAUDE_CLI_PATH` | 自动检测 | `claude` CLI 二进制路径 |
 
 ### 项目结构
 
 ```
-backend/     # FastAPI 后端 + 工作流引擎
-  app/               # FastAPI 应用（路由、模型、数据库）
-  workflow/           # 工作流引擎核心
-    engine/           # 图构建器、执行器、表达式求值
-    nodes/            # 节点类型注册（data_source, llm_agent 等）
-    temporal/         # Temporal 工作流、活动、Worker
-    agents/           # Agent 集成（LLM、CCCC）
-    sse/              # Server-Sent Events 基础设施
-frontend/            # Next.js 工作流编辑器 UI
+work-flow/
+├── backend/
+│   ├── app/                    # FastAPI 应用
+│   │   ├── routes/             # API 端点（batch, design, workflows）
+│   │   ├── repositories/       # 数据访问层
+│   │   ├── models/             # SQLAlchemy ORM 模型
+│   │   ├── database.py         # 数据库引擎 + 会话管理
+│   │   ├── event_bus.py        # 统一 SSE 事件基础设施
+│   │   └── temporal_adapter.py # Temporal 客户端单例
+│   ├── workflow/
+│   │   ├── engine/             # LangGraph 图构建器 + 执行器
+│   │   ├── nodes/              # 节点类型注册（agents, spec_analyzer 等）
+│   │   ├── temporal/           # Temporal 工作流 + 活动
+│   │   ├── integrations/       # Figma 客户端、分类器
+│   │   └── templates/          # 工作流 JSON 模板
+│   ├── tests/                  # 624 个测试（pytest）
+│   ├── Makefile                # dev/stop/worker/api/temporal
+│   └── pyproject.toml
+├── frontend/
+│   ├── app/
+│   │   ├── batch-bugs/         # 批量修 Bug 界面
+│   │   ├── design-to-code/     # 设计转 Spec 界面
+│   │   └── workflows/          # 可视化工作流编辑器
+│   ├── components/             # 共享 UI 组件（shadcn/ui）
+│   └── lib/                    # Hooks、工具函数
+├── docker-compose.yml          # 3 服务编排
+├── Dockerfile.backend          # 多阶段 Python 构建
+├── Dockerfile.frontend         # Next.js standalone 构建
+└── .env.example                # 环境变量模板
 ```
 
-### API 接口
+### 测试
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/v2/workflows` | 工作流列表 |
-| GET | `/api/v2/workflows/{id}` | 工作流详情 |
-| POST | `/api/v2/workflows` | 创建工作流 |
-| PUT | `/api/v2/workflows/{id}` | 更新工作流 |
-| POST | `/api/v2/workflows/{id}/run` | 执行工作流 |
-| GET | `/api/v2/workflows/{id}/runs` | 运行记录 |
-| GET | `/api/v2/sse/stream/{run_id}` | SSE 事件流 |
+```bash
+cd backend
+
+# 全量测试
+python -m pytest tests/ -q
+
+# 按模块
+python -m pytest tests/test_routes_batch.py -q       # 34 个路由测试
+python -m pytest tests/test_routes_design.py -q       # 22 个路由测试
+python -m pytest tests/test_repository_batch_job.py -q # 28 个仓储测试
+python -m pytest tests/workflow/ -q                    # 工作流引擎测试
+```
+
+### 架构
+
+```
+[浏览器] ──→ [Next.js :3000] ──→ [FastAPI :8000] ──→ [Temporal :7233]
+                                       │                     │
+                                  [SQLite DB]          [Worker 进程]
+                                       │                     │
+                                  [EventBus] ←── SSE ──── [Activities]
+                                       │                     │
+                                  [SSE 推送] ←──────── [Claude CLI / Figma API]
+```
+
+### License
+
+MIT

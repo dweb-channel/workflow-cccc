@@ -48,5 +48,16 @@ data/
 # Frontend public assets (generated)
 frontend/public/spec-data/
 
-# CCCC state
+# CCCC state and internal docs
 .cccc/
+CCCC_HELP.md
+CCCC_STANDUP.md
+
+# Personal / sensitive files
+resume*
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
