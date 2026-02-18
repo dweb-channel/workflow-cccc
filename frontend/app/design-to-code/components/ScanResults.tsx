@@ -129,7 +129,7 @@ export function ScanResults({
       {warnings && warnings.length > 0 && (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-1">
           {warnings.map((w, i) => (
-            <div key={i} className="flex items-start gap-2">
+            <div key={`warn-${i}`} className="flex items-start gap-2">
               <AlertTriangle className="h-3.5 w-3.5 text-amber-400 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-300">{w}</p>
             </div>

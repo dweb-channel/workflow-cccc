@@ -135,7 +135,7 @@ export function ActivityFeed({
 
           return isExpanded ? (
             <ExpandedBugSection
-              key={idx}
+              key={bug.bug_id}
               bug={bug}
               bugIndex={idx}
               events={bugEvents}
@@ -145,7 +145,7 @@ export function ActivityFeed({
             />
           ) : (
             <CollapsedBugRow
-              key={idx}
+              key={bug.bug_id}
               bug={bug}
               bugIndex={idx}
               events={bugEvents}

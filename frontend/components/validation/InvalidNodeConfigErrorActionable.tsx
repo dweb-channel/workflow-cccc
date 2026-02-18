@@ -77,7 +77,7 @@ export function InvalidNodeConfigErrorActionable({
           >
             {fieldErrors.map((fieldError, idx) => (
               <div
-                key={idx}
+                key={fieldError.field}
                 data-testid={`config-error-${fieldError.field}`}
                 className="p-3 flex items-start gap-2"
               >

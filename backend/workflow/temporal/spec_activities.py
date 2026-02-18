@@ -31,20 +31,8 @@ from ..settings import (
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# SSE push helper (Worker → FastAPI via HTTP POST)
-# ---------------------------------------------------------------------------
-
-async def _push_event(job_id: str, event_type: str, data: dict) -> None:
-    """Push SSE event via HTTP POST to FastAPI backend.
-
-    Non-blocking: logs errors but never fails the activity.
-    """
-    from ..sse import push_sse_event
-    try:
-        await push_sse_event(job_id, event_type, data)
-    except Exception as e:
-        logger.error("Failed to push SSE event %s for %s: %s", event_type, job_id, e)
+# SSE push helper — shared with batch_activities via sse_events module
+from .sse_events import _push_event  # noqa: F401
 
 
 # ---------------------------------------------------------------------------

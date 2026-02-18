@@ -104,10 +104,11 @@ export default function TestHarnessPage() {
 
   // Helper to render ErrorActionable components
   const renderErrorActionable = (error: ValidationError, idx: number) => {
+    const errorKey = `${error.code}-${error.node_ids.join("-")}`;
     if (isMissingFieldReferenceError(error)) {
       return (
         <MissingFieldReferenceErrorActionable
-          key={idx}
+          key={errorKey}
           error={error}
           onFixField={handleFixField}
         />
@@ -116,7 +117,7 @@ export default function TestHarnessPage() {
     if (isCircularDependencyError(error)) {
       return (
         <CircularDependencyErrorActionable
-          key={idx}
+          key={errorKey}
           error={error}
           onBreakCycle={handleBreakCycle}
         />
@@ -125,7 +126,7 @@ export default function TestHarnessPage() {
     if (error.code === 'INVALID_NODE_CONFIG') {
       return (
         <InvalidNodeConfigErrorActionable
-          key={idx}
+          key={errorKey}
           error={error}
           onEditNode={handleEditNode}
         />
@@ -134,7 +135,7 @@ export default function TestHarnessPage() {
     // Fallback for other error types
     return (
       <div
-        key={idx}
+        key={errorKey}
         data-testid={`validation-error-${error.code.toLowerCase()}`}
         className="border border-red-200 bg-red-50 rounded-md p-4"
       >
@@ -152,10 +153,11 @@ export default function TestHarnessPage() {
   };
 
   const renderWarningActionable = (warning: ValidationWarning, idx: number) => {
+    const warnKey = `${warning.code}-${warning.node_ids.join("-")}`;
     if (isDanglingNodeWarning(warning)) {
       return (
         <DanglingNodeWarningActionable
-          key={idx}
+          key={warnKey}
           warning={warning}
           onConnectNode={handleConnectNode}
         />
@@ -164,7 +166,7 @@ export default function TestHarnessPage() {
     if (warning.code === 'UNUSED_OUTPUT_FIELD') {
       return (
         <JumpReferenceWarningActionable
-          key={idx}
+          key={warnKey}
           warning={warning}
           onFixJumpTarget={handleFixJumpTarget}
         />
@@ -173,7 +175,7 @@ export default function TestHarnessPage() {
     // Fallback for other warning types
     return (
       <div
-        key={idx}
+        key={warnKey}
         data-testid={`validation-warning-${warning.code.toLowerCase()}`}
         className="border border-yellow-200 bg-yellow-50 rounded-md p-4"
       >
@@ -353,7 +355,7 @@ export default function TestHarnessPage() {
                   >
                     {actionLog.map((log, idx) => (
                       <div
-                        key={idx}
+                        key={`log-${idx}`}
                         className="text-sm text-gray-700 font-mono"
                       >
                         {idx + 1}. {log}

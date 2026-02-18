@@ -8,12 +8,11 @@ import {
   type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
-import { useSSEStream } from "@/lib/useSSEStream";
+import { usePipelineConnection } from "@/lib/usePipelineConnection";
+import { TERMINAL_STATUSES } from "@/lib/constants";
 import type { DesignJob, PipelineEvent } from "../types";
 import type { DesignSpec, ComponentSpec, ComponentUpdate, SemanticRole } from "@/lib/types/design-spec";
 import { applyComponentUpdates } from "@/lib/types/design-spec";
-
-const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
 const MAX_EVENTS = 500;
 const TRIM_TO = 300;
 
@@ -63,20 +62,14 @@ export function useDesignJob() {
     []
   );
 
-  // --- SSE URL: non-null only when job is active ---
-  const sseUrl = useMemo(() => {
-    if (!currentJob || TERMINAL_STATUSES.includes(currentJob.job_status)) {
-      return null;
-    }
-    return getDesignJobStreamUrl(currentJob.job_id);
-  }, [currentJob?.job_id, currentJob?.job_status]); // eslint-disable-line react-hooks/exhaustive-deps
+  // --- SSE URL gated by job lifecycle (via shared helper) ---
 
   // --- Node event dedup ---
   const seenNodeEventsRef = useRef(new Set<string>());
-  // Reset dedup set when URL changes (new job)
+  // Reset dedup set when job changes
   useEffect(() => {
     seenNodeEventsRef.current = new Set();
-  }, [sseUrl]);
+  }, [currentJob?.job_id]);
 
   // --- Ref for jobId (used in pollFn) ---
   const jobIdRef = useRef(currentJob?.job_id);
@@ -284,9 +277,11 @@ export function useDesignJob() {
     });
   }, []);
 
-  // --- SSE connection via shared hook ---
-  const { connected: sseConnected, stale: sseStale } = useSSEStream({
-    url: sseUrl,
+  // --- SSE connection via shared pipeline helper ---
+  const { connected: sseConnected, stale: sseStale } = usePipelineConnection({
+    jobId: currentJob?.job_id,
+    jobStatus: currentJob?.job_status,
+    getStreamUrl: getDesignJobStreamUrl,
     handlers: sseHandlers,
     terminalEvents: ["job_done"],
     pollFn,

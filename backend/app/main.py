@@ -64,7 +64,7 @@ from .routes.execution import router as execution_router  # noqa: E402
 from .routes.validation import router as validation_router  # noqa: E402
 from .routes.templates import router as templates_router  # noqa: E402
 from .routes.batch import router as batch_router  # noqa: E402
-from .routes.batch import jira_router  # noqa: E402
+from .routes.jira import router as jira_router  # noqa: E402
 from .routes.filesystem import router as filesystem_router  # noqa: E402
 from .routes.workspace import router as workspace_router  # noqa: E402
 from .routes.design import router as design_router  # noqa: E402

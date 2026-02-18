@@ -223,7 +223,7 @@ function OutputPreviewText({ text }: { text: string }) {
       {parts.map((part, i) =>
         /^https?:\/\//.test(part) ? (
           <a
-            key={i}
+            key={`url-${i}`}
             href={part}
             target="_blank"
             rel="noopener noreferrer"
@@ -233,7 +233,7 @@ function OutputPreviewText({ text }: { text: string }) {
             {part}
           </a>
         ) : (
-          <span key={i}>{part}</span>
+          <span key={`text-${i}`}>{part}</span>
         )
       )}
     </>

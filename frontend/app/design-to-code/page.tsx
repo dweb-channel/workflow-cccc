@@ -346,7 +346,7 @@ function DesignToCodeContent() {
                         <div className="space-y-2">
                           {PIPELINE_STAGES.map((stage, i) => (
                             <div
-                              key={i}
+                              key={stage.icon}
                               className="flex items-start gap-2.5 text-xs"
                             >
                               <span className="shrink-0 mt-0.5 text-base">

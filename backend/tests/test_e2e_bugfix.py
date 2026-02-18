@@ -17,6 +17,9 @@ import sys
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+pytest.importorskip("temporalio", reason="temporalio not installed — skip e2e tests")
+
 from httpx import AsyncClient, ASGITransport
 from app.database import engine, Base
 from app.main import app

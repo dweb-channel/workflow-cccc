@@ -125,25 +125,25 @@ export function DesignAnalysisSection({ text }: { text: string }) {
     <div className="space-y-1 text-[11px] leading-relaxed text-slate-300">
       {lines.map((line, i) => {
         const trimmed = line.trim();
-        if (!trimmed) return <div key={i} className="h-1" />;
+        if (!trimmed) return <div key={`line-${i}`} className="h-1" />;
 
         if (trimmed.startsWith("## ")) {
           return (
-            <div key={i} className="font-semibold text-white text-[12px] mt-2 first:mt-0">
+            <div key={`line-${i}`} className="font-semibold text-white text-[12px] mt-2 first:mt-0">
               {renderInline(trimmed.slice(3))}
             </div>
           );
         }
         if (trimmed.startsWith("### ")) {
           return (
-            <div key={i} className="font-medium text-slate-200 text-[11px] mt-1.5">
+            <div key={`line-${i}`} className="font-medium text-slate-200 text-[11px] mt-1.5">
               {renderInline(trimmed.slice(4))}
             </div>
           );
         }
         if (trimmed.startsWith("- ")) {
           return (
-            <div key={i} className="flex gap-1.5 pl-2">
+            <div key={`line-${i}`} className="flex gap-1.5 pl-2">
               <span className="text-slate-500 shrink-0">•</span>
               <span>{renderInline(trimmed.slice(2))}</span>
             </div>
@@ -152,13 +152,13 @@ export function DesignAnalysisSection({ text }: { text: string }) {
         const numberedMatch = trimmed.match(/^(\d+)\.\s+(.+)/);
         if (numberedMatch) {
           return (
-            <div key={i} className="flex gap-1.5 pl-2">
+            <div key={`line-${i}`} className="flex gap-1.5 pl-2">
               <span className="text-slate-500 shrink-0 tabular-nums">{numberedMatch[1]}.</span>
               <span>{renderInline(numberedMatch[2])}</span>
             </div>
           );
         }
-        return <div key={i}>{renderInline(trimmed)}</div>;
+        return <div key={`line-${i}`}>{renderInline(trimmed)}</div>;
       })}
     </div>
   );
@@ -172,16 +172,16 @@ function renderInline(text: string): React.ReactNode {
     <>
       {parts.map((part, i) => {
         if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={i} className="text-white font-medium">{part.slice(2, -2)}</strong>;
+          return <strong key={`fmt-${i}`} className="text-white font-medium">{part.slice(2, -2)}</strong>;
         }
         if (part.startsWith("`") && part.endsWith("`")) {
           return (
-            <code key={i} className="rounded bg-slate-700/80 px-1 py-0.5 text-[10px] font-mono text-emerald-400">
+            <code key={`fmt-${i}`} className="rounded bg-slate-700/80 px-1 py-0.5 text-[10px] font-mono text-emerald-400">
               {part.slice(1, -1)}
             </code>
           );
         }
-        return <span key={i}>{part}</span>;
+        return <span key={`fmt-${i}`}>{part}</span>;
       })}
     </>
   );

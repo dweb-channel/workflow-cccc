@@ -212,7 +212,7 @@ export default function CanvasPage() {
               <div className="space-y-1 font-mono text-xs">
                 {logs.map((log, i) => (
                   <div
-                    key={i}
+                    key={`log-${i}`}
                     className={`rounded px-2 py-1 ${
                       log.includes("[RUNNING]")
                         ? "bg-blue-50 text-blue-700"

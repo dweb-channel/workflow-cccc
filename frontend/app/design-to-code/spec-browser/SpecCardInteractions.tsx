@@ -18,7 +18,7 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
         <div>
           <span className="text-[10px] font-medium text-slate-400">行为</span>
           {interaction.behaviors.map((b, i) => (
-            <div key={i} className="mt-1 rounded bg-slate-900 px-2 py-1.5 text-[11px]">
+            <div key={`${b.trigger}-${b.action}-${i}`} className="mt-1 rounded bg-slate-900 px-2 py-1.5 text-[11px]">
               <span className="text-orange-400">{TRIGGER_ZH[b.trigger || "click"] || b.trigger}</span>
               <span className="text-slate-500"> → </span>
               <span className="text-slate-300">{b.action}</span>
@@ -33,7 +33,7 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
         <div>
           <span className="text-[10px] font-medium text-slate-400">状态变化</span>
           {interaction.states.map((s, i) => (
-            <div key={i} className="mt-1 rounded bg-slate-900 px-2 py-1.5">
+            <div key={s.name || `state-${i}`} className="mt-1 rounded bg-slate-900 px-2 py-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-medium text-violet-400">{s.name}</span>
                 {s.description && (
@@ -53,7 +53,7 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
         <div>
           <span className="text-[10px] font-medium text-slate-400">过渡动画</span>
           {interaction.transitions.map((t, i) => (
-            <div key={i} className="mt-1 text-[11px] text-slate-400">
+            <div key={`${t.property}-${t.duration_ms}-${i}`} className="mt-1 text-[11px] text-slate-400">
               {t.property} {t.duration_ms}ms {t.easing || "ease"}
             </div>
           ))}

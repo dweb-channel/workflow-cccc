@@ -106,7 +106,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
             <div className="rounded-md bg-slate-900 px-2.5 py-2">
               <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
                 {e.diff.split("\n").map((line, i) => (
-                  <span key={i} className={line.startsWith("+") ? "text-green-400" : line.startsWith("-") ? "text-red-400" : "text-slate-400"}>
+                  <span key={`diff-${i}`} className={line.startsWith("+") ? "text-green-400" : line.startsWith("-") ? "text-red-400" : "text-slate-400"}>
                     {line}{"\n"}
                   </span>
                 ))}
@@ -218,7 +218,7 @@ export function ExploreGroupCard({ group }: { group: ExploreGroup }) {
           {expanded && (
             <div className="mt-2 space-y-1 border-l-2 border-slate-600 pl-3">
               {group.events.map((evt, i) => (
-                <MiniEventRow key={i} event={evt} />
+                <MiniEventRow key={evt.timestamp || `evt-${i}`} event={evt} />
               ))}
             </div>
           )}

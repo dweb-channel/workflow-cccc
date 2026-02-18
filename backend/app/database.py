@@ -74,7 +74,7 @@ async def get_session_ctx() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    """Create all tables. Use for development/testing only."""
+    """Create all tables and run lightweight migrations for dev SQLite."""
     # Enable WAL mode for SQLite to allow concurrent reads/writes
     if "sqlite" in DATABASE_URL:
         async with engine.begin() as conn:
@@ -82,6 +82,23 @@ async def init_db():
             await conn.execute(sqlalchemy.text("PRAGMA busy_timeout=5000"))
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migrations: add missing columns to existing tables
+        await _migrate_add_missing_columns(conn)
+
+
+async def _migrate_add_missing_columns(conn):
+    """Add columns that were added after initial table creation (no-op if already present)."""
+    migrations = [
+        ("batch_jobs", "workspace_id", "VARCHAR(64)"),
+    ]
+    for table, column, col_type in migrations:
+        try:
+            await conn.execute(sqlalchemy.text(
+                f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+            ))
+        except Exception:
+            # Column already exists — ignore
+            pass
 
 
 async def close_db():

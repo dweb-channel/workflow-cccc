@@ -607,7 +607,7 @@ function NodeOutputRow({
           <span className="hidden sm:flex items-center gap-1 shrink-0">
             {keyFields.map((kf, i) => (
               <span
-                key={i}
+                key={`${kf}-${i}`}
                 className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] text-slate-500"
               >
                 {kf}
@@ -657,7 +657,7 @@ function ValidationWarning({
       {expanded && (
         <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
           {nodes.map((n, i) => (
-            <div key={i} className="flex items-center gap-2 text-[11px]">
+            <div key={`${n.name}-${i}`} className="flex items-center gap-2 text-[11px]">
               <span className="text-amber-400/80">•</span>
               <span className="text-amber-300 font-medium">{n.name}</span>
               <span className="text-amber-500/60 truncate">{n.path}</span>

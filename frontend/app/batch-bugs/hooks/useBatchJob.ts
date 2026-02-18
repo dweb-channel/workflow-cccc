@@ -9,10 +9,9 @@ import {
   type BatchBugFixRequest,
 } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
-import { useSSEStream } from "@/lib/useSSEStream";
+import { usePipelineConnection } from "@/lib/usePipelineConnection";
+import { TERMINAL_STATUSES } from "@/lib/constants";
 import type { BatchJob, BugStatus, BugStep, BatchJobStats, AIThinkingEvent, AIThinkingStats, DbSyncWarning } from "../types";
-
-const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
 
 export function useBatchJob() {
   const { toast } = useToast();
@@ -63,13 +62,7 @@ export function useBatchJob() {
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- SSE URL: non-null only when job is active ---
-  const sseUrl = useMemo(() => {
-    if (!currentJob || TERMINAL_STATUSES.includes(currentJob.job_status)) {
-      return null;
-    }
-    return getBatchJobStreamUrl(currentJob.job_id);
-  }, [currentJob?.job_id, currentJob?.job_status]); // eslint-disable-line react-hooks/exhaustive-deps
+  // --- SSE URL gated by job lifecycle (via shared helper) ---
 
   // --- Helper to update a specific bug by index ---
   const updateBug = useCallback(
@@ -302,9 +295,11 @@ export function useBatchJob() {
     });
   }, []);
 
-  // --- SSE connection via shared hook ---
-  const { connected: sseConnected, stale: sseStale } = useSSEStream({
-    url: sseUrl,
+  // --- SSE connection via shared pipeline helper ---
+  const { connected: sseConnected, stale: sseStale } = usePipelineConnection({
+    jobId: currentJob?.job_id,
+    jobStatus: currentJob?.job_status,
+    getStreamUrl: getBatchJobStreamUrl,
     handlers: sseHandlers,
     terminalEvents: ["job_done"],
     pollFn,

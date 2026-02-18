@@ -71,7 +71,7 @@ export function JumpReferenceWarningActionable({
           >
             {jumpPaths.map((path, idx) => (
               <div
-                key={idx}
+                key={path.condition || `path-${idx}`}
                 data-testid={`jump-path-${idx}`}
                 className="p-3"
               >

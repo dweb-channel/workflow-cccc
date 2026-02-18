@@ -86,7 +86,7 @@ export function CircularDependencyErrorActionable({
         >
           <div className="flex flex-wrap items-center gap-2">
             {cycle_path.map((nodeId, idx) => (
-              <div key={idx} className="flex items-center gap-2">
+              <div key={`${nodeId}-${idx}`} className="flex items-center gap-2">
                 <code
                   data-testid={`cycle-node-${idx}`}
                   className={`px-2 py-1 rounded font-mono text-xs ${
@@ -122,7 +122,7 @@ export function CircularDependencyErrorActionable({
           >
             {breakableEdges.map((edge, idx) => (
               <div
-                key={idx}
+                key={`${edge.source}-${edge.target}`}
                 className="flex items-center gap-2 text-sm"
               >
                 <Button

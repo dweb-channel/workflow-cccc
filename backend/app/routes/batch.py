@@ -1,6 +1,7 @@
-"""Batch Bug Fix and Jira Integration API endpoints.
+"""Batch Bug Fix API endpoints.
 
-Provides endpoints for dispatching batch bug fix tasks and querying Jira.
+Provides endpoints for dispatching batch bug fix tasks, monitoring progress,
+and controlling jobs (cancel/retry/delete).
 Workflow execution is delegated to Temporal Worker (separate process).
 SSE events arrive via the shared /api/internal/events/{run_id} endpoint.
 """
@@ -9,21 +10,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator
 
 # Database imports
 from app.database import get_session_ctx
 from app.repositories.batch_job import BatchJobRepository
-from app.models.db import BatchJobModel, BugResultModel
+from app.models.db import BatchJobModel
 
 # SSE infrastructure (unified EventBus)
 from app.event_bus import push_event as push_node_event, subscribe_events
@@ -31,6 +29,22 @@ from app.event_bus import push_event as push_node_event, subscribe_events
 # Temporal client (lazy import to avoid startup dependency)
 from app.temporal_adapter import get_client
 from workflow.config import TASK_QUEUE
+
+# Schemas (extracted to batch_schemas.py)
+from .batch_schemas import (
+    BatchBugFixConfig,
+    BatchBugFixRequest,
+    BatchBugFixResponse,
+    BatchDeleteRequest,
+    BatchDeleteResponse,
+    BatchJobListResponse,
+    BatchJobStatusResponse,
+    BatchJobSummary,
+    BugStatus,
+    DryRunBugPreview,
+    DryRunResponse,
+    JobControlResponse,
+)
 
 logger = logging.getLogger("workflow.routes.batch")
 
@@ -40,159 +54,7 @@ router = APIRouter(prefix="/api/v2/batch", tags=["batch"])
 # This survives FastAPI restarts (workflow ID = "batch-{job_id}").
 
 
-# --- Schemas ---
-
-
-class BatchBugFixConfig(BaseModel):
-    """Configuration for batch bug fix job."""
-    validation_level: Literal["minimal", "standard", "thorough"] = "standard"
-    failure_policy: Literal["stop", "skip", "retry"] = "skip"
-    max_retries: int = Field(default=3, ge=1, le=10)
-
-
-class BatchBugFixRequest(BaseModel):
-    """Request for POST /api/v2/batch/bug-fix."""
-    jira_urls: List[str] = Field(..., min_length=1, description="List of Jira bug URLs")
-    cwd: Optional[str] = Field(
-        None,
-        description="Working directory for Claude CLI (defaults to current directory)",
-    )
-    workspace_id: Optional[str] = Field(
-        None,
-        description="Workspace ID to associate this job with (inherits config_defaults)",
-    )
-    config: Optional[BatchBugFixConfig] = None
-    dry_run: bool = Field(
-        default=False,
-        description="If true, return a preview without starting Temporal workflow",
-    )
-
-    @field_validator("jira_urls")
-    @classmethod
-    def validate_jira_urls(cls, urls: List[str]) -> List[str]:
-        """Validate that each URL is a reachable Jira-like URL.
-
-        Rejects:
-        - Non-HTTP(S) URLs
-        - Reserved/example domains (example.com, localhost, etc.)
-        - Malformed URLs without proper host
-        """
-        _BLOCKED_HOSTS = {"example.com", "example.org", "example.net", "localhost", "127.0.0.1"}
-
-        invalid = []
-        for url in urls:
-            url = url.strip()
-            if not url:
-                invalid.append(("(empty)", "URL cannot be empty"))
-                continue
-            parsed = urlparse(url)
-            if parsed.scheme not in ("http", "https"):
-                invalid.append((url, f"must use http or https (got '{parsed.scheme}')"))
-                continue
-            host = (parsed.hostname or "").lower()
-            if not host:
-                invalid.append((url, "missing hostname"))
-                continue
-            # Check blocked domains (exact match or subdomain)
-            base_host = ".".join(host.rsplit(".", 2)[-2:]) if "." in host else host
-            if base_host in _BLOCKED_HOSTS or host in _BLOCKED_HOSTS:
-                invalid.append((url, f"'{host}' is a reserved/example domain, not a real Jira instance"))
-                continue
-
-        if invalid:
-            details = "; ".join(f"{u}: {reason}" for u, reason in invalid)
-            raise ValueError(f"Invalid Jira URL(s): {details}")
-        return urls
-
-
-class BugStepInfo(BaseModel):
-    """Execution step information for a bug."""
-    step: str
-    label: str
-    status: Literal["pending", "in_progress", "completed", "failed"] = "pending"
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    duration_ms: Optional[float] = None
-    output_preview: Optional[str] = None
-    error: Optional[str] = None
-    attempt: Optional[int] = None
-
-
-class BugStatus(BaseModel):
-    """Status of a single bug in the batch."""
-    url: str
-    status: Literal["pending", "in_progress", "completed", "failed", "skipped"]
-    error: Optional[str] = None
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    steps: Optional[List[BugStepInfo]] = None
-    retry_count: Optional[int] = None
-
-
-class BatchBugFixResponse(BaseModel):
-    """Response for POST /api/v2/batch/bug-fix."""
-    job_id: str
-    status: Literal["started", "running", "completed", "failed", "cancelled"]
-    total_bugs: int
-    created_at: str
-
-
-class DryRunBugPreview(BaseModel):
-    """Preview of a single bug in dry-run mode."""
-    url: str
-    jira_key: str
-    expected_steps: List[str] = Field(
-        description="Ordered list of visible pipeline steps",
-    )
-
-
-class DryRunResponse(BaseModel):
-    """Response for POST /api/v2/batch/bug-fix with dry_run=true."""
-    dry_run: Literal[True] = True
-    total_bugs: int
-    cwd: str
-    config: BatchBugFixConfig
-    bugs: List[DryRunBugPreview]
-    expected_steps_per_bug: List[str] = Field(
-        description="Canonical step labels for each bug",
-    )
-
-
-class BatchJobStatusResponse(BaseModel):
-    """Response for GET /api/v2/batch/bug-fix/{job_id}."""
-    job_id: str
-    status: Literal["started", "running", "completed", "failed", "cancelled"]
-    total_bugs: int
-    completed: int
-    failed: int
-    skipped: int
-    in_progress: int
-    pending: int
-    bugs: List[BugStatus]
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-
-
-class BatchJobSummary(BaseModel):
-    """Summary of a batch job for list view."""
-    job_id: str
-    status: Literal["started", "running", "completed", "failed", "cancelled"]
-    total_bugs: int
-    completed: int
-    failed: int
-    created_at: str
-    updated_at: str
-
-
-class BatchJobListResponse(BaseModel):
-    """Response for GET /api/v2/batch/bug-fix (list)."""
-    jobs: List[BatchJobSummary]
-    total: int
-    page: int
-    page_size: int
-
-
-# --- Batch Bug Fix Endpoints ---
+# --- Helpers ---
 
 
 def _extract_jira_key_from_url(url: str) -> str:
@@ -208,6 +70,45 @@ _DRY_RUN_STEPS = [
     "验证修复结果",
     "修复完成 / 修复失败",
 ]
+
+
+def _db_job_to_dict(db_job: BatchJobModel) -> Dict[str, Any]:
+    """Convert database job model to dict format for API responses."""
+    return {
+        "job_id": db_job.id,
+        "status": db_job.status,
+        "config": db_job.config or {},
+        "error": db_job.error,
+        "bugs": [
+            {
+                "url": bug.url,
+                "status": bug.status,
+                "error": bug.error,
+                "started_at": bug.started_at.isoformat() if bug.started_at else None,
+                "completed_at": bug.completed_at.isoformat() if bug.completed_at else None,
+                "steps": bug.steps,
+                "retry_count": _count_retries(bug.steps),
+            }
+            for bug in sorted(db_job.bugs, key=lambda b: b.bug_index)
+        ],
+        "created_at": db_job.created_at.isoformat() if db_job.created_at else "",
+        "updated_at": db_job.updated_at.isoformat() if db_job.updated_at else "",
+    }
+
+
+def _count_retries(steps: Optional[List[Dict[str, Any]]]) -> int:
+    """Count the number of retries from steps data."""
+    if not steps:
+        return 0
+    max_attempt = 0
+    for step in steps:
+        attempt = step.get("attempt")
+        if attempt is not None and attempt > max_attempt:
+            max_attempt = attempt
+    return max(0, max_attempt - 1)  # attempt 1 = first try, not a retry
+
+
+# --- Batch Bug Fix CRUD Endpoints ---
 
 
 @router.post("/bug-fix", status_code=201)
@@ -330,42 +231,6 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
         total_bugs=len(payload.jira_urls),
         created_at=now,
     )
-
-
-def _db_job_to_dict(db_job: BatchJobModel) -> Dict[str, Any]:
-    """Convert database job model to dict format for API responses."""
-    return {
-        "job_id": db_job.id,
-        "status": db_job.status,
-        "config": db_job.config or {},
-        "error": db_job.error,
-        "bugs": [
-            {
-                "url": bug.url,
-                "status": bug.status,
-                "error": bug.error,
-                "started_at": bug.started_at.isoformat() if bug.started_at else None,
-                "completed_at": bug.completed_at.isoformat() if bug.completed_at else None,
-                "steps": bug.steps,
-                "retry_count": _count_retries(bug.steps),
-            }
-            for bug in sorted(db_job.bugs, key=lambda b: b.bug_index)
-        ],
-        "created_at": db_job.created_at.isoformat() if db_job.created_at else "",
-        "updated_at": db_job.updated_at.isoformat() if db_job.updated_at else "",
-    }
-
-
-def _count_retries(steps: Optional[List[Dict[str, Any]]]) -> int:
-    """Count the number of retries from steps data."""
-    if not steps:
-        return 0
-    max_attempt = 0
-    for step in steps:
-        attempt = step.get("attempt")
-        if attempt is not None and attempt > max_attempt:
-            max_attempt = attempt
-    return max(0, max_attempt - 1)  # attempt 1 = first try, not a retry
 
 
 @router.get("/bug-fix/{job_id}", response_model=BatchJobStatusResponse)
@@ -523,14 +388,6 @@ async def stream_batch_job_progress(job_id: str):
 # --- Job Control Endpoints ---
 
 
-class JobControlResponse(BaseModel):
-    """Response for job control operations (cancel/pause/resume)."""
-    success: bool
-    job_id: str
-    status: str
-    message: str
-
-
 @router.post("/bug-fix/{job_id}/cancel", response_model=JobControlResponse)
 async def cancel_batch_job(job_id: str):
     """Cancel a running batch bug fix job.
@@ -686,8 +543,10 @@ async def retry_single_bug(job_id: str, bug_index: int):
             async with get_session_ctx() as session:
                 repo = BatchJobRepository(session)
                 await repo.update_bug_status(job_id, bug_index, "failed", error=str(e))
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.error(
+                f"Job {job_id}: Failed to revert bug {bug_index} status after retry failure: {db_err}"
+            )
         raise HTTPException(
             status_code=503,
             detail=f"Failed to start retry workflow: {e}. Is Temporal running?",
@@ -712,8 +571,8 @@ async def delete_batch_job(job_id: str):
         client = await get_client()
         handle = client.get_workflow_handle(f"batch-{job_id}")
         await handle.cancel()
-    except Exception:
-        pass  # Workflow may already be completed/cancelled
+    except Exception as e:
+        logger.debug(f"Job {job_id}: Temporal workflow cancel skipped (may already be done): {e}")
 
     # Delete from database
     try:
@@ -737,18 +596,6 @@ async def delete_batch_job(job_id: str):
     )
 
 
-class BatchDeleteRequest(BaseModel):
-    """Request for batch deletion."""
-    job_ids: List[str] = Field(..., description="List of job IDs to delete")
-
-
-class BatchDeleteResponse(BaseModel):
-    """Response for batch deletion."""
-    deleted: List[str]
-    failed: List[str]
-    message: str
-
-
 @router.post("/bug-fix/batch-delete", response_model=BatchDeleteResponse)
 async def batch_delete_jobs(request: BatchDeleteRequest):
     """Delete multiple batch jobs at once."""
@@ -758,7 +605,8 @@ async def batch_delete_jobs(request: BatchDeleteRequest):
         try:
             await delete_batch_job(job_id)
             deleted.append(job_id)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Batch delete: failed to delete job {job_id}: {e}")
             failed.append(job_id)
 
     return BatchDeleteResponse(
@@ -800,231 +648,3 @@ async def get_global_metrics():
         metrics = await repo.get_global_metrics()
 
     return metrics
-
-
-# --- Jira Integration Endpoints ---
-
-jira_router = APIRouter(prefix="/api/v2/jira", tags=["jira"])
-
-
-class JiraQueryRequest(BaseModel):
-    """Request for POST /api/v2/jira/query."""
-    jql: str = Field(..., description="JQL query string")
-    jira_url: Optional[str] = Field(
-        None,
-        description="Jira instance URL (e.g., https://company.atlassian.net). "
-        "Falls back to JIRA_URL env var if not provided.",
-    )
-    email: Optional[str] = Field(
-        None,
-        description="Jira user email. Falls back to JIRA_EMAIL env var if not provided.",
-    )
-    api_token: Optional[str] = Field(
-        None,
-        description="Jira API token. Falls back to JIRA_API_TOKEN env var if not provided.",
-    )
-    max_results: int = Field(
-        default=50,
-        ge=1,
-        le=100,
-        description="Maximum number of results to return (default 50, max 100)",
-    )
-
-
-class JiraBugInfo(BaseModel):
-    """Bug information from Jira."""
-    key: str
-    summary: str
-    status: str
-    url: str
-    priority: Optional[str] = None
-    assignee: Optional[str] = None
-
-
-class JiraQueryResponse(BaseModel):
-    """Response for POST /api/v2/jira/query."""
-    bugs: List[JiraBugInfo]
-    total: int
-    jql: str
-
-
-class JiraErrorResponse(BaseModel):
-    """Error response for Jira API failures."""
-    error: str
-    error_type: Literal["auth_failed", "jql_error", "connection_error", "unknown"]
-    details: Optional[str] = None
-
-
-@jira_router.post(
-    "/query",
-    response_model=JiraQueryResponse,
-    responses={
-        400: {"model": JiraErrorResponse, "description": "JQL syntax error"},
-        401: {"model": JiraErrorResponse, "description": "Authentication failed"},
-        502: {"model": JiraErrorResponse, "description": "Jira connection error"},
-    },
-)
-async def query_jira_bugs(payload: JiraQueryRequest):
-    """Query Jira for bugs using JQL.
-
-    Credentials can be provided in the request body or via environment variables:
-    - JIRA_URL: Jira instance URL
-    - JIRA_EMAIL: User email
-    - JIRA_API_TOKEN: API token
-
-    Example JQL queries:
-    - `project = MYPROJECT AND type = Bug`
-    - `project = MYPROJECT AND type = Bug AND status = Open`
-    - `assignee = currentUser() AND type = Bug`
-    """
-    import httpx
-    import base64
-
-    # Resolve credentials (request body > env vars)
-    jira_url = payload.jira_url or os.environ.get("JIRA_URL")
-    email = payload.email or os.environ.get("JIRA_EMAIL")
-    api_token = payload.api_token or os.environ.get("JIRA_API_TOKEN")
-
-    # Validate required credentials
-    missing = []
-    if not jira_url:
-        missing.append("jira_url (or JIRA_URL env var)")
-    if not email:
-        missing.append("email (or JIRA_EMAIL env var)")
-    if not api_token:
-        missing.append("api_token (or JIRA_API_TOKEN env var)")
-
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": f"Missing required credentials: {', '.join(missing)}",
-                "error_type": "auth_failed",
-            },
-        )
-
-    # Normalize Jira URL (remove trailing slash)
-    jira_url = jira_url.rstrip("/")
-
-    # Build auth header (Basic auth with email:token)
-    auth_string = f"{email}:{api_token}"
-    auth_bytes = base64.b64encode(auth_string.encode()).decode()
-
-    # Build request to Jira REST API
-    search_url = f"{jira_url}/rest/api/3/search"
-    headers = {
-        "Authorization": f"Basic {auth_bytes}",
-        "Accept": "application/json",
-    }
-    params = {
-        "jql": payload.jql,
-        "maxResults": payload.max_results,
-        "fields": "summary,status,priority,assignee",
-    }
-
-    logger.info(f"Jira query: JQL='{payload.jql}', maxResults={payload.max_results}")
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(search_url, headers=headers, params=params)
-
-            if response.status_code == 401:
-                raise HTTPException(
-                    status_code=401,
-                    detail={
-                        "error": "Authentication failed. Check email and API token.",
-                        "error_type": "auth_failed",
-                    },
-                )
-
-            if response.status_code == 400:
-                error_data = response.json()
-                error_messages = error_data.get("errorMessages", [])
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "Invalid JQL query",
-                        "error_type": "jql_error",
-                        "details": "; ".join(error_messages) if error_messages else str(error_data),
-                    },
-                )
-
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "error": f"Jira API returned status {response.status_code}",
-                        "error_type": "unknown",
-                        "details": response.text[:500],
-                    },
-                )
-
-            data = response.json()
-
-    except httpx.ConnectError as e:
-        logger.error(f"Jira connection error: {e}")
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": f"Failed to connect to Jira: {jira_url}",
-                "error_type": "connection_error",
-                "details": str(e),
-            },
-        )
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "error": "Jira request timed out",
-                "error_type": "connection_error",
-            },
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Jira query error: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": "Unexpected error querying Jira",
-                "error_type": "unknown",
-                "details": str(e),
-            },
-        )
-
-    # Parse response
-    issues = data.get("issues", [])
-    total = data.get("total", len(issues))
-
-    bugs: List[JiraBugInfo] = []
-    for issue in issues:
-        key = issue.get("key", "")
-        fields = issue.get("fields", {})
-
-        status_obj = fields.get("status", {})
-        status = status_obj.get("name", "Unknown") if status_obj else "Unknown"
-
-        priority_obj = fields.get("priority")
-        priority = priority_obj.get("name") if priority_obj else None
-
-        assignee_obj = fields.get("assignee")
-        assignee = assignee_obj.get("displayName") if assignee_obj else None
-
-        issue_url = f"{jira_url}/browse/{key}"
-
-        bugs.append(JiraBugInfo(
-            key=key,
-            summary=fields.get("summary", ""),
-            status=status,
-            url=issue_url,
-            priority=priority,
-            assignee=assignee,
-        ))
-
-    logger.info(f"Jira query returned {len(bugs)} bugs (total: {total})")
-
-    return JiraQueryResponse(
-        bugs=bugs,
-        total=total,
-        jql=payload.jql,
-    )

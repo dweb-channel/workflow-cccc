@@ -112,7 +112,7 @@ export function StyleSection({ style }: { style: StyleSpec }) {
   return (
     <div className="space-y-0.5">
       {lines.map((line, i) => (
-        <div key={i} className="flex items-center gap-1.5 text-[11px] text-slate-300">
+        <div key={`style-${i}`} className="flex items-center gap-1.5 text-[11px] text-slate-300">
           {line.color && (
             <span
               className="inline-block h-3 w-3 shrink-0 rounded border border-slate-600"

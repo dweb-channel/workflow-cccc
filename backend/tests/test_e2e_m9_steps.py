@@ -29,6 +29,9 @@ from typing import Any, Dict, List, Optional
 # Add parent to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+pytest.importorskip("temporalio", reason="temporalio not installed — skip e2e tests")
+
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from app.database import Base, get_session_ctx

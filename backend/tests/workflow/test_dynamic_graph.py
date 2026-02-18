@@ -11,6 +11,7 @@ Tests cover:
 import pytest
 
 from workflow.engine.graph_builder import (
+    LANGGRAPH_AVAILABLE,
     EdgeDefinition,
     LoopInfo,
     NodeConfig,
@@ -403,8 +404,9 @@ class TestWorkflowValidation:
         assert "node-2" in no_outgoing[0].node_ids
 
 
+@pytest.mark.skipif(not LANGGRAPH_AVAILABLE, reason="langgraph not installed")
 class TestGraphBuilding:
-    """Test graph building from configuration."""
+    """Test graph building from configuration (requires langgraph)."""
 
     def test_build_simple_graph(self):
         """Test building simple 2-node workflow."""
@@ -441,6 +443,10 @@ class TestGraphBuilding:
 
         with pytest.raises(ValueError, match="Workflow validation failed"):
             build_graph_from_config(workflow)
+
+
+class TestExecutionOrder:
+    """Test execution order (pure Python, no langgraph needed)."""
 
     def test_get_execution_order(self):
         """Test getting execution order."""

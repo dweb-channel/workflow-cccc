@@ -589,7 +589,7 @@ function DryRunPreviewPanel({
         <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
           {result.bugs.map((bug, i) => (
             <div
-              key={i}
+              key={bug.jira_key}
               className="flex items-center gap-2 rounded bg-slate-700/50 px-3 py-1.5 text-xs"
             >
               <span className="shrink-0 rounded-full bg-cyan-500/20 px-1.5 py-0.5 font-mono text-[10px] text-cyan-400">
