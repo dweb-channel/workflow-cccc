@@ -88,6 +88,11 @@ class EdgeDefinition:
             raise ValueError(f"self-loop detected: {self.source} -> {self.target}")
 
 
+_DEFAULT_MERGE_SKIP_KEYS = frozenset({
+    "updated_fields", "error", "has_more", "node_id", "node_type",
+})
+
+
 @dataclass
 class WorkflowDefinition:
     """Declarative workflow definition.
@@ -98,6 +103,7 @@ class WorkflowDefinition:
         edges: List of edge definitions
         entry_point: Optional entry point node ID (auto-detected if not provided)
         max_iterations: Maximum loop iterations per node (default 10)
+        merge_skip_keys: Keys to exclude from state merge (defaults to standard set)
     """
 
     name: str
@@ -105,6 +111,7 @@ class WorkflowDefinition:
     edges: List[EdgeDefinition]
     entry_point: Optional[str] = None
     max_iterations: int = 10
+    merge_skip_keys: Optional[frozenset] = None  # Keys to exclude from state merge
 
     def __post_init__(self):
         """Validate workflow definition."""
@@ -638,7 +645,9 @@ def build_graph_from_config(workflow: WorkflowDefinition):
         node_instances[node_config.id] = node
 
         # Wrap node execute in a function that updates state
-        def make_node_func(node_instance):
+        skip_keys = workflow.merge_skip_keys or _DEFAULT_MERGE_SKIP_KEYS
+
+        def make_node_func(node_instance, _skip=skip_keys):
             async def node_func(state: Dict[str, Any]) -> Dict[str, Any]:
                 # Execute node with current state as inputs
                 result = await node_instance.execute(state)
@@ -649,12 +658,10 @@ def build_graph_from_config(workflow: WorkflowDefinition):
                 # If the node output contains state updates (e.g., from update_state node),
                 # merge those into the top-level state as well.
                 # Use blacklist: merge everything except internal metadata keys.
-                # This allows any workflow (batch-bugs, design-to-code, etc.)
-                # to propagate state without needing a per-workflow whitelist.
-                _MERGE_SKIP_KEYS = {"updated_fields", "error", "has_more", "node_id", "node_type"}
+                # skip_keys is configurable per-workflow via WorkflowDefinition.merge_skip_keys.
                 if isinstance(result, dict):
                     for key, value in result.items():
-                        if key not in _MERGE_SKIP_KEYS:
+                        if key not in _skip:
                             new_state[key] = value
 
                 return new_state

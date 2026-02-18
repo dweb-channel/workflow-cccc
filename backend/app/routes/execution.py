@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_session
 from ..repositories.workflow import WorkflowRepository
 from ..models.schemas import DynamicRunRequest, DynamicRunResponse
-from ..sse import sse_event_generator
+from ..event_bus import subscribe_events
 from ..temporal_adapter import start_dynamic_workflow
 from .workflows import _build_workflow_definition, validate_workflow_graph
 
@@ -91,7 +91,7 @@ async def stream_workflow_run(
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     return StreamingResponse(
-        sse_event_generator(run_id),
+        subscribe_events(run_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

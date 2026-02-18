@@ -25,8 +25,8 @@ from app.database import get_session_ctx
 from app.repositories.batch_job import BatchJobRepository
 from app.models.db import BatchJobModel, BugResultModel
 
-# SSE infrastructure (shared with generic workflow execution)
-from app.sse import sse_event_generator, push_node_event
+# SSE infrastructure (unified EventBus)
+from app.event_bus import push_event as push_node_event, subscribe_events
 
 # Temporal client (lazy import to avoid startup dependency)
 from app.temporal_adapter import get_client
@@ -315,8 +315,10 @@ async def create_batch_bug_fix(payload: BatchBugFixRequest):
             async with get_session_ctx() as session:
                 repo = BatchJobRepository(session)
                 await repo.update_status(job_id, "failed", error=str(e))
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.error(
+                f"Job {job_id}: Failed to mark orphan job as failed in DB: {db_err}"
+            )
         raise HTTPException(
             status_code=503,
             detail=f"Failed to start workflow: {e}. Is Temporal running?",
@@ -474,15 +476,11 @@ async def _batch_sse_generator(job_id: str):
     except Exception as e:
         logger.error(f"Job {job_id}: Failed to send initial SSE state: {e}")
 
-    # Stream events from shared SSE infrastructure.
-    # sse_event_generator creates a queue in _active_streams[job_id]
-    # that receives events pushed to /api/internal/events/{job_id}.
-    # It stops on "workflow_complete"; we also stop on "job_done".
-    async for event_str in sse_event_generator(job_id):
+    # Stream events from EventBus (events arrive from Temporal Worker
+    # via HTTP POST to /api/internal/events/{job_id}).
+    # subscribe_events stops automatically on job_done / workflow_complete.
+    async for event_str in subscribe_events(job_id):
         yield event_str
-        # Check if this is a job_done event (batch-specific stop signal)
-        if event_str.startswith("event: job_done\n"):
-            break
 
 
 @router.get("/bug-fix/{job_id}/stream")

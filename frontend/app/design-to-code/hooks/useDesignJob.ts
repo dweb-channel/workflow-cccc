@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   submitSpecRun,
   getDesignJobStatus,
@@ -8,22 +8,12 @@ import {
   type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
+import { useSSEStream } from "@/lib/useSSEStream";
 import type { DesignJob, PipelineEvent } from "../types";
 import type { DesignSpec, ComponentSpec, ComponentUpdate, SemanticRole } from "@/lib/types/design-spec";
 import { applyComponentUpdates } from "@/lib/types/design-spec";
 
-/** Safe JSON.parse — returns null on failure */
-function safeParse(raw: string): unknown | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-const SSE_INITIAL_RETRY_MS = 3000;
-const SSE_MAX_RETRY_MS = 30000;
-const POLL_INTERVAL_MS = 30000;
+const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
 const MAX_EVENTS = 500;
 const TRIM_TO = 300;
 
@@ -31,17 +21,12 @@ export function useDesignJob() {
   const [currentJob, setCurrentJob] = useState<DesignJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [sseConnected, setSseConnected] = useState(false);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
   const [currentNode, setCurrentNode] = useState<string | null>(null);
   const [designSpec, setDesignSpec] = useState<DesignSpec | null>(null);
   const [specComplete, setSpecComplete] = useState(false);
   const [validation, setValidation] = useState<Record<string, unknown> | null>(null);
   const [tokenUsage, setTokenUsage] = useState<{ input_tokens: number; output_tokens: number } | null>(null);
-
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const retryCountRef = useRef(0);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // --- Computed Stats ---
   const stats = currentJob
@@ -65,196 +50,146 @@ export function useDesignJob() {
       const evt: PipelineEvent = {
         event_type: eventType,
         node_id: (data.node_id as string) || undefined,
-        timestamp:
-          (data.timestamp as string) || new Date().toISOString(),
+        timestamp: (data.timestamp as string) || new Date().toISOString(),
         data,
         message: (data.message as string) || undefined,
       };
       setEvents((prev) => {
         const next = [...prev, evt];
-        if (next.length > MAX_EVENTS)
-          return next.slice(next.length - TRIM_TO);
+        if (next.length > MAX_EVENTS) return next.slice(next.length - TRIM_TO);
         return next;
       });
     },
     []
   );
 
-  // --- SSE Connection ---
-  const connectSSE = useCallback(
-    (jobId: string) => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+  // --- SSE URL: non-null only when job is active ---
+  const sseUrl = useMemo(() => {
+    if (!currentJob || TERMINAL_STATUSES.includes(currentJob.job_status)) {
+      return null;
+    }
+    return getDesignJobStreamUrl(currentJob.job_id);
+  }, [currentJob?.job_id, currentJob?.job_status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Node event dedup ---
+  const seenNodeEventsRef = useRef(new Set<string>());
+  // Reset dedup set when URL changes (new job)
+  useEffect(() => {
+    seenNodeEventsRef.current = new Set();
+  }, [sseUrl]);
+
+  // --- Ref for jobId (used in pollFn) ---
+  const jobIdRef = useRef(currentJob?.job_id);
+  jobIdRef.current = currentJob?.job_id;
+
+  // --- SSE event handlers ---
+  const sseHandlers = useMemo<Record<string, (data: Record<string, unknown>) => void>>(() => {
+    const handleNodeEvent = (
+      eventType: "node_started" | "node_completed",
+      data: Record<string, unknown>
+    ) => {
+      const nodeId = (data.node_id as string) || (data.node as string) || null;
+      const key = `${eventType}:${nodeId}:${data.timestamp || ""}`;
+      if (seenNodeEventsRef.current.has(key)) return;
+      seenNodeEventsRef.current.add(key);
+      if (eventType === "node_started") {
+        setCurrentNode(nodeId);
       }
+      pushEvent(eventType, { ...data, node_id: nodeId });
+    };
 
-      const url = getDesignJobStreamUrl(jobId);
-      const es = new EventSource(url);
-      eventSourceRef.current = es;
-
-      es.onopen = () => {
-        setSseConnected(true);
-        retryCountRef.current = 0;
-      };
-
-      // Initial job state
-      es.addEventListener("job_state", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+    return {
+      job_state: (data) => {
         setCurrentJob((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             job_status: (data.status as string) || prev.job_status,
-            components_total:
-              (data.components_total as number) ?? prev.components_total,
-            components_completed:
-              (data.components_completed as number) ??
-              prev.components_completed,
-            components_failed:
-              (data.components_failed as number) ?? prev.components_failed,
+            components_total: (data.components_total as number) ?? prev.components_total,
+            components_completed: (data.components_completed as number) ?? prev.components_completed,
+            components_failed: (data.components_failed as number) ?? prev.components_failed,
           };
         });
-      });
+      },
 
-      // Job status updates
-      es.addEventListener("job_status", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      job_status: (data) => {
         setCurrentJob((prev) =>
           prev
             ? { ...prev, job_status: (data.status as string) || prev.job_status }
             : prev
         );
         pushEvent("job_status", data);
-      });
+      },
 
-      // Node lifecycle — backend sends "node_update" with status field.
-      // We normalize to node_started/node_completed for the UI.
-      // Dedup: track seen events to avoid double-processing if backend
-      // ever sends both node_update and node_started/node_completed.
-      const seenNodeEvents = new Set<string>();
-      const handleNodeEvent = (
-        eventType: "node_started" | "node_completed",
-        data: Record<string, unknown>
-      ) => {
-        const nodeId = (data.node_id as string) || (data.node as string) || null;
-        const key = `${eventType}:${nodeId}:${data.timestamp || ""}`;
-        if (seenNodeEvents.has(key)) return;
-        seenNodeEvents.add(key);
-        if (eventType === "node_started") {
-          setCurrentNode(nodeId);
-        }
-        pushEvent(eventType, { ...data, node_id: nodeId });
-      };
-
-      es.addEventListener("node_update", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      node_update: (data) => {
         const status = data.status as string;
         if (status === "running") {
           handleNodeEvent("node_started", data);
         } else if (status === "completed") {
           handleNodeEvent("node_completed", data);
         }
-      });
+      },
 
-      es.addEventListener("node_output", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      node_output: (data) => {
         pushEvent("node_output", { ...data, node_id: (data.node_id as string) || (data.node as string) });
-      });
+      },
 
-      es.addEventListener("node_started", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      node_started: (data) => {
         handleNodeEvent("node_started", data);
-      });
+      },
 
-      es.addEventListener("node_completed", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      node_completed: (data) => {
         handleNodeEvent("node_completed", data);
-      });
+      },
 
-      // Component loop events
-      es.addEventListener("loop_iteration", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      loop_iteration: (data) => {
         pushEvent("loop_iteration", data);
-      });
+      },
 
-      es.addEventListener("loop_terminated", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      loop_terminated: (data) => {
         pushEvent("loop_terminated", data);
-      });
+      },
 
-      // Workflow lifecycle
-      es.addEventListener("workflow_start", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      workflow_start: (data) => {
         pushEvent("workflow_start", data);
-      });
+      },
 
-      es.addEventListener("workflow_complete", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      workflow_complete: (data) => {
         pushEvent("workflow_complete", data);
-      });
+      },
 
-      es.addEventListener("workflow_error", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      workflow_error: (data) => {
         pushEvent("workflow_error", data);
-      });
+      },
 
-      // Figma fetch events (run-spec pipeline)
-      es.addEventListener("figma_fetch_start", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      figma_fetch_start: (data) => {
         pushEvent("figma_fetch_start", data);
-      });
+      },
 
-      es.addEventListener("figma_fetch_complete", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      figma_fetch_complete: (data) => {
         pushEvent("figma_fetch_complete", data);
-      });
+      },
 
-      // AI thinking events (if nodes push them)
-      es.addEventListener("ai_thinking", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      ai_thinking: (data) => {
         pushEvent("ai_thinking", data);
-      });
+      },
 
       // ---- Design Spec progressive rendering ----
 
-      // frame_decomposed: Node 1 finished — all partial components arrive at once
-      // Backend payload: { components: ComponentSpec[], page: {...}, components_count: N }
-      es.addEventListener("frame_decomposed", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      frame_decomposed: (data) => {
         const components = data.components as ComponentSpec[] | undefined;
         const page = data.page as DesignSpec["page"] | undefined;
         if (components && components.length > 0) {
           setDesignSpec((prev) => {
             if (!prev) {
-              // Initialize spec with all decomposed components
               return {
                 version: "1.0",
-                source: (data.source as DesignSpec["source"]) ?? {
-                  tool: "figma",
-                  file_key: "",
-                },
+                source: (data.source as DesignSpec["source"]) ?? { tool: "figma", file_key: "" },
                 page: page ?? {},
-                design_tokens: data.design_tokens as
-                  | DesignSpec["design_tokens"]
-                  | undefined,
+                design_tokens: data.design_tokens as DesignSpec["design_tokens"] | undefined,
                 components,
               };
             }
-            // Merge components by id
             const merged = [...prev.components];
             for (const comp of components) {
               const idx = merged.findIndex((c) => c.id === comp.id);
@@ -268,13 +203,9 @@ export function useDesignJob() {
           });
         }
         pushEvent("frame_decomposed", data);
-      });
+      },
 
-      // spec_analyzed: Node 2 finished one component's semantic analysis
-      // Backend payload: { component_id, component_name, suggested_name, role, description, index, total, tokens_used? }
-      es.addEventListener("spec_analyzed", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      spec_analyzed: (data) => {
         const componentId = data.component_id as string | undefined;
         if (componentId) {
           const update: ComponentUpdate = {
@@ -292,7 +223,6 @@ export function useDesignJob() {
             };
           });
         }
-        // Accumulate per-component token usage
         const compTokens = data.tokens_used as { input_tokens?: number; output_tokens?: number } | undefined;
         if (compTokens) {
           setTokenUsage((prev) => ({
@@ -301,18 +231,13 @@ export function useDesignJob() {
           }));
         }
         pushEvent("spec_analyzed", data);
-      });
+      },
 
-      // spec_complete: Node 3 finished — spec file written
-      // Backend payload: { spec_path, components_count, components_succeeded, components_failed, validation, token_usage? }
-      es.addEventListener("spec_complete", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      spec_complete: (data) => {
         setSpecComplete(true);
         if (data.validation) {
           setValidation(data.validation as Record<string, unknown>);
         }
-        // Use authoritative total from backend (replaces incremental accumulation)
         const totalTokens = data.token_usage as { input_tokens?: number; output_tokens?: number } | undefined;
         if (totalTokens) {
           setTokenUsage({
@@ -321,83 +246,51 @@ export function useDesignJob() {
           });
         }
         pushEvent("spec_complete", data);
-      });
+      },
 
-      // Final event — always sent
-      es.addEventListener("job_done", (e) => {
-        const data = safeParse(e.data) as Record<string, unknown> | null;
-        if (!data) return;
+      job_done: (data) => {
         setCurrentJob((prev) => {
           if (!prev) return prev;
           return {
             ...prev,
             job_status: (data.status as string) || "completed",
-            components_total:
-              (data.components_total as number) ?? prev.components_total,
-            components_completed:
-              (data.components_completed as number) ??
-              prev.components_completed,
-            components_failed:
-              (data.components_failed as number) ?? prev.components_failed,
+            components_total: (data.components_total as number) ?? prev.components_total,
+            components_completed: (data.components_completed as number) ?? prev.components_completed,
+            components_failed: (data.components_failed as number) ?? prev.components_failed,
             error: (data.error as string) || undefined,
           };
         });
         pushEvent("job_done", data);
-        es.close();
-        setSseConnected(false);
         setCurrentNode(null);
-      });
+      },
+    };
+  }, [pushEvent]);
 
-      es.onerror = () => {
-        setSseConnected(false);
-        es.close();
-        // Exponential backoff retry
-        const delay = Math.min(
-          SSE_INITIAL_RETRY_MS * Math.pow(2, retryCountRef.current),
-          SSE_MAX_RETRY_MS
-        );
-        retryCountRef.current++;
-        setTimeout(() => {
-          setCurrentJob((prev) => {
-            if (
-              prev &&
-              !["completed", "failed", "cancelled"].includes(prev.job_status)
-            ) {
-              connectSSE(jobId);
-            }
-            return prev;
-          });
-        }, delay);
+  // --- Fallback poll function ---
+  const pollFn = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    const status = await getDesignJobStatus(jobId);
+    setCurrentJob((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        job_status: status.status,
+        components_total: status.components_total,
+        components_completed: status.components_completed,
+        components_failed: status.components_failed,
+        error: status.error || prev.error,
       };
-    },
-    [pushEvent]
-  );
-
-  // --- Fallback Polling ---
-  const startPolling = useCallback((jobId: string) => {
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    pollTimerRef.current = setInterval(async () => {
-      try {
-        const status = await getDesignJobStatus(jobId);
-        setCurrentJob((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            job_status: status.status,
-            components_total: status.components_total,
-            components_completed: status.components_completed,
-            components_failed: status.components_failed,
-            error: status.error || prev.error,
-          };
-        });
-        if (["completed", "failed", "cancelled"].includes(status.status)) {
-          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-        }
-      } catch {
-        // Ignore polling errors
-      }
-    }, POLL_INTERVAL_MS);
+    });
   }, []);
+
+  // --- SSE connection via shared hook ---
+  const { connected: sseConnected, stale: sseStale } = useSSEStream({
+    url: sseUrl,
+    handlers: sseHandlers,
+    terminalEvents: ["job_done"],
+    pollFn,
+  });
 
   // --- Submit ---
   const submit = useCallback(
@@ -423,8 +316,8 @@ export function useDesignJob() {
         setCurrentNode(null);
         setDesignSpec(null);
         setSpecComplete(false);
-        connectSSE(response.job_id);
-        startPolling(response.job_id);
+        setTokenUsage(null);
+        setValidation(null);
         return response;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "提交失败";
@@ -434,7 +327,7 @@ export function useDesignJob() {
         setSubmitting(false);
       }
     },
-    [connectSSE, startPolling]
+    []
   );
 
   // --- Cancel ---
@@ -443,17 +336,7 @@ export function useDesignJob() {
     setCurrentJob((prev) =>
       prev ? { ...prev, job_status: "cancelled" } : prev
     );
-    eventSourceRef.current?.close();
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
   }, [currentJob]);
-
-  // --- Cleanup ---
-  useEffect(() => {
-    return () => {
-      eventSourceRef.current?.close();
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    };
-  }, []);
 
   return {
     currentJob,
@@ -462,6 +345,7 @@ export function useDesignJob() {
     stats,
     events,
     sseConnected,
+    sseStale,
     currentNode,
     designSpec,
     specComplete,

@@ -23,10 +23,12 @@ class MergeReport:
     children_updates_total: int = 0
     children_updates_matched: int = 0
     children_updates_unmatched: List[str] = field(default_factory=list)
+    children_updates_pruned: List[str] = field(default_factory=list)  # expected: pruned by depth
     empty_descriptions: List[str] = field(default_factory=list)
 
     @property
     def children_updates_loss_rate(self) -> float:
+        """Loss rate excluding pruned IDs (only truly unmatched count as loss)."""
         if self.children_updates_total == 0:
             return 0.0
         return len(self.children_updates_unmatched) / self.children_updates_total
@@ -36,6 +38,7 @@ class MergeReport:
             "children_updates_total": self.children_updates_total,
             "children_updates_matched": self.children_updates_matched,
             "children_updates_unmatched": self.children_updates_unmatched,
+            "children_updates_pruned": self.children_updates_pruned,
             "children_updates_loss_rate": round(self.children_updates_loss_rate, 2),
             "empty_descriptions": self.empty_descriptions,
         }
@@ -282,6 +285,25 @@ def _collect_all_child_ids(node: Dict[str, Any], ids: set) -> None:
                 _collect_all_child_ids(child, ids)
 
 
+def _collect_all_pruned_ids(node: Dict[str, Any]) -> List[str]:
+    """Recursively collect all pruned child IDs from the component tree.
+
+    These are IDs of children that FrameDecomposer skipped due to pruning
+    (depth limit, small icons, vector types, etc.). Stored as _pruned_child_ids
+    on nodes that had children but didn't recurse into them.
+    """
+    pruned: List[str] = []
+    pruned_here = node.get("_pruned_child_ids")
+    if isinstance(pruned_here, list):
+        pruned.extend(pruned_here)
+    children = node.get("children")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                pruned.extend(_collect_all_pruned_ids(child))
+    return pruned
+
+
 def merge_analyzer_output(
     partial_spec: Dict[str, Any],
     analyzer_output: Dict[str, Any],
@@ -316,18 +338,33 @@ def merge_analyzer_output(
     _merge_into_component(result, analyzer_output, children_map, report)
 
     # Detect unmatched children_updates (LLM returned IDs not found in tree)
+    # Distinguish between "pruned by depth limit" (expected) and truly unmatched
     all_child_ids: set = set()
     _collect_all_child_ids(result, all_child_ids)
+    pruned_ids = set(_collect_all_pruned_ids(result))
     for child_id in children_map:
         if child_id not in all_child_ids:
-            report.children_updates_unmatched.append(child_id)
+            if child_id in pruned_ids:
+                report.children_updates_pruned.append(child_id)
+            else:
+                report.children_updates_unmatched.append(child_id)
 
-    # Log warnings for unmatched children
+    # Log pruned IDs at info level (expected behavior, not a problem)
+    if report.children_updates_pruned:
+        comp_name = result.get("name", "unknown")
+        logger.info(
+            "spec_merger: component '%s' — %d children_updates matched pruned nodes "
+            "(expected, these nodes were depth-limited by FrameDecomposer)",
+            comp_name,
+            len(report.children_updates_pruned),
+        )
+
+    # Log truly unmatched IDs as warnings (possible LLM hallucination)
     if report.children_updates_unmatched:
         comp_name = result.get("name", "unknown")
         logger.warning(
             "spec_merger: component '%s' — %d/%d children_updates unmatched "
-            "(IDs not found in tree): %s",
+            "(IDs not found in tree or pruned set, possible hallucination): %s",
             comp_name,
             len(report.children_updates_unmatched),
             report.children_updates_total,

@@ -3,13 +3,12 @@
 Provides endpoints for running the spec analysis pipeline that converts
 Figma designs into structured design_spec.json files.
 
-Execution is async (background task) with SSE progress streaming.
-No Temporal dependency — uses asyncio for POC validation.
+Execution via Temporal workflow (T141 migration from asyncio.create_task).
+SSE progress streaming via EventBus.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -27,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session, get_session_ctx
 from app.models.db import DesignJobModel
 from app.repositories.design_job import DesignJobRepository
-from app.sse import push_node_event, sse_event_generator
+from app.event_bus import push_event as push_node_event, subscribe_events
 
 logger = logging.getLogger("workflow.routes.design")
 
@@ -396,17 +395,27 @@ async def run_spec_pipeline(
         f"file_key={file_key}, node_id={node_id}"
     )
 
-    # Start async execution
-    task = asyncio.create_task(
-        _execute_spec_pipeline(
+    # Start Temporal workflow (T141: migrated from asyncio.create_task)
+    from app.temporal_adapter import start_spec_pipeline
+    try:
+        await start_spec_pipeline(
             job_id=job_id,
             file_key=file_key,
             node_id=node_id,
             output_dir=output_dir,
-            model=payload.model,
+            model=payload.model or "",
         )
-    )
-    task.add_done_callback(lambda t: _on_pipeline_task_done(t, job_id))
+    except Exception as exc:
+        # Temporal unavailable — fail the job immediately
+        await repo.update_status(
+            job_id, "failed",
+            error=f"无法启动 Temporal 工作流: {exc}",
+            completed_at=datetime.now(timezone.utc),
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"无法启动 Spec 管线: {exc}",
+        ) from exc
 
     return DesignRunResponse(
         job_id=job_id,
@@ -486,7 +495,11 @@ async def cancel_design_job(
     job_id: str,
     session: AsyncSession = Depends(get_session),
 ):
-    """Cancel a running design-to-code job."""
+    """Cancel a running design-to-spec job.
+
+    T141: Now cancels the Temporal workflow, which raises CancelledError
+    in the activity — truly stopping execution.
+    """
     repo = DesignJobRepository(session)
     job = await repo.get(job_id)
     if not job:
@@ -496,18 +509,28 @@ async def cancel_design_job(
         return {"success": False, "job_id": job_id, "status": job.status,
                 "message": f"Job already {job.status}"}
 
-    await repo.update_status(
-        job_id, "cancelled",
-        completed_at=datetime.now(timezone.utc),
-    )
-
-    # Push job_done event so SSE clients close
-    push_node_event(job_id, "job_done", {
-        "status": "cancelled",
-        "components_total": job.components_total,
-        "components_completed": job.components_completed,
-        "components_failed": job.components_failed,
-    })
+    # Cancel Temporal workflow (activity will handle DB + SSE cleanup)
+    from app.temporal_adapter import get_client
+    try:
+        client = await get_client()
+        handle = client.get_workflow_handle(f"spec-{job_id}")
+        await handle.cancel()
+    except Exception as e:
+        logger.warning(
+            "Job %s: Temporal cancel failed (may already be done): %s",
+            job_id, e,
+        )
+        # Fallback: update DB directly if Temporal cancel fails
+        await repo.update_status(
+            job_id, "cancelled",
+            completed_at=datetime.now(timezone.utc),
+        )
+        push_node_event(job_id, "job_done", {
+            "status": "cancelled",
+            "components_total": job.components_total,
+            "components_completed": job.components_completed,
+            "components_failed": job.components_failed,
+        })
 
     return {"success": True, "job_id": job_id, "status": "cancelled"}
 
@@ -642,11 +665,9 @@ async def _design_sse_generator(job_id: str, initial_state: Dict[str, Any]):
     """
     yield f"event: job_state\ndata: {json.dumps(initial_state, default=str)}\n\n"
 
-    # Stream from shared SSE infrastructure
-    async for event_str in sse_event_generator(job_id):
+    # Stream from EventBus (stops automatically on job_done / workflow_complete)
+    async for event_str in subscribe_events(job_id):
         yield event_str
-        if event_str.startswith("event: job_done\n"):
-            break
 
 
 # --- Figma URL Parsing ---
@@ -696,329 +717,27 @@ def _parse_figma_url(url: str) -> tuple:
 
 
 # --- Pipeline Execution ---
+# T141: _execute_spec_pipeline() and _on_pipeline_task_done() removed.
+# Pipeline logic moved to workflow/temporal/spec_activities.py.
+# Now handled by Temporal SpecPipelineWorkflow + execute_spec_pipeline_activity.
 
 
-def _on_pipeline_task_done(task: asyncio.Task, job_id: str) -> None:
-    """Callback for pipeline background tasks — logs unhandled exceptions."""
-    if task.cancelled():
-        logger.warning(f"Job {job_id}: Pipeline task was cancelled")
-        return
-    exc = task.exception()
-    if exc:
-        logger.error(
-            f"Job {job_id}: Pipeline task raised unhandled exception: {exc}",
-            exc_info=exc,
-        )
-
-
-async def _execute_spec_pipeline(
+async def _execute_spec_pipeline(  # noqa: C901 — DEPRECATED, kept only for test compat
     job_id: str,
     file_key: str,
     node_id: str,
     output_dir: str,
     model: Optional[str] = None,
 ):
-    """Execute the 3-node spec pipeline as a background task.
+    """DEPRECATED: Pipeline logic moved to workflow/temporal/spec_activities.py (T141).
 
-    Phase 1: Fetch raw Figma data (node tree + screenshots + variables)
-    Phase 2: FrameDecomposerNode — structural extraction (70%)
-    Phase 3: SpecAnalyzerNode — LLM vision analysis (30%)
-    Phase 4: SpecAssemblerNode — final spec assembly
-
-    Uses get_session_ctx() for DB access since this runs outside
-    FastAPI's request lifecycle.
+    This function is no longer called by the route handler. It was replaced by
+    Temporal's SpecPipelineWorkflow + execute_spec_pipeline_activity.
+    Kept temporarily for any test references; will be removed in next cleanup.
     """
-    final_status = "failed"
-    final_error: Optional[str] = None
-    components_total = 0
-    components_completed = 0
-    components_failed = 0
-    figma_last_modified = ""
-    token_usage: Dict[str, int] = {}
-
-    try:
-        # Update status to running
-        async with get_session_ctx() as session:
-            repo = DesignJobRepository(session)
-            await repo.update_status(job_id, "running")
-        push_node_event(job_id, "job_status", {"status": "running"})
-
-        # Phase 1: Fetch from Figma
-        push_node_event(job_id, "figma_fetch_start", {
-            "file_key": file_key,
-            "node_id": node_id,
-        })
-
-        from workflow.integrations.figma_client import FigmaClient, FigmaClientError
-
-        try:
-            client = FigmaClient()
-        except FigmaClientError as e:
-            error_msg = (
-                "Figma API not configured. Set FIGMA_TOKEN environment variable "
-                "with a valid Figma Personal Access Token."
-            )
-            logger.error(f"Job {job_id}: {error_msg}")
-            async with get_session_ctx() as session:
-                repo = DesignJobRepository(session)
-                await repo.update_status(
-                    job_id, "failed",
-                    error=error_msg,
-                    completed_at=datetime.now(timezone.utc),
-                )
-            push_node_event(job_id, "job_done", {
-                "status": "failed", "error": error_msg,
-                "components_total": 0, "components_completed": 0,
-                "components_failed": 0,
-            })
-            return
-
-        try:
-            # 1a. Fetch raw node tree
-            nodes_resp = await client.get_file_nodes(file_key, [node_id])
-            file_name = nodes_resp.get("name", "")
-            figma_last_modified = nodes_resp.get("lastModified", "")
-            nodes_data = nodes_resp.get("nodes", {})
-            page_data = nodes_data.get(node_id, {})
-            page_doc = page_data.get("document", {})
-            page_name = page_doc.get("name", "")
-
-            # Skip resolve_to_page — user targets the exact Frame they want.
-            # The scan-figma endpoint still uses resolve_to_page for discovery.
-
-            # 1b. Collect top-level children IDs for screenshots
-            children = page_doc.get("children", [])
-            child_node_ids = [c.get("id") for c in children if c.get("id")]
-            # Also include the page node itself
-            all_screenshot_ids = [node_id] + child_node_ids
-
-            # 1c. Download screenshots
-            screenshot_paths: Dict[str, str] = {}
-            if all_screenshot_ids:
-                try:
-                    screenshot_paths = await client.download_screenshots(
-                        file_key, all_screenshot_ids, output_dir,
-                    )
-                except FigmaClientError as e:
-                    logger.warning(f"Job {job_id}: Screenshot download failed: {e}")
-
-            # 1d. Fetch design tokens from variables
-            design_tokens_raw: Dict[str, Any] = {}
-            try:
-                design_tokens_raw = await client.get_design_tokens(file_key)
-            except FigmaClientError as e:
-                logger.warning(f"Job {job_id}: Design tokens fetch failed: {e}")
-        finally:
-            await client.close()
-
-        push_node_event(job_id, "figma_fetch_complete", {
-            "components_count": len(children),
-            "screenshots_count": len(screenshot_paths),
-        })
-
-        logger.info(
-            f"Job {job_id}: Figma fetch complete — "
-            f"{len(children)} children, {len(screenshot_paths)} screenshots"
-        )
-
-        # Phase 2: FrameDecomposerNode
-        from workflow.nodes.spec_nodes import FrameDecomposerNode
-
-        decomposer = FrameDecomposerNode(
-            node_id="frame_decomposer_0",
-            node_type="frame_decomposer",
-            config={},
-        )
-        decomposer_result = await decomposer.execute({
-            "figma_node_tree": nodes_resp,
-            "design_tokens": design_tokens_raw,
-            "page_name": page_name,
-            "page_node_id": node_id,
-            "file_key": file_key,
-            "file_name": file_name,
-            "screenshot_paths": screenshot_paths,
-        })
-
-        components = decomposer_result.get("components", [])
-        page_meta = decomposer_result.get("page", {})
-        schema_tokens = decomposer_result.get("design_tokens", {})
-        source_meta = decomposer_result.get("source", {})
-        components_total = len(components)
-
-        # Update component count in DB
-        async with get_session_ctx() as session:
-            repo = DesignJobRepository(session)
-            await repo.update_component_counts(job_id, total=components_total)
-
-        push_node_event(job_id, "frame_decomposed", {
-            "components_count": components_total,
-            "page": page_meta,
-            "components": components,
-        })
-
-        logger.info(
-            f"Job {job_id}: FrameDecomposer complete — "
-            f"{components_total} components"
-        )
-
-        # Phase 3: SpecAnalyzerNode
-        from workflow.nodes.spec_nodes import SpecAnalyzerNode
-
-        analyzer = SpecAnalyzerNode(
-            node_id="spec_analyzer_0",
-            node_type="spec_analyzer",
-            config={
-                "cwd": output_dir,
-                "model": model or "",
-                "max_tokens": 4096,
-                "max_retries": 2,
-            },
-        )
-        analyzer_result = await analyzer.execute({
-            "components": components,
-            "page": page_meta,
-            "design_tokens": schema_tokens,
-            "source": source_meta,
-            "run_id": job_id,
-        })
-
-        analyzed_components = analyzer_result.get("components", components)
-        analysis_stats = analyzer_result.get("analysis_stats", {})
-        token_usage = analyzer_result.get("token_usage", {})
-        components_completed = analysis_stats.get("succeeded", 0)
-        components_failed = analysis_stats.get("failed", 0)
-
-        # Surface SpecAnalyzer errors to the user via SSE
-        analyzer_error = analysis_stats.get("error")
-        if analyzer_error:
-            # Make the error message user-friendly
-            if "api_key" in str(analyzer_error).lower() or "auth" in str(analyzer_error).lower():
-                friendly_msg = "语义分析未执行：请检查 ANTHROPIC_API_KEY 环境变量配置"
-            else:
-                friendly_msg = f"语义分析失败：{analyzer_error}"
-            logger.warning(
-                f"Job {job_id}: SpecAnalyzer error — {analyzer_error}"
-            )
-            push_node_event(job_id, "workflow_error", {
-                "message": friendly_msg,
-                "node_id": "spec_analyzer_0",
-                "error": str(analyzer_error),
-            })
-            # Mark all components as failed if none succeeded
-            if components_completed == 0:
-                components_failed = components_total
-        else:
-            # Edge case: client init OK but every component analysis failed
-            if components_completed == 0 and components_total > 0:
-                push_node_event(job_id, "workflow_error", {
-                    "message": f"语义分析全部失败：{components_total} 个组件均未成功",
-                    "node_id": "spec_analyzer_0",
-                })
-                components_failed = components_total
-            logger.info(
-                f"Job {job_id}: SpecAnalyzer complete — "
-                f"{components_completed}/{components_total} succeeded"
-            )
-
-        # Phase 4: SpecAssemblerNode
-        from workflow.nodes.spec_nodes import SpecAssemblerNode
-
-        assembler = SpecAssemblerNode(
-            node_id="spec_assembler_0",
-            node_type="spec_assembler",
-            config={"output_dir": output_dir},
-        )
-        assembler_result = await assembler.execute({
-            "components": analyzed_components,
-            "page": page_meta,
-            "design_tokens": schema_tokens,
-            "source": source_meta,
-            "output_dir": output_dir,
-            "token_usage": token_usage,
-            "figma_last_modified": figma_last_modified,
-        })
-
-        spec_path = assembler_result.get("spec_path", "")
-        spec_document = assembler_result.get("spec_document", {})
-        validation = assembler_result.get("validation", {})
-
-        push_node_event(job_id, "spec_complete", {
-            "spec_path": spec_path,
-            "components_count": components_total,
-            "components_succeeded": components_completed,
-            "components_failed": components_failed,
-            "validation": validation,
-            "token_usage": token_usage,
-        })
-
-        final_status = "completed"
-
-        # Persist final state to DB
-        async with get_session_ctx() as session:
-            repo = DesignJobRepository(session)
-            await repo.update(
-                job_id,
-                status=final_status,
-                design_file=spec_path,
-                completed_at=datetime.now(timezone.utc),
-                result={
-                    "spec_path": spec_path,
-                    "analysis_stats": analysis_stats,
-                    "components_count": components_total,
-                    "validation": validation,
-                    "token_usage": token_usage,
-                },
-                components_total=components_total,
-                components_completed=components_completed,
-                components_failed=components_failed,
-            )
-
-        logger.info(
-            f"Job {job_id}: Spec pipeline {final_status} — "
-            f"{components_completed}/{components_total} components, "
-            f"spec at {spec_path}"
-        )
-
-    except BaseException as e:
-        logger.error(f"Job {job_id}: Spec pipeline failed: {e}", exc_info=True)
-        final_status = "failed"
-        final_error = str(e)
-        try:
-            async with get_session_ctx() as session:
-                repo = DesignJobRepository(session)
-                await repo.update_status(
-                    job_id, "failed",
-                    error=str(e),
-                    completed_at=datetime.now(timezone.utc),
-                )
-        except Exception:
-            logger.warning(f"Job {job_id}: Failed to persist error status to DB")
-    finally:
-        # Ensure DB is never stuck in "running" state
-        if final_status not in ("completed", "failed"):
-            final_status = "failed"
-            final_error = final_error or "Pipeline interrupted unexpectedly"
-            try:
-                async with get_session_ctx() as session:
-                    repo = DesignJobRepository(session)
-                    await repo.update_status(
-                        job_id, "failed",
-                        error=final_error,
-                        completed_at=datetime.now(timezone.utc),
-                    )
-            except Exception:
-                pass  # DB may be unavailable during shutdown
-
-        # Always push final job_done event
-        push_node_event(job_id, "job_done", {
-            "status": final_status,
-            "components_total": components_total,
-            "components_completed": components_completed,
-            "components_failed": components_failed,
-            "error": final_error,
-        })
-
-
+    raise NotImplementedError(
+        "_execute_spec_pipeline removed in T141 — use Temporal SpecPipelineWorkflow"
+    )
 
 
 def _build_interaction_notes_summary(notes: List[Dict[str, Any]]) -> str:

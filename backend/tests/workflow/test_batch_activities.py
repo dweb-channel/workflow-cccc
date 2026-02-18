@@ -149,7 +149,7 @@ class TestRecordNextStepStart:
         node_start_times: Dict[str, datetime] = {}
         state = {"retry_count": 0}
 
-        with patch("workflow.temporal.batch_activities.asyncio") as mock_asyncio:
+        with patch("workflow.temporal.sse_events.asyncio") as mock_asyncio:
             mock_loop = MagicMock()
             mock_asyncio.get_running_loop.return_value = mock_loop
 
@@ -168,7 +168,7 @@ class TestRecordNextStepStart:
         node_start_times: Dict[str, datetime] = {}
         state = {"retry_count": 0}
 
-        with patch("workflow.temporal.batch_activities.asyncio") as mock_asyncio:
+        with patch("workflow.temporal.sse_events.asyncio") as mock_asyncio:
             mock_loop = MagicMock()
             mock_asyncio.get_running_loop.return_value = mock_loop
 
@@ -184,7 +184,7 @@ class TestRecordNextStepStart:
         node_start_times: Dict[str, datetime] = {}
         state = {"retry_count": 0}
 
-        with patch("workflow.temporal.batch_activities.asyncio") as mock_asyncio:
+        with patch("workflow.temporal.sse_events.asyncio") as mock_asyncio:
             mock_loop = MagicMock()
             mock_asyncio.get_running_loop.return_value = mock_loop
 
@@ -201,7 +201,7 @@ class TestRecordNextStepStart:
         node_start_times: Dict[str, datetime] = {}
         state = {"retry_count": 1}
 
-        with patch("workflow.temporal.batch_activities.asyncio") as mock_asyncio:
+        with patch("workflow.temporal.sse_events.asyncio") as mock_asyncio:
             mock_loop = MagicMock()
             mock_asyncio.get_running_loop.return_value = mock_loop
 
@@ -217,7 +217,7 @@ class TestRecordNextStepStart:
         node_start_times: Dict[str, datetime] = {}
         state = {}
 
-        with patch("workflow.temporal.batch_activities.asyncio") as mock_asyncio:
+        with patch("workflow.temporal.sse_events.asyncio") as mock_asyncio:
             mock_loop = MagicMock()
             mock_asyncio.get_running_loop.return_value = mock_loop
 
@@ -236,8 +236,8 @@ class TestRecordNextStepStart:
 class TestSyncIncrementalResults:
     """Test incremental result syncing to DB + SSE."""
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_completed_bug(self, mock_push, mock_db):
         from workflow.temporal.batch_activities import _sync_incremental_results
 
@@ -260,8 +260,8 @@ class TestSyncIncrementalResults:
             for c in db_calls
         )
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_failed_bug(self, mock_push, mock_db):
         from workflow.temporal.batch_activities import _sync_incremental_results
 
@@ -274,8 +274,8 @@ class TestSyncIncrementalResults:
         event_types = [c[0][1] for c in push_calls]
         assert "bug_failed" in event_types
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_marks_next_bug_in_progress(self, mock_push, mock_db):
         from workflow.temporal.batch_activities import _sync_incremental_results
 
@@ -293,8 +293,8 @@ class TestSyncIncrementalResults:
         assert len(bug_started_calls) == 1
         assert bug_started_calls[0][0][2]["bug_index"] == 1
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_last_bug_no_next_started(self, mock_push, mock_db):
         """When last bug completes, no bug_started event for next."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -308,8 +308,8 @@ class TestSyncIncrementalResults:
         bug_started_calls = [c for c in push_calls if c[0][1] == "bug_started"]
         assert len(bug_started_calls) == 0
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_skipped_bug(self, mock_push, mock_db):
         from workflow.temporal.batch_activities import _sync_incremental_results
 
@@ -325,8 +325,8 @@ class TestSyncIncrementalResults:
         skipped_call = [c for c in push_calls if c[0][1] == "bug_failed"][0]
         assert skipped_call[0][2].get("skipped") is True
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_sync_incremental_from_middle(self, mock_push, mock_db):
         """Only process results from start_index onwards."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -362,7 +362,7 @@ class TestSyncIncrementalResults:
 class TestSyncFinalResults:
     """Test final result sync + job_done event."""
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_all_completed(self, mock_ctx, mock_repo_cls, mock_push):
@@ -394,7 +394,7 @@ class TestSyncFinalResults:
         assert data["completed"] == 2
         assert data["failed"] == 0
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_some_failed(self, mock_ctx, mock_repo_cls, mock_push):
@@ -426,8 +426,8 @@ class TestSyncFinalResults:
         assert data["failed"] == 1
         assert data["skipped"] == 1
 
-    @patch("workflow.temporal.batch_activities.asyncio.sleep", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events.asyncio.sleep", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.database.get_session_ctx")
     async def test_db_failure_pushes_job_done_with_warning(self, mock_ctx, mock_push, mock_sleep):
         """DB sync failure → job_done event has db_sync_failed flag."""
@@ -534,7 +534,7 @@ class TestResetStaleBugs:
 class TestPeriodicHeartbeat:
     """Test heartbeat background task."""
 
-    @patch("workflow.temporal.batch_activities.activity")
+    @patch("workflow.temporal.sse_events.activity")
     async def test_heartbeat_sends_and_can_be_cancelled(self, mock_activity):
         from workflow.temporal.batch_activities import _periodic_heartbeat
 
@@ -549,7 +549,7 @@ class TestPeriodicHeartbeat:
 
         mock_activity.heartbeat.assert_called()
 
-    @patch("workflow.temporal.batch_activities.activity")
+    @patch("workflow.temporal.sse_events.activity")
     async def test_heartbeat_stops_on_activity_error(self, mock_activity):
         from workflow.temporal.batch_activities import _periodic_heartbeat
 
@@ -606,7 +606,7 @@ class TestUpdateJobStatus:
             "job_1", "failed", error="boom"
         )
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.database.get_session_ctx")
     async def test_db_error_returns_false_and_pushes_warning(self, mock_ctx, mock_push):
         from workflow.temporal.batch_activities import _update_job_status
@@ -728,8 +728,8 @@ class TestUpdateBugStatusDb:
 class TestSyncIncrementalResultsWithOffset:
     """Test _sync_incremental_results with bug_index_offset for retry scenarios."""
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_offset_3_sse_uses_db_bug_index(self, mock_push, mock_db):
         """5-bug job, retry bug[3]: SSE bug_index should be 3, not 0."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -747,8 +747,8 @@ class TestSyncIncrementalResultsWithOffset:
         assert len(bug_completed_calls) == 1
         assert bug_completed_calls[0][0][2]["bug_index"] == 3
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_offset_3_db_update_uses_db_bug_index(self, mock_push, mock_db):
         """DB update should use offset bug_index (3), not array index (0)."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -764,8 +764,8 @@ class TestSyncIncrementalResultsWithOffset:
         assert len(db_calls) == 1
         assert db_calls[0][0][1] == 3  # db_i = 0 + 3
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_offset_with_next_bug_started(self, mock_push, mock_db):
         """With offset=2 and 2 bugs, next bug_started should have bug_index=3."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -785,8 +785,8 @@ class TestSyncIncrementalResultsWithOffset:
         assert len(bug_started_calls) == 1
         assert bug_started_calls[0][0][2]["bug_index"] == 3  # next_index(1) + offset(2)
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_offset_db_failure_pushes_warning_with_correct_index(self, mock_push, mock_db):
         """DB failure with offset should push warning with correct bug_index."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -812,7 +812,7 @@ class TestSyncIncrementalResultsWithOffset:
 class TestSyncFinalResultsRetryMode:
     """Test _sync_final_results with bug_index_offset > 0 (retry mode)."""
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_retry_recomputes_overall_from_all_bugs(self, mock_ctx, mock_repo_cls, mock_push):
@@ -849,7 +849,7 @@ class TestSyncFinalResultsRetryMode:
         # update_status should be called with "completed"
         mock_repo.update_status.assert_awaited_once_with("job_1", "completed")
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_retry_partial_still_failed(self, mock_ctx, mock_repo_cls, mock_push):
@@ -884,7 +884,7 @@ class TestSyncFinalResultsRetryMode:
         assert job_done_calls[0][0][2]["status"] == "failed"
         mock_repo.update_status.assert_awaited_once_with("job_1", "failed")
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_retry_skipped_bug_means_failed_overall(self, mock_ctx, mock_repo_cls, mock_push):
@@ -914,7 +914,7 @@ class TestSyncFinalResultsRetryMode:
         ]
         assert job_done_calls[0][0][2]["status"] == "failed"
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_non_retry_preserves_incremental_timestamps(self, mock_ctx, mock_repo_cls, mock_push):
@@ -948,7 +948,7 @@ class TestSyncFinalResultsRetryMode:
         assert calls[0].kwargs.get("completed_at") is None  # bug 0 preserved
         assert calls[1].kwargs.get("completed_at") is not None  # bug 1 set
 
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
     async def test_retry_bug_status_written_with_offset(self, mock_ctx, mock_repo_cls, mock_push):
@@ -981,13 +981,14 @@ class TestSyncFinalResultsRetryMode:
 
 
 class TestSyncFinalResultsDbRetry:
-    """Test that _sync_final_results retries once on transient DB failure."""
+    """Test that _sync_final_results retries with exponential backoff on DB failure."""
 
-    @patch("workflow.temporal.batch_activities.asyncio.sleep", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync.random.uniform", return_value=0.0)
+    @patch("workflow.temporal.sse_events.asyncio.sleep", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.repositories.batch_job.BatchJobRepository")
     @patch("app.database.get_session_ctx")
-    async def test_retry_succeeds_on_second_attempt(self, mock_ctx, mock_repo_cls, mock_push, mock_sleep):
+    async def test_retry_succeeds_on_second_attempt(self, mock_ctx, mock_repo_cls, mock_push, mock_sleep, mock_uniform):
         """First DB attempt fails, second succeeds → db_sync_failed absent."""
         from workflow.temporal.batch_activities import _sync_final_results
 
@@ -1012,8 +1013,8 @@ class TestSyncFinalResultsDbRetry:
 
         await _sync_final_results("job_1", final_state, ["url1"])
 
-        # Should have slept between retries
-        mock_sleep.assert_awaited_once_with(1)
+        # Should have slept with exponential backoff (2^0 * 1.0 = 1.0 with jitter=0)
+        mock_sleep.assert_awaited_once_with(1.0)
 
         # job_done should NOT have db_sync_failed
         job_done_calls = [
@@ -1022,11 +1023,12 @@ class TestSyncFinalResultsDbRetry:
         assert len(job_done_calls) == 1
         assert "db_sync_failed" not in job_done_calls[0][0][2]
 
-    @patch("workflow.temporal.batch_activities.asyncio.sleep", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync.random.uniform", return_value=0.0)
+    @patch("workflow.temporal.sse_events.asyncio.sleep", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     @patch("app.database.get_session_ctx")
-    async def test_both_attempts_fail_sets_warning(self, mock_ctx, mock_push, mock_sleep):
-        """Both DB attempts fail → db_sync_failed in job_done event."""
+    async def test_all_attempts_fail_sets_warning(self, mock_ctx, mock_push, mock_sleep, mock_uniform):
+        """All 4 DB attempts fail → db_sync_failed in job_done event."""
         from workflow.temporal.batch_activities import _sync_final_results
 
         mock_ctx.return_value.__aenter__ = AsyncMock(
@@ -1038,7 +1040,12 @@ class TestSyncFinalResultsDbRetry:
 
         await _sync_final_results("job_1", final_state, ["url1"])
 
-        mock_sleep.assert_awaited_once_with(1)
+        # Should have slept 3 times (between attempts 1-2, 2-3, 3-4)
+        # Backoff: 2^0=1.0, 2^1=2.0, 2^2=4.0 (with jitter=0)
+        assert mock_sleep.await_count == 3
+        mock_sleep.assert_any_await(1.0)
+        mock_sleep.assert_any_await(2.0)
+        mock_sleep.assert_any_await(4.0)
 
         job_done_calls = [
             c for c in mock_push.call_args_list if c[0][1] == "job_done"
@@ -1056,8 +1063,8 @@ class TestSyncFinalResultsDbRetry:
 class TestSyncIncrementalDbWarning:
     """Test that _sync_incremental_results pushes SSE warning on DB failure."""
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_db_failure_pushes_warning(self, mock_push, mock_db):
         """When DB update fails, a db_sync_warning SSE event is pushed."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -1074,8 +1081,8 @@ class TestSyncIncrementalDbWarning:
         assert len(warning_calls) == 1
         assert warning_calls[0][0][2]["bug_index"] == 0
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_db_success_no_warning(self, mock_push, mock_db):
         """When DB update succeeds, no warning event is pushed."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -1091,8 +1098,8 @@ class TestSyncIncrementalDbWarning:
         ]
         assert len(warning_calls) == 0
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_multiple_bugs_partial_failure(self, mock_push, mock_db):
         """2 bugs: first DB update fails, second succeeds → 1 warning."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -1298,9 +1305,9 @@ class TestPreflightCheck:
     async def test_all_checks_pass(self):
         from workflow.temporal.batch_activities import _preflight_check
 
-        with patch("os.path.isdir", return_value=True):
+        with patch("workflow.temporal.git_operations.os.path.isdir", return_value=True):
             with patch(
-                "workflow.temporal.batch_activities._git_is_repo",
+                "workflow.temporal.git_operations._git_is_repo",
                 new_callable=AsyncMock,
                 return_value=True,
             ):
@@ -1313,7 +1320,7 @@ class TestPreflightCheck:
     async def test_cwd_not_exists(self):
         from workflow.temporal.batch_activities import _preflight_check
 
-        with patch("os.path.isdir", return_value=False):
+        with patch("workflow.temporal.git_operations.os.path.isdir", return_value=False):
             with patch("shutil.which", return_value=None):
                 with patch.dict("os.environ", {}, clear=True):
                     ok, issues = await _preflight_check("/nonexistent", {}, "job_1")
@@ -1324,9 +1331,9 @@ class TestPreflightCheck:
     async def test_not_git_repo(self):
         from workflow.temporal.batch_activities import _preflight_check
 
-        with patch("os.path.isdir", return_value=True):
+        with patch("workflow.temporal.git_operations.os.path.isdir", return_value=True):
             with patch(
-                "workflow.temporal.batch_activities._git_is_repo",
+                "workflow.temporal.git_operations._git_is_repo",
                 new_callable=AsyncMock,
                 return_value=False,
             ):
@@ -1345,9 +1352,9 @@ class TestPreflightCheck:
                 return None
             return f"/usr/bin/{name}"
 
-        with patch("os.path.isdir", return_value=True):
+        with patch("workflow.temporal.git_operations.os.path.isdir", return_value=True):
             with patch(
-                "workflow.temporal.batch_activities._git_is_repo",
+                "workflow.temporal.git_operations._git_is_repo",
                 new_callable=AsyncMock,
                 return_value=True,
             ):
@@ -1361,7 +1368,7 @@ class TestPreflightCheck:
         """cwd not exists + claude missing = 2 errors."""
         from workflow.temporal.batch_activities import _preflight_check
 
-        with patch("os.path.isdir", return_value=False):
+        with patch("workflow.temporal.git_operations.os.path.isdir", return_value=False):
             with patch("shutil.which", return_value=None):
                 with patch.dict("os.environ", {}, clear=True):
                     ok, issues = await _preflight_check("/nonexistent", {}, "job_1")
@@ -1696,7 +1703,7 @@ class TestPrescanClosedBugs:
         )
         assert result == set()
 
-    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._jira_get_status", new_callable=AsyncMock)
     @patch.dict("os.environ", {
         "JIRA_URL": "https://jira.example.com",
         "JIRA_EMAIL": "test@example.com",
@@ -1714,7 +1721,7 @@ class TestPrescanClosedBugs:
         assert result == set()
         assert mock_status.call_count == 2
 
-    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._jira_get_status", new_callable=AsyncMock)
     @patch.dict("os.environ", {
         "JIRA_URL": "https://jira.example.com",
         "JIRA_EMAIL": "test@example.com",
@@ -1734,7 +1741,7 @@ class TestPrescanClosedBugs:
         result = await _prescan_closed_bugs(urls, "job_1")
         assert result == {1, 3}
 
-    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._jira_get_status", new_callable=AsyncMock)
     @patch.dict("os.environ", {
         "JIRA_URL": "https://jira.example.com",
         "JIRA_EMAIL": "test@example.com",
@@ -1751,7 +1758,7 @@ class TestPrescanClosedBugs:
         result = await _prescan_closed_bugs(urls, "job_1")
         assert result == {0, 1}
 
-    @patch("workflow.temporal.batch_activities._jira_get_status", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._jira_get_status", new_callable=AsyncMock)
     @patch.dict("os.environ", {
         "JIRA_URL": "https://jira.example.com",
         "JIRA_EMAIL": "test@example.com",
@@ -1775,8 +1782,8 @@ class TestPrescanClosedBugs:
 class TestSyncIncrementalResultsWithIndexMap:
     """Test _sync_incremental_results with index_map for skip scenarios."""
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_index_map_sse_uses_mapped_index(self, mock_push, mock_db):
         """5-bug job, bugs 1,3 skipped → active bugs are 0,2,4.
         index_map=[0, 2, 4]. Workflow bug 1 → DB bug 2."""
@@ -1810,8 +1817,8 @@ class TestSyncIncrementalResultsWithIndexMap:
         assert len(bug_failed_calls) == 1
         assert bug_failed_calls[0][0][2]["bug_index"] == 2
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_index_map_db_update_uses_mapped_index(self, mock_push, mock_db):
         """DB update should use mapped index, not array index."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -1834,8 +1841,8 @@ class TestSyncIncrementalResultsWithIndexMap:
         assert len(status_calls) == 1
         assert status_calls[0][0][1] == 2  # db_i = index_map[0] = 2
 
-    @patch("workflow.temporal.batch_activities._update_bug_status_db", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock)
+    @patch("workflow.temporal.state_sync._update_bug_status_db", new_callable=AsyncMock)
+    @patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock)
     async def test_index_map_next_bug_started_uses_mapped_index(self, mock_push, mock_db):
         """Next bug_started should use mapped index for the next active bug."""
         from workflow.temporal.batch_activities import _sync_incremental_results
@@ -1892,7 +1899,7 @@ class TestSyncFinalResultsWithSkip:
         mock_repo.update_status = AsyncMock()
 
         with patch("app.repositories.batch_job.BatchJobRepository", return_value=mock_repo):
-            with patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock) as mock_push:
+            with patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock) as mock_push:
                 final_state = {
                     "results": [
                         {"status": "completed"},
@@ -1947,7 +1954,7 @@ class TestSyncFinalResultsWithSkip:
         mock_repo.update_status = AsyncMock()
 
         with patch("app.repositories.batch_job.BatchJobRepository", return_value=mock_repo):
-            with patch("workflow.temporal.batch_activities._push_event", new_callable=AsyncMock):
+            with patch("workflow.temporal.sse_events._push_event", new_callable=AsyncMock):
                 final_state = {
                     "results": [
                         {"status": "completed"},

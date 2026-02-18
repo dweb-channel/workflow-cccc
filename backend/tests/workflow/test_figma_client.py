@@ -8,6 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workflow.integrations.figma_client import FigmaClient, FigmaClientError
+from workflow.integrations.figma_classifiers import (
+    parse_variables, parse_styles, variables_to_design_tokens,
+    detect_components_from_tree, node_to_component, extract_text_content,
+    to_component_name, to_css_var_name, extract_interaction_context,
+    detect_visual_annotations, classify_frame_by_rules, associate_specs_to_screens,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -313,17 +319,17 @@ class TestGetNodeImages:
 class TestParseVariables:
 
     def test_color_rgba_to_hex(self, client, sample_variables_response):
-        result = client._parse_variables(sample_variables_response)
+        result = parse_variables(sample_variables_response)
         # round(0.298 * 255) = round(75.99) = 76 = 0x4C
         assert result["Brand-主题色/品牌色"] == "#FFDD4C"
         assert result["Text Color/字体_黑100%"] == "#000000"
 
     def test_bg_color(self, client, sample_variables_response):
-        result = client._parse_variables(sample_variables_response)
+        result = parse_variables(sample_variables_response)
         assert result["Fill/背景色_页面"] == "#F5F5F5"
 
     def test_float_value(self, client, sample_variables_response):
-        result = client._parse_variables(sample_variables_response)
+        result = parse_variables(sample_variables_response)
         assert result["spacing/page-padding"] == "16"
 
 
@@ -339,10 +345,10 @@ class TestToComponentName:
         ("a-b-c", "ABC"),
     ])
     def test_conversion(self, input_name, expected):
-        assert FigmaClient._to_component_name(input_name) == expected
+        assert to_component_name(input_name) == expected
 
     def test_empty_returns_component(self):
-        assert FigmaClient._to_component_name("中文名") == "Component"
+        assert to_component_name("中文名") == "Component"
 
 
 class TestToCssVarName:
@@ -354,7 +360,7 @@ class TestToCssVarName:
         ("spacing/page-padding", "spacing-page-padding"),
     ])
     def test_conversion(self, input_name, expected):
-        assert FigmaClient._to_css_var_name(input_name) == expected
+        assert to_css_var_name(input_name) == expected
 
 
 class TestDetectComponentsFromTree:
@@ -364,7 +370,7 @@ class TestDetectComponentsFromTree:
         children = page_doc["children"]
         page_bounds = {"x": 80, "y": 318, "width": 393, "height": 852}
 
-        components, node_ids = client._detect_components_from_tree(
+        components, node_ids = detect_components_from_tree(
             children, page_bounds
         )
 
@@ -381,7 +387,7 @@ class TestDetectComponentsFromTree:
         children = page_doc["children"]
         page_bounds = {"x": 80, "y": 318, "width": 393, "height": 852}
 
-        components, node_ids = client._detect_components_from_tree(
+        components, node_ids = detect_components_from_tree(
             children, page_bounds
         )
 
@@ -393,7 +399,7 @@ class TestDetectComponentsFromTree:
         children = page_doc["children"]
         page_bounds = {"x": 80, "y": 318, "width": 393, "height": 852}
 
-        components, _ = client._detect_components_from_tree(
+        components, _ = detect_components_from_tree(
             children, page_bounds
         )
 
@@ -413,7 +419,7 @@ class TestDetectComponentsFromTree:
         children = page_doc["children"]
         page_bounds = {"x": 80, "y": 318, "width": 393, "height": 852}
 
-        components, _ = client._detect_components_from_tree(
+        components, _ = detect_components_from_tree(
             children, page_bounds
         )
 
@@ -438,7 +444,7 @@ class TestDetectComponentsFromTree:
         }]
         page_bounds = {"width": 400, "height": 800}  # area = 320000
 
-        components, _ = client._detect_components_from_tree(children, page_bounds)
+        components, _ = detect_components_from_tree(children, page_bounds)
         assert components[0]["type"] == "section"
 
 
@@ -449,14 +455,14 @@ class TestVariablesToDesignTokens:
             "Brand-主题色/品牌色": "#FFDD4C",
             "Fill/背景色_页面": "#F5F5F5",
         }
-        tokens = client._variables_to_design_tokens(variables)
+        tokens = variables_to_design_tokens(variables)
         assert len(tokens["colors"]) == 2
 
     def test_classifies_spacing(self, client):
         variables = {
             "spacing/page-padding": "16",
         }
-        tokens = client._variables_to_design_tokens(variables)
+        tokens = variables_to_design_tokens(variables)
         assert len(tokens["spacing"]) == 1
 
 
@@ -562,7 +568,7 @@ class TestExtractInteractionContext:
                 ]},
             ],
         }
-        ctx = client._extract_interaction_context(node)
+        ctx = extract_interaction_context(node)
         assert ctx["node_id"] == "100:1"
         assert ctx["name"] == "首页-交互说明"
         assert "点击Tab切换内容区域" in ctx["text_content"]
@@ -588,7 +594,7 @@ class TestExtractInteractionContext:
                 ]},
             ],
         }
-        ctx = client._extract_interaction_context(node)
+        ctx = extract_interaction_context(node)
         assert ctx["has_visual_annotations"] is True
         assert "ARROW" in ctx["visual_annotation_types"]
         assert "LINE" in ctx["visual_annotation_types"]
@@ -599,7 +605,7 @@ class TestExtractInteractionContext:
     def test_empty_frame(self, client):
         """Frame with no children → empty text, no annotations."""
         node = {"id": "300:1", "name": "Empty", "type": "FRAME", "children": []}
-        ctx = client._extract_interaction_context(node)
+        ctx = extract_interaction_context(node)
         assert ctx["text_content"] == []
         assert ctx["has_visual_annotations"] is False
 
@@ -617,7 +623,7 @@ class TestExtractInteractionContext:
                 ]},
             ],
         }
-        ctx = client._extract_interaction_context(node)
+        ctx = extract_interaction_context(node)
         assert ctx["has_visual_annotations"] is True
         assert "BOOLEAN_OPERATION" in ctx["visual_annotation_types"]
 
@@ -633,7 +639,7 @@ class TestExtractInteractionContext:
                 {"type": "TEXT", "characters": "重点标注"},
             ],
         }
-        ctx = client._extract_interaction_context(node)
+        ctx = extract_interaction_context(node)
         assert ctx["has_visual_annotations"] is True
         assert "STAR" in ctx["visual_annotation_types"]
         assert "POLYGON" in ctx["visual_annotation_types"]
@@ -654,7 +660,7 @@ class TestDetectVisualAnnotations:
                 ]},
             ],
         }
-        result = client._detect_visual_annotations(node)
+        result = detect_visual_annotations(node)
         assert result == set()
 
     def test_mixed_annotations(self, client):
@@ -670,13 +676,13 @@ class TestDetectVisualAnnotations:
                 ]},
             ],
         }
-        result = client._detect_visual_annotations(node)
+        result = detect_visual_annotations(node)
         assert result == {"LINE", "ARROW", "VECTOR"}
 
     def test_root_is_annotation_type(self, client):
         """Root node itself is an annotation type."""
         node = {"type": "VECTOR", "children": []}
-        result = client._detect_visual_annotations(node)
+        result = detect_visual_annotations(node)
         assert result == {"VECTOR"}
 
 
@@ -786,7 +792,7 @@ class TestClassifyFrameByRules:
             "id": "1:1", "name": "通屏效果", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "ui_screen"
         assert result["device_type"] == "mobile"
         assert result["confidence"] >= 0.9
@@ -797,7 +803,7 @@ class TestClassifyFrameByRules:
             "id": "1:2", "name": "首页", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 500, "y": 0, "width": 375, "height": 812},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "ui_screen"
         assert result["device_type"] == "mobile"
 
@@ -807,7 +813,7 @@ class TestClassifyFrameByRules:
             "id": "1:3", "name": "测试页", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 398, "height": 700},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "ui_screen"
         assert result["device_type"] == "mobile"
 
@@ -817,7 +823,7 @@ class TestClassifyFrameByRules:
             "id": "2:1", "name": "iPad 首页", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 768, "height": 1024},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "ui_screen"
         assert result["device_type"] == "tablet"
 
@@ -827,7 +833,7 @@ class TestClassifyFrameByRules:
             "id": "3:1", "name": "Dashboard", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1440, "height": 900},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "ui_screen"
         assert result["device_type"] == "desktop"
 
@@ -837,7 +843,7 @@ class TestClassifyFrameByRules:
             "id": "3:2", "name": "Banner", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 1920, "height": 200},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "excluded"
         assert "wide_banner" in result["reason"]
 
@@ -847,7 +853,7 @@ class TestClassifyFrameByRules:
             "id": "4:1", "name": "参考图片", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "excluded"
         assert "keyword_match" in result["reason"]
 
@@ -857,7 +863,7 @@ class TestClassifyFrameByRules:
             "id": "5:1", "name": "首页交互说明", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 500, "y": 0, "width": 600, "height": 400},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "interaction_spec"
 
     def test_design_system_keyword(self, client):
@@ -866,7 +872,7 @@ class TestClassifyFrameByRules:
             "id": "6:1", "name": "颜色系统", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 700, "height": 400},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "design_system"
 
     def test_invisible_excluded(self, client):
@@ -875,7 +881,7 @@ class TestClassifyFrameByRules:
             "id": "7:1", "name": "Hidden", "type": "FRAME", "visible": False,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "excluded"
         assert result["reason"] == "invisible"
 
@@ -885,7 +891,7 @@ class TestClassifyFrameByRules:
             "id": "8:1", "name": "Empty", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 0, "height": 0},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "excluded"
         assert result["reason"] == "zero_size"
 
@@ -895,7 +901,7 @@ class TestClassifyFrameByRules:
             "id": "9:1", "name": "神秘内容", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 500, "height": 300},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "unknown"
         assert result["confidence"] == 0.0
 
@@ -905,7 +911,7 @@ class TestClassifyFrameByRules:
             "id": "10:1", "name": "旧版首页", "type": "FRAME", "visible": True,
             "absoluteBoundingBox": {"x": 0, "y": 0, "width": 393, "height": 852},
         }
-        result = client._classify_frame_by_rules(node)
+        result = classify_frame_by_rules(node)
         assert result["classification"] == "excluded"
 
 
@@ -921,7 +927,7 @@ class TestAssociateSpecsToScreens:
         specs = [
             {"node_id": "sp1", "name": "交互A", "bounds": {"x": 450, "y": 100, "width": 200, "height": 300}},
         ]
-        client._associate_specs_to_screens(screens, specs)
+        associate_specs_to_screens(screens, specs)
         # sp1 is closer to s2 (x=500) than s1 (x=0)
         assert specs[0]["related_to"]["node_id"] == "s2"
 
@@ -935,7 +941,7 @@ class TestAssociateSpecsToScreens:
             # Spec is closer to s2 by position, but name matches s1
             {"node_id": "sp1", "name": "首页-交互说明", "bounds": {"x": 450, "y": 100, "width": 200, "height": 300}},
         ]
-        client._associate_specs_to_screens(screens, specs)
+        associate_specs_to_screens(screens, specs)
         # Name bonus overrides proximity
         assert specs[0]["related_to"]["node_id"] == "s1"
 
@@ -943,14 +949,14 @@ class TestAssociateSpecsToScreens:
         """No specs → no-op."""
         screens = [{"node_id": "s1", "name": "A", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}}]
         specs = []
-        client._associate_specs_to_screens(screens, specs)
+        associate_specs_to_screens(screens, specs)
         # No crash
 
     def test_empty_screens(self, client):
         """No screens → specs get no related_to."""
         screens = []
         specs = [{"node_id": "sp1", "name": "A", "bounds": {"x": 0, "y": 0, "width": 100, "height": 100}}]
-        client._associate_specs_to_screens(screens, specs)
+        associate_specs_to_screens(screens, specs)
         assert "related_to" not in specs[0]
 
 

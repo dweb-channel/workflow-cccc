@@ -150,15 +150,15 @@ class SpecAnalyzerNode(BaseNodeImpl):
 
         # Concurrent analysis with semaphore to limit parallel CLI processes
         import asyncio
-        _CLI_CONCURRENCY = 3
-        sem = asyncio.Semaphore(_CLI_CONCURRENCY)
+        from ..settings import SPEC_CLI_CONCURRENCY, SPEC_COMPONENT_STAGGER_DELAY
+        sem = asyncio.Semaphore(SPEC_CLI_CONCURRENCY)
 
         async def _analyze_one(idx: int, component: Dict) -> Dict:
             comp_name = component.get("name", f"component_{idx}")
             comp_id = component.get("id", "")
-            # Stagger launches by 2s per component to avoid hitting rate limits
+            # Stagger launches to avoid hitting rate limits
             if idx > 0:
-                await asyncio.sleep(idx * 2.0)
+                await asyncio.sleep(idx * SPEC_COMPONENT_STAGGER_DELAY)
             logger.info(
                 "SpecAnalyzerNode [%s]: analyzing %s (%d/%d)",
                 self.node_id, comp_name, idx + 1, len(components),
@@ -190,7 +190,10 @@ class SpecAnalyzerNode(BaseNodeImpl):
                         token_totals["input_tokens"] += comp_tokens.get("input_tokens", 0)
                         token_totals["output_tokens"] += comp_tokens.get("output_tokens", 0)
 
-                    # Push SSE event for this component
+                    # Push SSE event for this component.
+                    # Uses HTTP POST (workflow/sse.py) since this runs in
+                    # Temporal Worker process — reverted from T137's direct
+                    # EventBus push after T141 Temporal migration.
                     if run_id:
                         from ..sse import push_sse_event
                         sse_payload: Dict[str, Any] = {

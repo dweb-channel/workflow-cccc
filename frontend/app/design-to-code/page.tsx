@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { Suspense, useState, useCallback, useEffect, useMemo, useRef, useReducer } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,34 @@ import { ScanResults } from "./components/ScanResults";
 import { SpecBrowser } from "./spec-browser";
 import { SpecTree } from "./spec-browser";
 import { scanFigma, type FigmaScanResponse } from "@/lib/api";
+
+// ---- Scan state machine (useReducer) ----
+type ScanState = {
+  step: "idle" | "scanning" | "selecting";
+  result: FigmaScanResponse | null;
+  error: string | null;
+};
+
+type ScanAction =
+  | { type: "START_SCAN" }
+  | { type: "SCAN_SUCCESS"; result: FigmaScanResponse }
+  | { type: "SCAN_ERROR"; error: string }
+  | { type: "RESET" };
+
+const SCAN_INITIAL: ScanState = { step: "idle", result: null, error: null };
+
+function scanReducer(_state: ScanState, action: ScanAction): ScanState {
+  switch (action.type) {
+    case "START_SCAN":
+      return { step: "scanning", result: null, error: null };
+    case "SCAN_SUCCESS":
+      return { step: "selecting", result: action.result, error: null };
+    case "SCAN_ERROR":
+      return { step: "idle", result: null, error: action.error };
+    case "RESET":
+      return SCAN_INITIAL;
+  }
+}
 
 /* ================================================================
    DesignToCodePage — Two-tab layout:
@@ -61,9 +89,7 @@ function DesignToCodeContent() {
   const [showLog, setShowLog] = useState(false);
 
   // Scan step state machine: idle → scanning → selecting
-  const [scanStep, setScanStep] = useState<"idle" | "scanning" | "selecting">("idle");
-  const [scanResult, setScanResult] = useState<FigmaScanResponse | null>(null);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scan, dispatchScan] = useReducer(scanReducer, SCAN_INITIAL);
 
   // Hook
   const {
@@ -137,17 +163,13 @@ function DesignToCodeContent() {
   // --- Scan Figma URL for frame classification ---
   const handleScan = useCallback(async () => {
     if (!figmaUrl.trim()) return;
-    setScanStep("scanning");
-    setScanError(null);
-    setScanResult(null);
+    dispatchScan({ type: "START_SCAN" });
     try {
       const result = await scanFigma(figmaUrl.trim());
-      setScanResult(result);
-      setScanStep("selecting");
+      dispatchScan({ type: "SCAN_SUCCESS", result });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "扫描失败";
-      setScanError(msg);
-      setScanStep("idle");
+      dispatchScan({ type: "SCAN_ERROR", error: msg });
     }
   }, [figmaUrl]);
 
@@ -174,8 +196,7 @@ function DesignToCodeContent() {
       };
       const result = await submit(request);
       if (result) {
-        setScanStep("idle");
-        setScanResult(null);
+        dispatchScan({ type: "RESET" });
         setActiveTab("execution");
       }
     },
@@ -183,15 +204,12 @@ function DesignToCodeContent() {
   );
 
   const handleScanBack = useCallback(() => {
-    setScanStep("idle");
-    setScanResult(null);
-    setScanError(null);
+    dispatchScan({ type: "RESET" });
   }, []);
 
   const handleNewJob = () => {
     setActiveTab("config");
-    setScanStep("idle");
-    setScanResult(null);
+    dispatchScan({ type: "RESET" });
   };
 
   const isFinished =
@@ -253,15 +271,15 @@ function DesignToCodeContent() {
               className="flex-1 overflow-hidden data-[state=inactive]:hidden"
             >
               {/* Scan selecting mode — full-width scan results */}
-              {scanStep === "selecting" && scanResult ? (
+              {scan.step === "selecting" && scan.result ? (
                 <div className="flex-1 h-full overflow-hidden">
                   <ScanResults
-                    pageName={scanResult.page_name}
-                    candidates={scanResult.candidates}
-                    interactionSpecs={scanResult.interaction_specs}
-                    designSystem={scanResult.design_system}
-                    excluded={scanResult.excluded}
-                    warnings={scanResult.warnings}
+                    pageName={scan.result.page_name}
+                    candidates={scan.result.candidates}
+                    interactionSpecs={scan.result.interaction_specs}
+                    designSystem={scan.result.design_system}
+                    excluded={scan.result.excluded}
+                    warnings={scan.result.warnings}
                     onConfirm={handleScanConfirm}
                     onBack={handleScanBack}
                   />
@@ -301,9 +319,9 @@ function DesignToCodeContent() {
                       </CardContent>
                     </Card>
 
-                    {(submitError || scanError) && (
+                    {(submitError || scan.error) && (
                       <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-2.5">
-                        <p className="text-sm text-red-400">{submitError || scanError}</p>
+                        <p className="text-sm text-red-400">{submitError || scan.error}</p>
                       </div>
                     )}
 

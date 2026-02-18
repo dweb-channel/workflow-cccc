@@ -15,6 +15,7 @@ import os
 import httpx
 
 from .logging_config import get_worker_logger
+from .settings import SSE_HTTP_MAX_CONNECTIONS, SSE_HTTP_MAX_KEEPALIVE, SSE_HTTP_TIMEOUT
 
 # API base URL for pushing SSE events (Worker → FastAPI)
 # Use 127.0.0.1 instead of localhost to avoid IPv6 timeout issues
@@ -33,8 +34,11 @@ async def _get_http_client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
         _http_client = httpx.AsyncClient(
-            timeout=5.0,
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            timeout=SSE_HTTP_TIMEOUT,
+            limits=httpx.Limits(
+                max_connections=SSE_HTTP_MAX_CONNECTIONS,
+                max_keepalive_connections=SSE_HTTP_MAX_KEEPALIVE,
+            ),
         )
     return _http_client
 

@@ -12,403 +12,45 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from temporalio import activity
 
+# Re-export from sub-modules for backward compatibility
+from .sse_events import (  # noqa: F401
+    NODE_TO_STEP,
+    _push_event,
+    _setup_sync_event_pusher,
+    _periodic_heartbeat,
+    _record_next_step_start,
+)
+from .git_operations import (  # noqa: F401
+    _extract_jira_key,
+    _git_is_repo,
+    _git_has_changes,
+    _git_commit_bug_fix,
+    _git_revert_changes,
+    _git_change_summary,
+    _prescan_closed_bugs,
+    _preflight_check,
+    _JIRA_RESOLVED_CATEGORIES,
+    _jira_get_status,
+    _git_run,
+)
+from .state_sync import (  # noqa: F401
+    _db_index,
+    _update_job_status,
+    _reset_stale_bugs,
+    _update_bug_status_db,
+    _persist_bug_steps,
+    _sync_incremental_results,
+    _sync_final_results,
+)
+
+from ..settings import BATCH_HEARTBEAT_INTERVAL, BATCH_DB_SYNC_MAX_ATTEMPTS, FAILURE_POLICY  # noqa: F401
+
 logger = logging.getLogger("workflow.temporal.batch_activities")
-
-# Node ID -> user-facing step mapping (None = internal node, not exposed to UI)
-NODE_TO_STEP: Dict[str, Optional[tuple]] = {
-    "get_current_bug": ("fetching", "获取 Bug 信息"),
-    "fix_bug_peer": ("fixing", "修复 Bug"),
-    "verify_fix": ("verifying", "验证修复结果"),
-    "check_verify_result": None,
-    "check_retry": None,
-    "increment_retry": ("retrying", "准备重试"),
-    "update_success": ("completed", "修复完成"),
-    "update_failure": ("failed", "修复失败"),
-    "check_more_bugs": None,
-    "input_node": None,
-    "output_node": None,
-}
-
-
-# --- Git Isolation Helpers ---
-
-
-def _extract_jira_key(url: str) -> str:
-    """Extract Jira issue key from URL.
-
-    Examples:
-        https://tssoft.atlassian.net/browse/XSZS-15463 → XSZS-15463
-        XSZS-15463 → XSZS-15463
-    """
-    match = re.search(r"([A-Z][A-Z0-9]+-\d+)", url)
-    return match.group(1) if match else url.rsplit("/", 1)[-1]
-
-
-async def _git_run(cwd: str, *args: str) -> tuple[int, str]:
-    """Run a git command and return (exit_code, stdout).
-
-    Non-blocking async subprocess. Captures stderr into stdout.
-    """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "git", *args,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        return proc.returncode or 0, stdout.decode("utf-8", errors="replace").strip()
-    except asyncio.TimeoutError:
-        logger.warning(f"Git command timed out: git {' '.join(args)}")
-        return 1, "timeout"
-    except Exception as e:
-        logger.warning(f"Git command failed: git {' '.join(args)}: {e}")
-        return 1, str(e)
-
-
-async def _git_is_repo(cwd: str) -> bool:
-    """Check if cwd is inside a git repository."""
-    code, _ = await _git_run(cwd, "rev-parse", "--is-inside-work-tree")
-    return code == 0
-
-
-async def _git_has_changes(cwd: str) -> bool:
-    """Check if there are uncommitted changes (staged or unstaged)."""
-    code, output = await _git_run(cwd, "status", "--porcelain")
-    return code == 0 and len(output.strip()) > 0
-
-
-async def _git_commit_bug_fix(cwd: str, jira_url: str, job_id: str) -> bool:
-    """Stage all changes and commit with a descriptive message.
-
-    Returns True if commit succeeded, False otherwise.
-    """
-    jira_key = _extract_jira_key(jira_url)
-
-    if not await _git_has_changes(cwd):
-        logger.info(f"Job {job_id}: No changes to commit for {jira_key}")
-        return True  # No changes is not an error
-
-    # Stage all changes in the working directory
-    code, output = await _git_run(cwd, "add", ".")
-    if code != 0:
-        logger.error(f"Job {job_id}: git add failed for {jira_key}: {output}")
-        return False
-
-    # Commit with conventional commit format
-    commit_msg = f"fix: {jira_key}\n\nAutomated fix by batch-bug-fix workflow\nJob: {job_id}"
-    code, output = await _git_run(cwd, "commit", "-m", commit_msg)
-    if code != 0:
-        logger.error(f"Job {job_id}: git commit failed for {jira_key}: {output}")
-        return False
-
-    logger.info(f"Job {job_id}: Committed fix for {jira_key}")
-    return True
-
-
-async def _git_revert_changes(cwd: str, job_id: str, jira_key: str) -> bool:
-    """Revert all uncommitted changes (tracked and untracked).
-
-    Used when a bug fix fails after max retries.
-    Returns True if revert succeeded.
-    """
-    if not await _git_has_changes(cwd):
-        return True  # Nothing to revert
-
-    # Revert tracked file changes
-    code1, out1 = await _git_run(cwd, "checkout", ".")
-    # Remove untracked files created during the fix attempt
-    code2, out2 = await _git_run(cwd, "clean", "-fd")
-
-    if code1 != 0:
-        logger.error(f"Job {job_id}: git checkout failed for {jira_key}: {out1}")
-    if code2 != 0:
-        logger.error(f"Job {job_id}: git clean failed for {jira_key}: {out2}")
-
-    success = code1 == 0 and code2 == 0
-    if success:
-        logger.info(f"Job {job_id}: Reverted changes for failed {jira_key}")
-    return success
-
-
-async def _git_change_summary(cwd: str, job_id: str) -> Optional[Dict[str, Any]]:
-    """Collect code change summary before commit.
-
-    Runs git diff --stat (tracked) and counts untracked files.
-    Returns None if no changes.
-    """
-    if not await _git_has_changes(cwd):
-        return None
-
-    # Tracked file changes
-    code, stat_output = await _git_run(cwd, "diff", "--stat")
-
-    # Untracked (new) files
-    code2, untracked_output = await _git_run(
-        cwd, "ls-files", "--others", "--exclude-standard",
-    )
-
-    tracked_lines = (
-        stat_output.strip().split("\n") if stat_output.strip() else []
-    )
-    untracked_files = [
-        f for f in untracked_output.strip().split("\n") if f.strip()
-    ] if untracked_output.strip() else []
-
-    # Parse tracked file list from stat output (all lines except summary)
-    tracked_files: List[str] = []
-    insertions = 0
-    deletions = 0
-
-    if len(tracked_lines) > 1:
-        for line in tracked_lines[:-1]:
-            fname = line.strip().split("|")[0].strip()
-            if fname:
-                tracked_files.append(fname)
-
-        summary_line = tracked_lines[-1]
-        ins_match = re.search(r"(\d+) insertion", summary_line)
-        del_match = re.search(r"(\d+) deletion", summary_line)
-        if ins_match:
-            insertions = int(ins_match.group(1))
-        if del_match:
-            deletions = int(del_match.group(1))
-
-    all_files = tracked_files + untracked_files
-    if not all_files:
-        return None
-
-    return {
-        "files_changed": len(all_files),
-        "insertions": insertions,
-        "deletions": deletions,
-        "new_files": len(untracked_files),
-        "file_list": all_files[:10],
-    }
-
-
-# --- Jira Status Check (T105: Smart Skip) ---
-
-
-def _db_index(
-    bug_index: int,
-    bug_index_offset: int,
-    index_map: Optional[List[int]] = None,
-) -> int:
-    """Map workflow-internal bug index to DB/SSE bug index.
-
-    When index_map is provided (skip mode), uses the mapping.
-    Otherwise falls back to simple offset (retry mode).
-    """
-    if index_map is not None:
-        return index_map[bug_index] if bug_index < len(index_map) else bug_index
-    return bug_index + bug_index_offset
-
-
-_JIRA_RESOLVED_CATEGORIES = frozenset({"done"})
-
-
-async def _jira_get_status(jira_url: str, job_id: str) -> Optional[str]:
-    """Get the status category of a Jira issue. Best-effort.
-
-    Returns the statusCategory.key (e.g., 'done', 'indeterminate', 'new')
-    or None if the check fails. Uses the same credentials as
-    _jira_add_fix_comment.
-    """
-    import os
-
-    jira_base = os.environ.get("JIRA_URL", "")
-    email = os.environ.get("JIRA_EMAIL", "")
-    token = os.environ.get("JIRA_API_TOKEN", "")
-
-    if not all([jira_base, email, token]):
-        return None
-
-    jira_key = _extract_jira_key(jira_url)
-
-    try:
-        import httpx
-        import base64
-
-        auth = base64.b64encode(f"{email}:{token}".encode()).decode()
-        url = (
-            f"{jira_base.rstrip('/')}/rest/api/3/issue/{jira_key}"
-            f"?fields=status"
-        )
-        headers = {
-            "Authorization": f"Basic {auth}",
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                category = (
-                    data.get("fields", {})
-                    .get("status", {})
-                    .get("statusCategory", {})
-                    .get("key", "")
-                    .lower()
-                )
-                return category
-            else:
-                logger.debug(
-                    f"Job {job_id}: Jira status check failed for {jira_key}: "
-                    f"HTTP {resp.status_code}"
-                )
-                return None
-
-    except Exception as e:
-        logger.debug(
-            f"Job {job_id}: Jira status check failed for {jira_key}: {e}"
-        )
-        return None
-
-
-async def _prescan_closed_bugs(
-    jira_urls: List[str], job_id: str,
-) -> set:
-    """Pre-scan Jira URLs and return indices of closed/resolved issues.
-
-    Best-effort: if Jira API is unavailable, returns empty set (no skips).
-    """
-    import os
-
-    # Skip pre-scan entirely if no Jira credentials
-    if not all([
-        os.environ.get("JIRA_URL", ""),
-        os.environ.get("JIRA_EMAIL", ""),
-        os.environ.get("JIRA_API_TOKEN", ""),
-    ]):
-        logger.info(f"Job {job_id}: Jira credentials not configured, skipping pre-scan")
-        return set()
-
-    closed = set()
-    for i, url in enumerate(jira_urls):
-        category = await _jira_get_status(url, job_id)
-        if category in _JIRA_RESOLVED_CATEGORIES:
-            closed.add(i)
-            jira_key = _extract_jira_key(url)
-            logger.info(
-                f"Job {job_id}: Bug {i} ({jira_key}) is resolved, will skip"
-            )
-
-    if closed:
-        logger.info(
-            f"Job {job_id}: Pre-scan found {len(closed)}/{len(jira_urls)} "
-            f"resolved bugs to skip"
-        )
-
-    return closed
-
-
-# --- SSE Push Helpers ---
-
-
-async def _push_event(job_id: str, event_type: str, data: Dict[str, Any]) -> None:
-    """Push an SSE event to the API server via HTTP POST.
-
-    Uses the existing push_sse_event from workflow/sse.py which POSTs to
-    /api/internal/events/{run_id}. Non-blocking: logs errors but never
-    fails the workflow.
-    """
-    from ..sse import push_sse_event
-
-    try:
-        await push_sse_event(job_id, event_type, data)
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to push SSE event {event_type}: {e}")
-
-
-def _setup_sync_event_pusher() -> None:
-    """Configure agents.py to push events via HTTP POST (fire-and-forget).
-
-    The on_event callback in agents.py is synchronous, so we create
-    a sync wrapper that schedules async HTTP POST calls on the event loop.
-    """
-    from ..nodes.agents import set_job_event_pusher
-
-    def sync_push(job_id: str, event_type: str, data: Dict[str, Any]) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_push_event(job_id, event_type, data))
-        except RuntimeError:
-            pass  # No event loop running, skip
-
-    set_job_event_pusher(sync_push)
-
-
-# --- Heartbeat ---
-
-
-async def _periodic_heartbeat(job_id: str, interval_seconds: int = 60) -> None:
-    """Send periodic heartbeats to Temporal while the activity is running.
-
-    This prevents heartbeat timeout during long-running Claude CLI calls.
-    Runs as a background task and is cancelled when the activity completes.
-    """
-    while True:
-        await asyncio.sleep(interval_seconds)
-        try:
-            activity.heartbeat(f"alive:job:{job_id}")
-        except Exception:
-            # Activity may have been cancelled; stop heartbeating
-            return
-
-
-# --- Pre-flight Check ---
-
-
-async def _preflight_check(
-    cwd: str, config: Dict[str, Any], job_id: str,
-) -> tuple[bool, List[str]]:
-    """Validate environment before starting the batch workflow.
-
-    Checks:
-    1. cwd exists and is a git repository
-    2. claude CLI is available
-
-    Returns (ok, errors) — ok=True means all checks passed.
-    """
-    import os
-    import shutil
-
-    errors: List[str] = []
-    warnings: List[str] = []
-
-    # 1. Working directory exists
-    if not os.path.isdir(cwd):
-        errors.append(f"工作目录不存在: {cwd}")
-    else:
-        # 2. Git repository check
-        if not await _git_is_repo(cwd):
-            errors.append(f"工作目录不是 Git 仓库: {cwd}")
-
-    # 3. Claude CLI available
-    claude_path = shutil.which("claude")
-    if not claude_path:
-        errors.append("Claude CLI 未安装或不在 PATH 中")
-
-    # Log results
-    all_issues = errors + warnings
-    if all_issues:
-        logger.info(
-            f"Job {job_id}: Preflight check — "
-            f"{len(errors)} error(s), {len(warnings)} warning(s)"
-        )
-        for issue in all_issues:
-            logger.info(f"  - {issue}")
-    else:
-        logger.info(f"Job {job_id}: Preflight check passed")
-
-    return len(errors) == 0, all_issues
 
 
 # --- Main Activity ---
@@ -586,7 +228,6 @@ async def execute_batch_bugfix_activity(params: dict) -> dict:
 
     except asyncio.CancelledError:
         logger.info(f"Job {job_id}: Activity cancelled")
-        # Revert uncommitted changes
         if await _git_is_repo(cwd):
             if await _git_has_changes(cwd):
                 logger.info(f"Job {job_id}: Reverting uncommitted changes after cancel")
@@ -601,7 +242,6 @@ async def execute_batch_bugfix_activity(params: dict) -> dict:
 
     except Exception as e:
         logger.error(f"Job {job_id}: Activity failed: {e}")
-        # Revert uncommitted changes
         if await _git_is_repo(cwd):
             if await _git_has_changes(cwd):
                 logger.info(f"Job {job_id}: Reverting uncommitted changes after error")
@@ -721,12 +361,9 @@ async def _execute_workflow(
 
             # --- Step-level SSE events ---
             bug_index = state.get("current_index", 0)
-            # After update_success/update_failure, current_index has been
-            # incremented, so the bug that just completed is at index - 1
             if node_id in ["update_success", "update_failure", "check_more_bugs"]:
                 bug_index = max(0, bug_index - 1)
 
-            # Map workflow bug_index to DB/SSE bug_index
             db_bug_index = _db_index(bug_index, bug_index_offset, index_map)
 
             step_info = NODE_TO_STEP.get(node_id)
@@ -741,7 +378,6 @@ async def _execute_workflow(
                     else None
                 )
 
-                # Calculate duration
                 duration_ms = None
                 start_key = f"{bug_index}:{node_id}"
                 if start_key in node_start_times:
@@ -750,7 +386,6 @@ async def _execute_workflow(
                         * 1000
                     )
 
-                # Extract output preview from the node-specific result
                 actual_result = (
                     node_output.get(node_id, {})
                     if isinstance(node_output, dict)
@@ -773,7 +408,6 @@ async def _execute_workflow(
                             msg[:500] + ("..." if len(msg) > 500 else "")
                         )
 
-                # Determine step status
                 step_status = "completed"
                 step_error = None
                 if step_name == "failed":
@@ -786,7 +420,6 @@ async def _execute_workflow(
                         step_status = "failed"
                         step_error = output_preview
 
-                # Build step record
                 step_record: Dict[str, Any] = {
                     "step": node_id,
                     "label": step_label,
@@ -806,7 +439,6 @@ async def _execute_workflow(
 
                 bug_steps.setdefault(bug_index, []).append(step_record)
 
-                # Push bug_step_completed SSE event
                 await _push_event(job_id, "bug_step_completed", {
                     "bug_index": db_bug_index,
                     "step": node_id,
@@ -822,13 +454,11 @@ async def _execute_workflow(
                     "timestamp": now_iso,
                 })
 
-            # Predict and record next step start
             _record_next_step_start(
                 job_id, node_id, bug_index, state, node_start_times,
                 bug_index_offset, index_map,
             )
 
-            # Sync results when update_success/update_failure completes
             if (
                 "results" in node_output
                 or node_id in ["update_success", "update_failure"]
@@ -857,18 +487,34 @@ async def _execute_workflow(
                         f"{last_synced_index + 1}/{len(jira_urls)}"
                     )
 
-                    # Persist steps for completed bug
                     steps = bug_steps.get(last_synced_index)
                     if steps:
                         await _persist_bug_steps(
                             job_id, _db_index(last_synced_index, bug_index_offset, index_map), steps,
                         )
 
+                    # --- failure_policy "stop": abort on first failure ---
+                    fp = config.get("failure_policy", "skip")
+                    if fp == "stop" and last_synced_index < len(current_results):
+                        latest = current_results[last_synced_index]
+                        if latest.get("status") == "failed":
+                            logger.info(
+                                f"Job {job_id}: failure_policy=stop — "
+                                f"aborting after bug {last_synced_index} failed"
+                            )
+                            await _push_event(job_id, "workflow_error", {
+                                "message": (
+                                    f"failure_policy=stop: Bug {last_synced_index} "
+                                    f"修复失败，终止剩余 Bug 处理"
+                                ),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            })
+                            return state
+
             # --- Git isolation: commit or revert after each bug ---
             if git_enabled and node_id == "update_success":
                 bug_url = jira_urls[bug_index] if bug_index < len(jira_urls) else ""
 
-                # Collect code change summary before commit
                 change_summary = await _git_change_summary(cwd, job_id)
                 if change_summary:
                     preview = (
@@ -929,350 +575,3 @@ async def _execute_workflow(
 
     state["success"] = True
     return state
-
-
-def _record_next_step_start(
-    job_id: str,
-    completed_node_id: str,
-    bug_index: int,
-    state: Dict[str, Any],
-    node_start_times: Dict[str, datetime],
-    bug_index_offset: int = 0,
-    index_map: Optional[List[int]] = None,
-) -> None:
-    """After a node completes, predict and record the start of the next step."""
-    next_node_map: Dict[str, Optional[str]] = {
-        "get_current_bug": "fix_bug_peer",
-        "fix_bug_peer": "verify_fix",
-        "verify_fix": None,
-        "increment_retry": "fix_bug_peer",
-        "input_node": "get_current_bug",
-    }
-
-    next_node = next_node_map.get(completed_node_id)
-    if next_node is None:
-        return
-
-    next_step_info = NODE_TO_STEP.get(next_node)
-    if next_step_info is None:
-        return
-
-    now = datetime.now(timezone.utc)
-    start_key = f"{bug_index}:{next_node}"
-    node_start_times[start_key] = now
-
-    step_name, step_label = next_step_info
-    attempt = (
-        state.get("retry_count", 0) + 1
-        if step_name in ("fixing", "verifying")
-        else None
-    )
-
-    event_data: Dict[str, Any] = {
-        "bug_index": _db_index(bug_index, bug_index_offset, index_map),
-        "step": next_node,
-        "label": step_label,
-        "node_label": step_label,
-        "timestamp": now.isoformat(),
-    }
-    if attempt is not None:
-        event_data["attempt"] = attempt
-
-    # Fire-and-forget: schedule async push on event loop
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_push_event(job_id, "bug_step_started", event_data))
-    except RuntimeError:
-        pass
-
-
-# --- Database Helpers ---
-
-
-async def _update_job_status(
-    job_id: str,
-    status: str,
-    error: Optional[str] = None,
-) -> bool:
-    """Update job status in database. Returns True on success."""
-    try:
-        from app.database import get_session_ctx
-        from app.repositories.batch_job import BatchJobRepository
-
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            await repo.update_status(job_id, status, error=error)
-        logger.info(f"Job {job_id}: DB status -> {status}")
-        return True
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to update status in DB: {e}")
-        await _push_event(job_id, "db_sync_warning", {
-            "message": f"数据库状态更新失败: {status}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
-        return False
-
-
-async def _reset_stale_bugs(job_id: str, total_bugs: int) -> None:
-    """Reset stale in_progress bugs back to pending on retry attempts.
-
-    When a heartbeat timeout kills an attempt, bugs may be left in
-    'in_progress' state. This resets them so the retry starts clean.
-    """
-    try:
-        from app.database import get_session_ctx
-        from app.repositories.batch_job import BatchJobRepository
-
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            db_job = await repo.get(job_id)
-            if db_job:
-                for bug in db_job.bugs:
-                    if bug.status == "in_progress":
-                        await repo.update_bug_status(
-                            job_id=job_id,
-                            bug_index=bug.bug_index,
-                            status="pending",
-                        )
-                        logger.info(
-                            f"Job {job_id}: Reset bug {bug.bug_index} "
-                            f"from in_progress to pending"
-                        )
-    except Exception as e:
-        logger.error(f"Job {job_id}: Failed to reset stale bugs: {e}")
-
-
-async def _update_bug_status_db(
-    job_id: str,
-    bug_index: int,
-    status: str,
-    error: Optional[str] = None,
-    started_at: Optional[datetime] = None,
-    completed_at: Optional[datetime] = None,
-) -> bool:
-    """Update a single bug's status in database. Returns True on success."""
-    try:
-        from app.database import get_session_ctx
-        from app.repositories.batch_job import BatchJobRepository
-
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            await repo.update_bug_status(
-                job_id=job_id,
-                bug_index=bug_index,
-                status=status,
-                error=error,
-                started_at=started_at,
-                completed_at=completed_at,
-            )
-        return True
-    except Exception as e:
-        logger.error(
-            f"Job {job_id}: Failed to update bug {bug_index} status: {e}"
-        )
-        return False
-
-
-async def _persist_bug_steps(
-    job_id: str,
-    bug_index: int,
-    steps: List[Dict[str, Any]],
-) -> bool:
-    """Persist step records for a completed bug to the database. Returns True on success."""
-    try:
-        from app.database import get_session_ctx
-        from app.repositories.batch_job import BatchJobRepository
-
-        async with get_session_ctx() as session:
-            repo = BatchJobRepository(session)
-            await repo.update_bug_steps(
-                job_id=job_id,
-                bug_index=bug_index,
-                steps=steps,
-            )
-        logger.info(
-            f"Job {job_id}: Persisted {len(steps)} steps for bug {bug_index}"
-        )
-        return True
-    except Exception as e:
-        logger.error(
-            f"Job {job_id}: Failed to persist steps for bug {bug_index}: {e}"
-        )
-        return False
-
-
-async def _sync_incremental_results(
-    job_id: str,
-    jira_urls: List[str],
-    results: List[Dict[str, Any]],
-    start_index: int,
-    bug_index_offset: int = 0,
-    index_map: Optional[List[int]] = None,
-) -> None:
-    """Sync new results to database and push SSE events.
-
-    Only processes results from start_index onwards (incremental).
-    Uses index_map (from pre-scan skip) or bug_index_offset (from retry)
-    to map workflow indices to DB/SSE bug_index.
-    """
-    now = datetime.now(timezone.utc)
-    now_iso = now.isoformat()
-
-    for i in range(start_index, len(results)):
-        if i >= len(jira_urls):
-            break
-
-        db_i = _db_index(i, bug_index_offset, index_map)
-        result = results[i]
-        result_status = result.get("status", "failed")
-        error_msg = None
-
-        if result_status == "completed":
-            await _push_event(job_id, "bug_completed", {
-                "bug_index": db_i,
-                "url": jira_urls[i],
-                "timestamp": now_iso,
-            })
-        elif result_status == "failed":
-            error_msg = result.get(
-                "error", result.get("response", "Unknown error")
-            )
-            await _push_event(job_id, "bug_failed", {
-                "bug_index": db_i,
-                "url": jira_urls[i],
-                "error": error_msg,
-                "timestamp": now_iso,
-            })
-        elif result_status == "skipped":
-            error_msg = result.get("error", "Skipped")
-            await _push_event(job_id, "bug_failed", {
-                "bug_index": db_i,
-                "url": jira_urls[i],
-                "error": error_msg,
-                "skipped": True,
-                "timestamp": now_iso,
-            })
-
-        # Update bug in DB
-        db_ok = await _update_bug_status_db(
-            job_id, db_i, result_status,
-            error=error_msg,
-            completed_at=now,
-        )
-        if not db_ok:
-            await _push_event(job_id, "db_sync_warning", {
-                "bug_index": db_i,
-                "message": f"Bug {db_i} 状态同步失败，刷新页面后状态可能不准确",
-                "timestamp": now_iso,
-            })
-
-    # Mark next pending bug as in_progress
-    next_index = len(results)
-    if next_index < len(jira_urls):
-        db_next = _db_index(next_index, bug_index_offset, index_map)
-        await _update_bug_status_db(
-            job_id, db_next, "in_progress",
-            started_at=now,
-        )
-        await _push_event(job_id, "bug_started", {
-            "bug_index": db_next,
-            "url": jira_urls[next_index],
-            "timestamp": now_iso,
-        })
-
-
-async def _sync_final_results(
-    job_id: str,
-    final_state: Dict[str, Any],
-    jira_urls: List[str],
-    bug_index_offset: int = 0,
-    index_map: Optional[List[int]] = None,
-    pre_skipped: int = 0,
-) -> None:
-    """Final sync — update all statuses and push job_done event.
-
-    For retry runs (bug_index_offset > 0) or skip runs (index_map is set),
-    the overall job status is recomputed from ALL bugs in the DB.
-    pre_skipped tracks bugs skipped during pre-scan (already resolved).
-    """
-    results = final_state.get("results", [])
-    now = datetime.now(timezone.utc)
-
-    completed = sum(1 for r in results if r.get("status") == "completed")
-    failed = sum(1 for r in results if r.get("status") == "failed")
-    skipped = sum(1 for r in results if r.get("status") == "skipped")
-
-    overall = "completed" if failed == 0 and skipped == 0 else "failed"
-    db_sync_ok = False
-
-    for attempt in range(2):  # 1 retry for transient DB failures
-        try:
-            from app.database import get_session_ctx
-            from app.repositories.batch_job import BatchJobRepository
-
-            async with get_session_ctx() as session:
-                repo = BatchJobRepository(session)
-                # Fetch existing bugs to preserve incremental completed_at timestamps
-                db_job = await repo.get(job_id)
-                existing_bugs = {b.bug_index: b for b in db_job.bugs} if db_job else {}
-
-                for i, result in enumerate(results):
-                    db_i = _db_index(i, bug_index_offset, index_map)
-                    existing = existing_bugs.get(db_i)
-                    # Only set completed_at if not already set by incremental sync
-                    bug_completed_at = None if (existing and existing.completed_at) else now
-                    await repo.update_bug_status(
-                        job_id=job_id,
-                        bug_index=db_i,
-                        status=result.get("status", "failed"),
-                        error=result.get("error"),
-                        completed_at=bug_completed_at,
-                    )
-
-                # Recompute overall status from ALL bugs in DB when
-                # some bugs were skipped or this is a retry run
-                if bug_index_offset > 0 or index_map is not None:
-                    db_job = await repo.get(job_id)
-                    if db_job:
-                        if index_map is not None:
-                            # Skip mode: pre-scan skipped bugs are not failures
-                            all_failed = sum(
-                                1 for b in db_job.bugs
-                                if b.status == "failed"
-                            )
-                        else:
-                            # Retry mode: skipped = failure (original behavior)
-                            all_failed = sum(
-                                1 for b in db_job.bugs
-                                if b.status in ("failed", "skipped")
-                            )
-                        overall = "completed" if all_failed == 0 else "failed"
-
-                await repo.update_status(job_id, overall)
-            logger.info(
-                f"Job {job_id}: Final sync — {overall} "
-                f"(completed={completed}, failed={failed}, skipped={skipped})"
-            )
-            db_sync_ok = True
-            break
-        except Exception as e:
-            logger.error(f"Job {job_id}: Final DB sync failed (attempt {attempt + 1}): {e}")
-            if attempt == 0:
-                await asyncio.sleep(1)  # Brief delay before retry
-
-    total_skipped = skipped + pre_skipped
-    total_bugs = len(jira_urls) + pre_skipped
-
-    event_data: Dict[str, Any] = {
-        "status": overall,
-        "completed": completed,
-        "failed": failed,
-        "skipped": total_skipped,
-        "total": total_bugs,
-        "timestamp": now.isoformat(),
-    }
-    if not db_sync_ok:
-        event_data["db_sync_failed"] = True
-        event_data["db_sync_message"] = "数据库同步失败，刷新页面后状态可能不准确"
-
-    await _push_event(job_id, "job_done", event_data)

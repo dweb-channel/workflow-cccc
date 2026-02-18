@@ -166,6 +166,7 @@ def figma_node_to_component_spec(
     children_specs: List[Dict] = []
     children = node.get("children", [])
     children_bounds: List[Dict] = []
+    pruned_child_ids: List[str] = []  # IDs of children skipped by pruning
 
     if _should_recurse(node, width, height, depth):
         # Recurse into children
@@ -179,12 +180,17 @@ def figma_node_to_component_spec(
                 children_bounds.append(child_spec["bounds"])
     else:
         # Not recursing -- still compute children_bounds from raw Figma bbox
-        # so detect_container_layout() can detect stack (overlapping) layout
+        # so detect_container_layout() can detect stack (overlapping) layout.
+        # Track pruned child IDs so spec_merger can distinguish "pruned" from
+        # "hallucinated" when LLM returns children_updates for these nodes.
         for child in children:
             if not child.get("visible", True):
                 continue
             if child.get("opacity", 1.0) == 0:
                 continue
+            child_id = child.get("id", "")
+            if child_id:
+                pruned_child_ids.append(child_id)
             c_bbox = child.get("absoluteBoundingBox", {})
             if c_bbox and c_bbox.get("width", 0) > 0 and c_bbox.get("height", 0) > 0:
                 children_bounds.append({
@@ -300,6 +306,10 @@ def figma_node_to_component_spec(
         spec["content"] = content
     if children_specs:
         spec["children"] = children_specs
+    # Attach pruned child IDs for spec_merger to distinguish
+    # "pruned by depth limit" from "hallucinated by LLM"
+    if pruned_child_ids:
+        spec["_pruned_child_ids"] = pruned_child_ids
 
     return spec
 

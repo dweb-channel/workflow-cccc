@@ -12,6 +12,11 @@ from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
     from .batch_activities import execute_batch_bugfix_activity
+    from ..settings import (
+        BATCH_WORKFLOW_HEARTBEAT_TIMEOUT_MINUTES,
+        BATCH_WORKFLOW_MIN_TIMEOUT_MINUTES,
+        BATCH_WORKFLOW_PER_BUG_MINUTES,
+    )
 
 
 @workflow.defn
@@ -37,17 +42,16 @@ class BatchBugFixWorkflow:
                 - config: Job configuration dict
         """
         bug_count = len(params.get("jira_urls", []))
-
-        # Timeout: 15 min per bug (fix ~5min + verify ~3min + retries), min 30 min
-        timeout_minutes = max(30, bug_count * 15)
+        timeout_minutes = max(
+            BATCH_WORKFLOW_MIN_TIMEOUT_MINUTES,
+            bug_count * BATCH_WORKFLOW_PER_BUG_MINUTES,
+        )
 
         self._result = await workflow.execute_activity(
             execute_batch_bugfix_activity,
             params,
             schedule_to_close_timeout=timedelta(minutes=timeout_minutes),
-            # Claude CLI nodes can take 5-10 min each; heartbeat is sent
-            # periodically during execution (not just on node completion).
-            heartbeat_timeout=timedelta(minutes=15),
+            heartbeat_timeout=timedelta(minutes=BATCH_WORKFLOW_HEARTBEAT_TIMEOUT_MINUTES),
         )
 
         return self._result

@@ -124,7 +124,7 @@ class TestGitIsRepo:
         from workflow.temporal.batch_activities import _git_is_repo
 
         with patch(
-            "workflow.temporal.batch_activities._git_run",
+            "workflow.temporal.git_operations._git_run",
             new_callable=AsyncMock,
             return_value=(0, "true"),
         ):
@@ -134,7 +134,7 @@ class TestGitIsRepo:
         from workflow.temporal.batch_activities import _git_is_repo
 
         with patch(
-            "workflow.temporal.batch_activities._git_run",
+            "workflow.temporal.git_operations._git_run",
             new_callable=AsyncMock,
             return_value=(128, "fatal: not a git repo"),
         ):
@@ -153,7 +153,7 @@ class TestGitHasChanges:
         from workflow.temporal.batch_activities import _git_has_changes
 
         with patch(
-            "workflow.temporal.batch_activities._git_run",
+            "workflow.temporal.git_operations._git_run",
             new_callable=AsyncMock,
             return_value=(0, " M src/main.py\n?? newfile.txt"),
         ):
@@ -163,7 +163,7 @@ class TestGitHasChanges:
         from workflow.temporal.batch_activities import _git_has_changes
 
         with patch(
-            "workflow.temporal.batch_activities._git_run",
+            "workflow.temporal.git_operations._git_run",
             new_callable=AsyncMock,
             return_value=(0, ""),
         ):
@@ -173,7 +173,7 @@ class TestGitHasChanges:
         from workflow.temporal.batch_activities import _git_has_changes
 
         with patch(
-            "workflow.temporal.batch_activities._git_run",
+            "workflow.temporal.git_operations._git_run",
             new_callable=AsyncMock,
             return_value=(128, "fatal"),
         ):
@@ -188,8 +188,8 @@ class TestGitHasChanges:
 class TestGitCommitBugFix:
     """Test per-bug git commit."""
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_commit_success(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_commit_bug_fix
 
@@ -211,7 +211,7 @@ class TestGitCommitBugFix:
         # Commit message should contain the Jira key
         assert "XSZS-15463" in commit_call[0][3]
 
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_no_changes_skips_commit(self, mock_has_changes):
         from workflow.temporal.batch_activities import _git_commit_bug_fix
 
@@ -220,8 +220,8 @@ class TestGitCommitBugFix:
         result = await _git_commit_bug_fix("/tmp", "XSZS-100", "job_1")
         assert result is True  # No changes is not an error
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_add_failure_returns_false(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_commit_bug_fix
 
@@ -231,8 +231,8 @@ class TestGitCommitBugFix:
         result = await _git_commit_bug_fix("/tmp", "XSZS-100", "job_1")
         assert result is False
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_commit_failure_returns_false(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_commit_bug_fix
 
@@ -243,8 +243,8 @@ class TestGitCommitBugFix:
         result = await _git_commit_bug_fix("/tmp", "XSZS-100", "job_1")
         assert result is False
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_commit_message_format(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_commit_bug_fix
 
@@ -267,8 +267,8 @@ class TestGitCommitBugFix:
 class TestGitRevertChanges:
     """Test git revert on failed bug fix."""
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_revert_success(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_revert_changes
 
@@ -285,7 +285,7 @@ class TestGitRevertChanges:
         clean_call = mock_run.call_args_list[1]
         assert clean_call[0] == ("/tmp", "clean", "-fd")
 
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_no_changes_skips_revert(self, mock_has_changes):
         from workflow.temporal.batch_activities import _git_revert_changes
 
@@ -294,8 +294,8 @@ class TestGitRevertChanges:
         result = await _git_revert_changes("/tmp", "job_1", "XSZS-100")
         assert result is True
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_checkout_failure(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_revert_changes
 
@@ -306,8 +306,8 @@ class TestGitRevertChanges:
         result = await _git_revert_changes("/tmp", "job_1", "XSZS-100")
         assert result is False
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_clean_failure(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_revert_changes
 
@@ -318,8 +318,8 @@ class TestGitRevertChanges:
         result = await _git_revert_changes("/tmp", "job_1", "XSZS-100")
         assert result is False
 
-    @patch("workflow.temporal.batch_activities._git_run", new_callable=AsyncMock)
-    @patch("workflow.temporal.batch_activities._git_has_changes", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_run", new_callable=AsyncMock)
+    @patch("workflow.temporal.git_operations._git_has_changes", new_callable=AsyncMock)
     async def test_both_fail(self, mock_has_changes, mock_run):
         from workflow.temporal.batch_activities import _git_revert_changes
 

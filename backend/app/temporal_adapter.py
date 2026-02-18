@@ -82,3 +82,43 @@ async def start_dynamic_workflow(
         task_queue=TEMPORAL_TASK_QUEUE,
     )
     return run.id
+
+
+async def start_spec_pipeline(
+    job_id: str,
+    file_key: str,
+    node_id: str,
+    output_dir: str,
+    model: str = "",
+    component_count_estimate: int = 3,
+) -> str:
+    """Start a SpecPipelineWorkflow via Temporal and return the workflow ID.
+
+    Args:
+        job_id: Unique job identifier (e.g., spec_xxx)
+        file_key: Figma file key
+        node_id: Figma page node ID
+        output_dir: Job output directory
+        model: Claude model override
+        component_count_estimate: Estimated component count for timeout calc
+
+    Returns:
+        Temporal workflow ID (spec-{job_id})
+    """
+    client = await get_client()
+    workflow_id = f"spec-{job_id}"
+    params = {
+        "job_id": job_id,
+        "file_key": file_key,
+        "node_id": node_id,
+        "output_dir": output_dir,
+        "model": model,
+        "component_count_estimate": component_count_estimate,
+    }
+    await client.start_workflow(
+        "SpecPipelineWorkflow",
+        params,
+        id=workflow_id,
+        task_queue=TEMPORAL_TASK_QUEUE,
+    )
+    return workflow_id

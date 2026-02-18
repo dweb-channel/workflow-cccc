@@ -473,7 +473,7 @@ class LLMAgentNode(BaseNodeImpl):
             result = await stream_claude_events(
                 full_prompt, cwd=cwd, timeout=timeout, on_event=on_event,
             )
-            success = not result.startswith("[Error]")
+            success = bool(result) and not result.startswith("[Error]")
             # Detect structured failure indicators in the summary sections
             # (e.g., agent couldn't access Jira URL or produced no modifications).
             # Only check within ## 根因分析 and ## 修改摘要 sections to avoid
@@ -663,6 +663,24 @@ class VerifyNode(BaseNodeImpl):
         # Also render cwd in case it contains template variables
         cwd = _render_template(cwd, inputs)
 
+        # Inject validation_level guidance (T142 S3)
+        validation_level = (
+            inputs.get("config", {}).get("validation_level", "standard")
+        )
+        if validation_level == "minimal":
+            rendered_prompt += (
+                "\n\n**验证级别：minimal**\n"
+                "只做快速语法检查：确认修改文件无语法错误、import 正确。"
+                "不需要运行完整测试套件。快速给出 VERIFIED 或 FAILED。"
+            )
+        elif validation_level == "thorough":
+            rendered_prompt += (
+                "\n\n**验证级别：thorough**\n"
+                "请执行完整验证：运行相关测试套件、检查边界情况、"
+                "确认没有引入回归问题。如果有相关的集成测试也请运行。"
+            )
+        # "standard" = no extra guidance, use default prompt
+
         # Prepend system prompt if provided
         if system_prompt:
             full_prompt = f"{system_prompt}\n\n---\n\n{rendered_prompt}"
@@ -682,11 +700,12 @@ class VerifyNode(BaseNodeImpl):
                 full_prompt, cwd=cwd, timeout=timeout, on_event=on_event,
             )
 
-            if response.startswith("[Error]"):
-                logger.error(f"VerifyNode {self.node_id}: Claude CLI error: {response[:200]}")
+            if not response or response.startswith("[Error]"):
+                err_msg = response[:200] if response else "<empty response>"
+                logger.error(f"VerifyNode {self.node_id}: Claude CLI error: {err_msg}")
                 return {
                     "verified": False,
-                    "message": response[:500],
+                    "message": response[:500] if response else "Empty response from Claude CLI",
                     "details": {"error": "claude_cli_error", "full_response": response},
                 }
 

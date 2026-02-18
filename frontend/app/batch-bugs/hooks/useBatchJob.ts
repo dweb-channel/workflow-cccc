@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   submitBatchBugFix,
   getBatchJobStreamUrl,
@@ -9,31 +9,15 @@ import {
   type BatchBugFixRequest,
 } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
+import { useSSEStream } from "@/lib/useSSEStream";
 import type { BatchJob, BugStatus, BugStep, BatchJobStats, AIThinkingEvent, AIThinkingStats, DbSyncWarning } from "../types";
 
-/** Safe JSON.parse — returns null on failure instead of throwing */
-function safeParse(raw: string): unknown | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-/** Exponential backoff: 3s → 6s → 12s → 24s → 30s cap */
-function getBackoffMs(retryCount: number): number {
-  return Math.min(3000 * Math.pow(2, retryCount), 30000);
-}
-
-const FALLBACK_POLL_INTERVAL = 30_000; // 30s
+const TERMINAL_STATUSES = ["completed", "failed", "cancelled"];
 
 export function useBatchJob() {
   const { toast } = useToast();
   const [currentJob, setCurrentJob] = useState<BatchJob | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const sseRetryCount = useRef(0);
-  const sseErrorToastShown = useRef(false);
-  const [sseConnected, setSseConnected] = useState(true);
 
   // AI Thinking state
   const [aiThinkingEvents, setAiThinkingEvents] = useState<AIThinkingEvent[]>([]);
@@ -47,6 +31,10 @@ export function useBatchJob() {
   // DB sync warnings
   const [dbSyncWarnings, setDbSyncWarnings] = useState<DbSyncWarning[]>([]);
 
+  // Refs for toast (used in SSE callbacks without causing re-renders)
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   // Recovery: on mount, check for active (non-terminal) job in DB
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +42,6 @@ export function useBatchJob() {
       try {
         const activeJob = await getActiveJob();
         if (cancelled || !activeJob) return;
-        // Restore currentJob state from DB response
         const bugs: BugStatus[] = activeJob.bugs.map((b, idx) => ({
           bug_id: `BUG-${idx + 1}`,
           url: b.url,
@@ -70,36 +57,23 @@ export function useBatchJob() {
           job_status: activeJob.status,
         });
       } catch {
-        // Recovery failure is non-critical — user can start a new job
         console.warn("Failed to recover active job on mount");
       }
     })();
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // SSE stream for real-time job status updates
-  useEffect(() => {
-    if (
-      !currentJob ||
-      currentJob.job_status === "completed" ||
-      currentJob.job_status === "failed" ||
-      currentJob.job_status === "cancelled"
-    ) {
-      return;
+  // --- SSE URL: non-null only when job is active ---
+  const sseUrl = useMemo(() => {
+    if (!currentJob || TERMINAL_STATUSES.includes(currentJob.job_status)) {
+      return null;
     }
+    return getBatchJobStreamUrl(currentJob.job_id);
+  }, [currentJob?.job_id, currentJob?.job_status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const jobId = currentJob.job_id;
-    sseRetryCount.current = 0;
-    sseErrorToastShown.current = false;
-
-    const streamUrl = getBatchJobStreamUrl(jobId);
-    const eventSource = new EventSource(streamUrl);
-
-    // Helper to update a specific bug by index
-    const updateBug = (
-      bugIndex: number,
-      updater: (bug: BugStatus) => BugStatus
-    ) => {
+  // --- Helper to update a specific bug by index ---
+  const updateBug = useCallback(
+    (bugIndex: number, updater: (bug: BugStatus) => BugStatus) => {
       setCurrentJob((prev) =>
         prev
           ? {
@@ -110,11 +84,16 @@ export function useBatchJob() {
             }
           : prev
       );
-    };
+    },
+    []
+  );
 
-    eventSource.addEventListener("job_state", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data) return;
+  // --- SSE event handlers ---
+  const jobIdRef = useRef(currentJob?.job_id);
+  jobIdRef.current = currentJob?.job_id;
+
+  const sseHandlers = useMemo<Record<string, (data: Record<string, unknown>) => void>>(() => ({
+    job_state: (data) => {
       setCurrentJob((prev) =>
         prev
           ? {
@@ -133,53 +112,47 @@ export function useBatchJob() {
             }
           : prev
       );
-    });
+    },
 
-    eventSource.addEventListener("bug_started", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_started: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => ({
         ...bug,
         status: "in_progress" as const,
         steps: [],
       }));
-    });
+    },
 
-    eventSource.addEventListener("bug_completed", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_completed: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => ({
         ...bug,
         status: "completed" as const,
         retry_count: (data.retry_count as number) ?? bug.retry_count,
       }));
-    });
+    },
 
-    eventSource.addEventListener("bug_failed", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_failed: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => ({
         ...bug,
         status: "failed" as const,
         error: (data.error as string) ?? bug.error,
         retry_count: (data.retry_count as number) ?? bug.retry_count,
       }));
-    });
+    },
 
-    eventSource.addEventListener("bug_skipped", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_skipped: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => ({
         ...bug,
         status: "skipped" as const,
         error: (data.reason as string) ?? bug.error,
       }));
-    });
+    },
 
-    // Step-level SSE events
-    eventSource.addEventListener("bug_step_started", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_step_started: (data) => {
+      if (typeof data.bug_index !== "number") return;
       const newStep: BugStep = {
         step: data.step as string,
         label: data.label as string,
@@ -191,19 +164,15 @@ export function useBatchJob() {
         ...bug,
         steps: [...(bug.steps ?? []), newStep],
       }));
-    });
+    },
 
-    eventSource.addEventListener("bug_step_completed", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_step_completed: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => {
         const steps = [...(bug.steps ?? [])];
         let found = false;
         for (let i = steps.length - 1; i >= 0; i--) {
-          if (
-            steps[i].step === data.step &&
-            steps[i].status === "in_progress"
-          ) {
+          if (steps[i].step === data.step && steps[i].status === "in_progress") {
             steps[i] = {
               ...steps[i],
               status: "completed",
@@ -215,7 +184,6 @@ export function useBatchJob() {
             break;
           }
         }
-        // If no in_progress step found (started event missed), create completed entry
         if (!found) {
           steps.push({
             step: data.step as string,
@@ -229,19 +197,15 @@ export function useBatchJob() {
         }
         return { ...bug, steps };
       });
-    });
+    },
 
-    eventSource.addEventListener("bug_step_failed", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || typeof data.bug_index !== "number") return;
+    bug_step_failed: (data) => {
+      if (typeof data.bug_index !== "number") return;
       updateBug(data.bug_index, (bug) => {
         const steps = [...(bug.steps ?? [])];
         let found = false;
         for (let i = steps.length - 1; i >= 0; i--) {
-          if (
-            steps[i].step === data.step &&
-            steps[i].status === "in_progress"
-          ) {
+          if (steps[i].step === data.step && steps[i].status === "in_progress") {
             steps[i] = {
               ...steps[i],
               status: "failed",
@@ -252,7 +216,6 @@ export function useBatchJob() {
             break;
           }
         }
-        // If no in_progress step found (started event missed), create failed entry
         if (!found) {
           steps.push({
             step: data.step as string,
@@ -265,35 +228,28 @@ export function useBatchJob() {
         }
         return { ...bug, steps };
       });
-    });
+    },
 
-    // AI Thinking events
-    eventSource.addEventListener("ai_thinking", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data || !data.type) return;
+    ai_thinking: (data) => {
+      if (!data.type) return;
       const event = data as unknown as AIThinkingEvent;
       setAiThinkingEvents((prev) => {
         const next = [...prev, event];
-        // Cap at 2000 events to prevent unbounded memory growth; trim to 1500 on overflow
         return next.length > 2000 ? next.slice(-1500) : next;
       });
       setAiThinkingStats((prev) => ({ ...prev, streaming: true }));
-    });
+    },
 
-    eventSource.addEventListener("ai_thinking_stats", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data) return;
+    ai_thinking_stats: (data) => {
       setAiThinkingStats((prev) => ({
         ...prev,
         tokens_in: (data.tokens_in as number) ?? prev.tokens_in,
         tokens_out: (data.tokens_out as number) ?? prev.tokens_out,
         cost: (data.cost as number) ?? prev.cost,
       }));
-    });
+    },
 
-    eventSource.addEventListener("db_sync_warning", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data) return;
+    db_sync_warning: (data) => {
       setDbSyncWarnings((prev) => [
         ...prev,
         {
@@ -302,95 +258,70 @@ export function useBatchJob() {
           timestamp: (data.timestamp as string) ?? new Date().toISOString(),
         },
       ]);
-    });
+    },
 
-    eventSource.addEventListener("preflight_failed", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data) return;
+    preflight_failed: (data) => {
       const errors = (data.errors as string[]) ?? [];
-      toast({
+      toastRef.current({
         title: "环境检查失败",
         description: errors.join("\n") || "Pre-flight 检查未通过",
         variant: "destructive",
       });
-    });
+    },
 
-    eventSource.addEventListener("job_done", (e) => {
-      const data = safeParse(e.data) as Record<string, unknown> | null;
-      if (!data) return;
+    job_done: (data) => {
       setCurrentJob((prev) =>
         prev ? { ...prev, job_status: (data.status as string) ?? prev.job_status } : prev
       );
       setAiThinkingStats((prev) => ({ ...prev, streaming: false }));
-      eventSource.close();
-    });
+    },
+  }), [updateBug]);
 
-    // SSE error handler with backoff awareness
-    eventSource.onerror = () => {
-      sseRetryCount.current += 1;
-      setSseConnected(false);
-      const backoff = getBackoffMs(sseRetryCount.current);
-      console.warn(
-        `SSE connection error (retry #${sseRetryCount.current}, next in ~${backoff / 1000}s)`
-      );
-      // Show toast once on first error
-      if (!sseErrorToastShown.current) {
-        sseErrorToastShown.current = true;
-        toast({
-          title: "连接中断",
-          description: "实时更新暂时不可用，正在尝试重连…",
-          variant: "destructive",
-        });
-      }
-    };
-
-    eventSource.onopen = () => {
-      setSseConnected(true);
-      // Connection restored — reset retry state
-      if (sseRetryCount.current > 0) {
-        sseRetryCount.current = 0;
-        sseErrorToastShown.current = false;
-        toast({
-          title: "连接恢复",
-          description: "实时更新已恢复",
-        });
-      }
-    };
-
-    // Fallback polling: GET job status every 30s to catch missed SSE events
-    const pollTimer = setInterval(async () => {
-      try {
-        const status = await getBatchJobStatus(jobId);
-        setCurrentJob((prev) => {
-          if (!prev || prev.job_id !== jobId) return prev;
+  // --- Fallback poll function ---
+  const pollFn = useCallback(async () => {
+    const jobId = jobIdRef.current;
+    if (!jobId) return;
+    const status = await getBatchJobStatus(jobId);
+    setCurrentJob((prev) => {
+      if (!prev || prev.job_id !== jobId) return prev;
+      return {
+        ...prev,
+        job_status: status.status,
+        bugs: prev.bugs.map((bug, idx) => {
+          const apiBug = status.bugs?.[idx];
+          if (!apiBug) return bug;
           return {
-            ...prev,
-            job_status: status.status,
-            bugs: prev.bugs.map((bug, idx) => {
-              const apiBug = status.bugs?.[idx];
-              if (!apiBug) return bug;
-              return {
-                ...bug,
-                status: apiBug.status ?? bug.status,
-                error: apiBug.error ?? bug.error,
-                // Keep SSE-derived steps and retry_count (not in BugStatusDetail)
-                steps: bug.steps && bug.steps.length > 0 ? bug.steps : undefined,
-                retry_count: bug.retry_count,
-              };
-            }),
+            ...bug,
+            status: apiBug.status ?? bug.status,
+            error: apiBug.error ?? bug.error,
+            steps: bug.steps && bug.steps.length > 0 ? bug.steps : undefined,
+            retry_count: bug.retry_count,
           };
-        });
-      } catch {
-        // Polling failure is non-critical — SSE is primary channel
-        console.warn("Fallback poll failed, will retry next interval");
-      }
-    }, FALLBACK_POLL_INTERVAL);
+        }),
+      };
+    });
+  }, []);
 
-    return () => {
-      eventSource.close();
-      clearInterval(pollTimer);
-    };
-  }, [currentJob?.job_id, toast]); // eslint-disable-line react-hooks/exhaustive-deps
+  // --- SSE connection via shared hook ---
+  const { connected: sseConnected, stale: sseStale } = useSSEStream({
+    url: sseUrl,
+    handlers: sseHandlers,
+    terminalEvents: ["job_done"],
+    pollFn,
+    onError: () => {
+      toastRef.current({
+        title: "连接中断",
+        description: "实时更新暂时不可用，正在尝试重连…",
+        variant: "destructive",
+      });
+    },
+    onReconnect: () => {
+      toastRef.current({
+        title: "连接恢复",
+        description: "实时更新已恢复",
+      });
+    },
+  });
 
   // Submit a new batch job — also resets AI thinking state
   const submit = useCallback(
@@ -459,14 +390,30 @@ export function useBatchJob() {
   // Retry a single failed bug
   const retryBug = useCallback(async (bugIndex: number) => {
     if (!currentJob) return;
+    // Guard: don't allow retry if job is terminal or bug is not failed
+    if (TERMINAL_STATUSES.includes(currentJob.job_status)) {
+      toast({
+        title: "无法重试",
+        description: `任务已${currentJob.job_status === "completed" ? "完成" : currentJob.job_status === "cancelled" ? "取消" : "结束"}，无法重试单个 Bug`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const targetBug = currentJob.bugs[bugIndex];
+    if (!targetBug || targetBug.status !== "failed") {
+      return;
+    }
     try {
       await retryBugApi(currentJob.job_id, bugIndex);
-      // Reset local bug state and mark job as running to reconnect SSE
       setCurrentJob((prev) => {
         if (!prev) return prev;
+        // Double-check: don't overwrite terminal job_status
+        const nextJobStatus = TERMINAL_STATUSES.includes(prev.job_status)
+          ? prev.job_status
+          : "running";
         return {
           ...prev,
-          job_status: "running",
+          job_status: nextJobStatus,
           bugs: prev.bugs.map((bug, idx) =>
             idx === bugIndex
               ? { ...bug, status: "pending" as const, error: undefined, steps: [] }
@@ -474,7 +421,6 @@ export function useBatchJob() {
           ),
         };
       });
-      // Clear AI thinking events for the retried bug (keep events with undefined bug_index)
       setAiThinkingEvents((prev) => prev.filter((e) => e.bug_index === undefined || e.bug_index !== bugIndex));
       toast({
         title: "重试已启动",
@@ -492,10 +438,8 @@ export function useBatchJob() {
   // Calculate stats
   const stats: BatchJobStats = currentJob
     ? {
-        completed: currentJob.bugs.filter((b) => b.status === "completed")
-          .length,
-        in_progress: currentJob.bugs.filter((b) => b.status === "in_progress")
-          .length,
+        completed: currentJob.bugs.filter((b) => b.status === "completed").length,
+        in_progress: currentJob.bugs.filter((b) => b.status === "in_progress").length,
         pending: currentJob.bugs.filter((b) => b.status === "pending").length,
         failed: currentJob.bugs.filter((b) => b.status === "failed").length,
         skipped: currentJob.bugs.filter((b) => b.status === "skipped").length,
@@ -510,6 +454,7 @@ export function useBatchJob() {
     cancel,
     retryBug,
     sseConnected,
+    sseStale,
     aiThinkingEvents,
     aiThinkingStats,
     dbSyncWarnings,
