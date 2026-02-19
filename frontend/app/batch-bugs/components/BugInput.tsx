@@ -129,7 +129,7 @@ https://jira.example.com/browse/BUG-1236`}
               onChange={(e) => onJiraUrlsChange(e.target.value)}
               className="min-h-[160px] font-mono text-sm"
             />
-            <p className="mt-2 text-xs text-slate-400">
+            <p className="mt-2 text-xs text-muted-foreground">
               已输入 {parseJiraUrls().length} 个链接
             </p>
           </TabsContent>
@@ -156,7 +156,7 @@ https://jira.example.com/browse/BUG-1236`}
               {jqlResults.length > 0 && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs text-slate-400">
+                    <p className="text-xs text-muted-foreground">
                       找到 {jqlResults.length} 个 Bug，已选择{" "}
                       {selectedBugKeys.size} 个
                     </p>
@@ -182,11 +182,11 @@ https://jira.example.com/browse/BUG-1236`}
                     </div>
                   </div>
 
-                  <div className="max-h-[200px] overflow-y-auto rounded-md border border-slate-700">
+                  <div className="max-h-[200px] overflow-y-auto rounded-md border border-border">
                     {jqlResults.map((bug) => (
                       <div
                         key={bug.key}
-                        className="flex items-center gap-3 border-b border-slate-700 px-3 py-2 last:border-b-0 hover:bg-slate-700/50"
+                        className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0 hover:bg-muted"
                       >
                         <Checkbox
                           checked={selectedBugKeys.has(bug.key)}
@@ -194,19 +194,19 @@ https://jira.example.com/browse/BUG-1236`}
                         />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-sm font-medium text-cyan-400">
+                            <span className="font-mono text-sm font-medium text-primary">
                               {bug.key}
                             </span>
-                            <Badge className="border-slate-600 bg-slate-700/50 text-slate-300 text-xs">
+                            <Badge className="border-border bg-muted/50 text-card-foreground text-xs">
                               {bug.status}
                             </Badge>
                             {bug.priority && (
-                              <span className="text-xs text-slate-400">
+                              <span className="text-xs text-muted-foreground">
                                 {bug.priority}
                               </span>
                             )}
                           </div>
-                          <p className="truncate text-xs text-slate-400">
+                          <p className="truncate text-xs text-muted-foreground">
                             {bug.summary}
                           </p>
                         </div>
@@ -217,7 +217,7 @@ https://jira.example.com/browse/BUG-1236`}
               )}
 
               {jqlResults.length === 0 && jqlQuery && !loadingJql && (
-                <p className="text-center text-xs text-slate-400 py-4">
+                <p className="text-center text-xs text-muted-foreground py-4">
                   输入 JQL 查询语句并点击查询
                 </p>
               )}

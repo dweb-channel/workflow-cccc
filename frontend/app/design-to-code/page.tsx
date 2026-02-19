@@ -68,7 +68,7 @@ export default function DesignToCodePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-full items-center justify-center text-slate-400">
+        <div className="flex h-full items-center justify-center text-muted-foreground">
           加载中...
         </div>
       }
@@ -220,10 +220,10 @@ function DesignToCodeContent() {
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* ---- Header ---- */}
-        <div className="shrink-0 bg-slate-800 px-6 pt-5 pb-3">
+        <div className="shrink-0 bg-card px-6 pt-5 pb-3">
           <div className="flex items-center gap-3 flex-wrap">
             <Palette className="h-5 w-5 text-violet-400" />
-            <h1 className="text-lg font-semibold text-white">设计转规格</h1>
+            <h1 className="text-lg font-semibold text-foreground">设计转规格</h1>
             {currentJob && (
               <div className="ml-auto flex items-center gap-2">
                 <span className="rounded-full bg-violet-500/10 px-2.5 py-0.5 font-mono text-xs text-violet-400">
@@ -238,16 +238,16 @@ function DesignToCodeContent() {
         <div className="h-[2px] bg-gradient-to-r from-violet-500 via-purple-400 to-pink-400 shrink-0" />
 
         {/* ---- Content ---- */}
-        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-[#0F172A]">
+        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-background">
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
             className="flex flex-1 flex-col overflow-hidden"
           >
-            <TabsList className="mb-4 w-fit shrink-0 bg-slate-800 p-1 rounded-lg">
+            <TabsList className="mb-4 w-fit shrink-0 bg-card p-1 rounded-lg">
               <TabsTrigger
                 value="config"
-                className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-violet-500 data-[state=active]:text-white data-[state=active]:shadow-sm text-slate-400"
+                className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-violet-500 data-[state=active]:text-white data-[state=active]:shadow-sm text-muted-foreground"
               >
                 <span className="inline-flex items-center gap-1.5">
                   <FileEdit className="h-3.5 w-3.5" /> 配置
@@ -256,7 +256,7 @@ function DesignToCodeContent() {
               <TabsTrigger
                 value="execution"
                 disabled={!hasJob || undefined}
-                className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-violet-500 data-[state=active]:text-white data-[state=active]:shadow-sm text-slate-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-violet-500 data-[state=active]:text-white data-[state=active]:shadow-sm text-muted-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <span className="inline-flex items-center gap-1.5">
                   <Play className="h-3.5 w-3.5" /> 执行{executionTabSuffix}
@@ -298,7 +298,7 @@ function DesignToCodeContent() {
                             placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
                             className="font-mono text-sm"
                           />
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-muted-foreground">
                             粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
                             格式。可带 node-id 参数指定具体节点。
                           </p>
@@ -312,7 +312,7 @@ function DesignToCodeContent() {
                             placeholder="output/spec"
                             className="font-mono text-sm"
                           />
-                          <p className="text-xs text-slate-400">
+                          <p className="text-xs text-muted-foreground">
                             生成的 design_spec.json 将输出到此目录
                           </p>
                         </div>
@@ -340,7 +340,7 @@ function DesignToCodeContent() {
                   <div className="w-[360px] shrink-0 overflow-y-auto">
                     <Card>
                       <CardContent className="p-4 space-y-3">
-                        <h3 className="text-sm font-semibold text-slate-300">
+                        <h3 className="text-sm font-semibold text-foreground">
                           Pipeline 流程
                         </h3>
                         <div className="space-y-2">
@@ -353,10 +353,10 @@ function DesignToCodeContent() {
                                 {stage.icon}
                               </span>
                               <div>
-                                <p className="font-medium text-slate-300">
+                                <p className="font-medium text-foreground">
                                   {stage.label}
                                 </p>
-                                <p className="text-slate-500">{stage.desc}</p>
+                                <p className="text-muted-foreground">{stage.desc}</p>
                               </div>
                             </div>
                           ))}
@@ -378,12 +378,12 @@ function DesignToCodeContent() {
                 /* ---- Completed: Full-width code preview ---- */
                 <div className="flex flex-1 h-full flex-col overflow-hidden">
                   {/* Compact status bar */}
-                  <div className="flex items-center gap-3 rounded-lg bg-slate-800 px-4 py-2.5 mb-3 shrink-0">
+                  <div className="flex items-center gap-3 rounded-lg bg-card px-4 py-2.5 mb-3 shrink-0">
                     <JobStatusBadge status={currentJob.job_status} />
-                    <span className="text-xs text-slate-300">
+                    <span className="text-xs text-foreground">
                       {stats.completed}/{stats.total} components
                     </span>
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-muted-foreground">
                       {currentJob.design_file ? currentJob.design_file.split("/").pop() : "Figma"}
                     </span>
                     <div className="flex-1" />
@@ -398,7 +398,7 @@ function DesignToCodeContent() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 text-xs text-slate-400"
+                      className="h-7 text-xs text-muted-foreground"
                       onClick={() => setShowLog((v) => !v)}
                     >
                       {showLog ? "Hide Log" : "Show Log"}
@@ -407,13 +407,13 @@ function DesignToCodeContent() {
 
                   {/* Token usage + validation banners */}
                   {tokenUsage && (tokenUsage.input_tokens > 0 || tokenUsage.output_tokens > 0) && (
-                    <div className="rounded-lg border border-slate-700 bg-slate-800/50 px-4 py-2 mb-3 shrink-0">
-                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <div className="rounded-lg border border-border bg-card/50 px-4 py-2 mb-3 shrink-0">
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         <span>Token 用量：</span>
-                        <span>输入 <span className="text-slate-200 font-mono">{tokenUsage.input_tokens.toLocaleString()}</span></span>
-                        <span>输出 <span className="text-slate-200 font-mono">{tokenUsage.output_tokens.toLocaleString()}</span></span>
-                        <span className="text-slate-500">|</span>
-                        <span>合计 <span className="text-slate-200 font-mono">{(tokenUsage.input_tokens + tokenUsage.output_tokens).toLocaleString()}</span></span>
+                        <span>输入 <span className="text-foreground font-mono">{tokenUsage.input_tokens.toLocaleString()}</span></span>
+                        <span>输出 <span className="text-foreground font-mono">{tokenUsage.output_tokens.toLocaleString()}</span></span>
+                        <span className="text-muted-foreground">|</span>
+                        <span>合计 <span className="text-foreground font-mono">{(tokenUsage.input_tokens + tokenUsage.output_tokens).toLocaleString()}</span></span>
                       </div>
                     </div>
                   )}
@@ -446,7 +446,7 @@ function DesignToCodeContent() {
                       />
                     </div>
                   ) : (
-                    <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+                    <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
                       No design spec available.
                     </div>
                   )}

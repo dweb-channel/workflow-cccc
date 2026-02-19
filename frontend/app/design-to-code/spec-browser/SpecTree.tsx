@@ -128,13 +128,13 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="shrink-0 border-b border-slate-700 px-3 py-2.5">
+      <div className="shrink-0 border-b border-border px-3 py-2.5">
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-xs font-semibold text-slate-300">
+            <span className="text-xs font-semibold text-foreground">
               Components
             </span>
-            <span className="ml-2 text-[11px] text-slate-500">
+            <span className="ml-2 text-[11px] text-muted-foreground">
               {filtered.length !== components.length
                 ? `${filtered.length}/${components.length}`
                 : `(${components.length})`}
@@ -146,7 +146,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
             className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
               groupByRole
                 ? "bg-violet-500/20 text-violet-300"
-                : "text-slate-500 hover:text-slate-300 hover:bg-slate-700/50"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
             title={groupByRole ? "Flat view" : "Group by role"}
           >
@@ -174,7 +174,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
       </div>
 
       {/* Search + Filter bar */}
-      <div className="shrink-0 border-b border-slate-700/50 px-3 py-1.5 space-y-1.5">
+      <div className="shrink-0 border-b border-border/50 px-3 py-1.5 space-y-1.5">
         {/* Search input */}
         <div className="relative">
           <input
@@ -182,12 +182,12 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search..."
-            className="w-full rounded bg-slate-800 border border-slate-600/50 px-2 py-1 text-[11px] text-slate-300 placeholder:text-slate-500 focus:outline-none focus:border-violet-500/50"
+            className="w-full rounded bg-card border border-input/50 px-2 py-1 text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-violet-500/50"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-[11px]"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-[11px]"
             >
               x
             </button>
@@ -201,7 +201,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
             className={`rounded px-1.5 py-0.5 text-[10px] transition-colors ${
               roleFilter.size > 0
                 ? "bg-violet-500/20 text-violet-300"
-                : "text-slate-500 hover:text-slate-300 hover:bg-slate-700/50"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
           >
             Role{roleFilter.size > 0 ? ` (${roleFilter.size})` : ""}
@@ -209,7 +209,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
           {roleFilter.size > 0 && (
             <button
               onClick={() => setRoleFilter(new Set())}
-              className="text-[10px] text-slate-500 hover:text-slate-300"
+              className="text-[10px] text-muted-foreground hover:text-foreground"
             >
               Clear
             </button>
@@ -247,9 +247,9 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
           // Grouped view
           grouped.map((group) => (
             <div key={group.label}>
-              <div className="sticky top-0 z-10 bg-slate-900/90 backdrop-blur-sm px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-700/30">
+              <div className="sticky top-0 z-10 bg-background/90 backdrop-blur-sm px-3 py-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border/30">
                 {group.label}
-                <span className="ml-1.5 text-slate-500 font-normal normal-case">
+                <span className="ml-1.5 text-muted-foreground font-normal normal-case">
                   ({group.components.length})
                 </span>
               </div>
@@ -278,7 +278,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
         )}
 
         {filtered.length === 0 && (
-          <div className="px-3 py-4 text-center text-[11px] text-slate-500">
+          <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">
             No matches
           </div>
         )}
@@ -290,7 +290,7 @@ export function SpecTree({ components, selectedId, onSelect, analysisStatus }: S
 // ---- Status indicator ----
 
 const STATUS_STYLES: Record<AnalysisStatus, { dot: string; label: string }> = {
-  pending: { dot: "bg-slate-500", label: "Pending" },
+  pending: { dot: "bg-muted-foreground", label: "Pending" },
   analyzing: { dot: "bg-amber-400 animate-pulse", label: "Analyzing" },
   complete: { dot: "bg-emerald-400", label: "Done" },
   error: { dot: "bg-red-400", label: "Error" },
@@ -327,7 +327,7 @@ function ComponentRow({
   return (
     <button
       onClick={() => onSelect(component.id)}
-      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-slate-700/40 border-b border-slate-700/30 ${
+      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-muted/40 border-b border-border/30 ${
         isSelected ? "bg-violet-500/15" : ""
       }`}
     >
@@ -337,10 +337,10 @@ function ComponentRow({
         <span
           className={`truncate text-[12px] ${
             isSelected
-              ? "font-medium text-white"
+              ? "font-medium text-foreground"
               : isSpacer || isPlatform
-                ? "text-slate-500 italic"
-                : "text-slate-300"
+                ? "text-muted-foreground italic"
+                : "text-foreground"
           }`}
         >
           {displayName}
@@ -357,19 +357,19 @@ function ComponentRow({
 
       {/* Description line (truncated) */}
       {component.description && (
-        <div className="text-[10px] text-slate-500 truncate leading-tight">
+        <div className="text-[10px] text-muted-foreground truncate leading-tight">
           {component.description.slice(0, 60)}{component.description.length > 60 ? "..." : ""}
         </div>
       )}
 
       {/* Bottom line: size */}
-      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+      <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
         <span>{Math.round(component.bounds.width)} x {Math.round(component.bounds.height)}</span>
         {component.children && component.children.length > 0 && (
-          <span className="text-slate-600">{component.children.length} children</span>
+          <span className="text-muted-foreground">{component.children.length} children</span>
         )}
         {component.children_collapsed != null && component.children_collapsed > 0 && (
-          <span className="text-slate-600">
+          <span className="text-muted-foreground">
             {component.children_collapsed} nodes
           </span>
         )}

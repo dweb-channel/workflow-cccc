@@ -22,8 +22,8 @@ import {
 
 export function AIAvatar() {
   return (
-    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-cyan-500/10">
-      <span className="text-[10px] font-bold text-cyan-400">AI</span>
+    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
+      <span className="text-[10px] font-bold text-primary">AI</span>
     </div>
   );
 }
@@ -43,7 +43,7 @@ export function EventCard({ event }: { event: AIThinkingEvent }) {
 
   return (
     <div
-      className={`border-b border-slate-700 px-4 py-3 ${borderColor ? "border-l-[3px]" : ""}`}
+      className={`border-b border-border px-4 py-3 ${borderColor ? "border-l-[3px]" : ""}`}
       style={borderColor ? { borderLeftColor: borderColor } : undefined}
       data-testid="event-card"
     >
@@ -57,7 +57,7 @@ export function EventCard({ event }: { event: AIThinkingEvent }) {
             >
               {isError ? "\u274C \u6267\u884C\u51FA\u9519" : cfg.label}
             </span>
-            <span className="shrink-0 text-[11px] text-slate-500">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               {formatRelativeTime(event.timestamp)}
             </span>
           </div>
@@ -79,7 +79,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "thinking":
     case "text":
       return (
-        <p className="text-xs leading-relaxed text-slate-300">
+        <p className="text-xs leading-relaxed text-card-foreground">
           {"content" in event ? event.content : ""}
         </p>
       );
@@ -87,9 +87,9 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
     case "read": {
       const e = event as AIThinkingReadEvent;
       return (
-        <span className="font-mono text-xs text-slate-200">
+        <span className="font-mono text-xs text-foreground">
           {e.file}
-          {e.lines && <span className="text-slate-500">  {e.lines}</span>}
+          {e.lines && <span className="text-muted-foreground">  {e.lines}</span>}
         </span>
       );
     }
@@ -99,14 +99,14 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
       return (
         <div className="space-y-1.5">
           {e.description && (
-            <p className="text-xs text-slate-400">{e.description}</p>
+            <p className="text-xs text-muted-foreground">{e.description}</p>
           )}
-          <p className="font-mono text-xs font-medium text-slate-200">{e.file}</p>
+          <p className="font-mono text-xs font-medium text-foreground">{e.file}</p>
           {e.diff && (
-            <div className="rounded-md bg-slate-900 px-2.5 py-2">
+            <div className="rounded-md bg-background px-2.5 py-2">
               <pre className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed">
                 {e.diff.split("\n").map((line, i) => (
-                  <span key={`diff-${i}`} className={line.startsWith("+") ? "text-green-400" : line.startsWith("-") ? "text-red-400" : "text-slate-400"}>
+                  <span key={`diff-${i}`} className={line.startsWith("+") ? "text-green-400" : line.startsWith("-") ? "text-red-400" : "text-muted-foreground"}>
                     {line}{"\n"}
                   </span>
                 ))}
@@ -122,14 +122,14 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
       return (
         <div className="space-y-1">
           {e.description && (
-            <p className="text-xs text-slate-400">{e.description}</p>
+            <p className="text-xs text-muted-foreground">{e.description}</p>
           )}
-          <div className="rounded-md bg-[#0F172A] px-2.5 py-2 space-y-1">
-            <p className="font-mono text-[11px] font-medium text-[#4ade80]">
+          <div className="rounded-md bg-background px-2.5 py-2 space-y-1">
+            <p className="font-mono text-[11px] font-medium text-green-400">
               $ {e.command}
             </p>
             {e.output && (
-              <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-[#94a3b8]">
+              <pre className="whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-muted-foreground">
                 {e.output}
               </pre>
             )}
@@ -145,7 +145,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
       const bgColor = isVerify ? "rgba(34,197,94,0.08)" : isFix ? "rgba(6,182,212,0.08)" : "rgba(30,41,59,0.5)";
       return (
         <div className="rounded-md border px-3 py-2" style={{ borderColor: bdrColor, backgroundColor: bgColor }}>
-          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-slate-300">
+          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-card-foreground">
             {event.content}
           </pre>
         </div>
@@ -154,7 +154,7 @@ function EventContent({ event }: { event: AIThinkingEvent }) {
 
     default:
       return (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           {"content" in event ? (event as { content: string }).content : JSON.stringify(event)}
         </p>
       );
@@ -180,7 +180,7 @@ export function ExploreGroupCard({ group }: { group: ExploreGroup }) {
     : "\u5206\u6790\u4EE3\u7801\u5E93\u4E2D...";
 
   return (
-    <div className="border-b border-slate-700 px-4 py-3" data-testid="event-group" data-count={count}>
+    <div className="border-b border-border px-4 py-3" data-testid="event-group" data-count={count}>
       <div className="flex gap-2.5">
         <AIAvatar />
         <div className="min-w-0 flex-1">
@@ -192,31 +192,31 @@ export function ExploreGroupCard({ group }: { group: ExploreGroup }) {
               >
                 {"\uD83D\uDCAD"} \u5206\u6790\u63A2\u7D22
               </span>
-              <p className="mt-1 text-xs leading-relaxed text-slate-300">
+              <p className="mt-1 text-xs leading-relaxed text-card-foreground">
                 {mainText}{mainText.length >= 80 ? "..." : ""}
               </p>
               {group.lastFile && (
-                <p className="mt-0.5 text-[11px] text-slate-400">
-                  \u6700\u8FD1: <span className="font-mono text-slate-200">{group.lastFile}</span>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  \u6700\u8FD1: <span className="font-mono text-foreground">{group.lastFile}</span>
                 </p>
               )}
-              <p className="mt-0.5 text-[11px] text-slate-500">{summaryStats}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">{summaryStats}</p>
             </div>
-            <span className="shrink-0 text-[11px] text-slate-500">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
               {formatRelativeTime(group.timestamp)}
             </span>
           </div>
           {count > 1 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="mt-1.5 text-[11px] font-medium text-cyan-400 hover:text-cyan-300"
+              className="mt-1.5 text-[11px] font-medium text-primary hover:text-primary"
               data-testid="event-group-expand"
             >
               {expanded ? `\u6536\u8D77 ${count} \u6761\u8BE6\u60C5 \u25B4` : `\u5C55\u5F00 ${count} \u6761\u8BE6\u60C5 \u25BE`}
             </button>
           )}
           {expanded && (
-            <div className="mt-2 space-y-1 border-l-2 border-slate-600 pl-3">
+            <div className="mt-2 space-y-1 border-l-2 border-border pl-3">
               {group.events.map((evt, i) => (
                 <MiniEventRow key={evt.timestamp || `evt-${i}`} event={evt} />
               ))}
@@ -233,11 +233,11 @@ function MiniEventRow({ event }: { event: AIThinkingEvent }) {
   const cfg = EVENT_CONFIG[event.type] ?? EVENT_CONFIG.text;
   return (
     <div className="flex items-start gap-1.5 text-[11px]">
-      <span className="shrink-0 font-mono text-slate-500 w-[48px]">{formatTime(event.timestamp)}</span>
+      <span className="shrink-0 font-mono text-muted-foreground w-[48px]">{formatTime(event.timestamp)}</span>
       <span className="shrink-0 rounded px-1 py-0.5" style={{ backgroundColor: cfg.tagBg, color: cfg.tagColor }}>
         {cfg.label}
       </span>
-      <span className="min-w-0 flex-1 truncate text-slate-400">
+      <span className="min-w-0 flex-1 truncate text-muted-foreground">
         {getMiniContent(event)}
       </span>
     </div>

@@ -78,19 +78,19 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
   }, [spec]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-800">
+    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-card">
       {/* ---- Toolbar ---- */}
-      <div className="flex items-center gap-2 border-b border-slate-700 bg-slate-900 px-4 py-2.5 shrink-0">
-        <span className="text-sm font-semibold text-white">
+      <div className="flex items-center gap-2 border-b border-border bg-background px-4 py-2.5 shrink-0">
+        <span className="text-sm font-semibold text-foreground">
           Spec Browser
         </span>
         {spec.page?.name && (
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-muted-foreground">
             &mdash; {spec.page.name}
           </span>
         )}
         {spec.page?.device?.type && (
-          <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
             {spec.page.device.type}
             {spec.page.device.width && spec.page.device.height
               ? ` ${spec.page.device.width}x${spec.page.device.height}`
@@ -117,7 +117,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
         {/* Copy JSON */}
         <button
           onClick={handleCopyJSON}
-          className="flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-700 transition-colors"
+          className="flex items-center gap-1 rounded-md border border-input bg-card px-2.5 py-1 text-[11px] text-foreground hover:bg-muted transition-colors"
           title={selectedComponent ? "Copy selected component JSON" : "Copy full spec JSON"}
         >
           {copiedMode === "json" ? (
@@ -131,7 +131,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
         {/* Download */}
         <button
           onClick={handleDownload}
-          className="flex items-center gap-1 rounded-md border border-slate-600 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-700 transition-colors"
+          className="flex items-center gap-1 rounded-md border border-input bg-card px-2.5 py-1 text-[11px] text-foreground hover:bg-muted transition-colors"
           title="Download full design_spec.json"
         >
           <Download className="h-3 w-3" />
@@ -142,7 +142,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
       {/* ---- Three-panel layout ---- */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Tree */}
-        <div className="w-[240px] shrink-0 border-r border-slate-700 overflow-hidden">
+        <div className="w-[240px] shrink-0 border-r border-border overflow-hidden">
           <SpecTree
             components={spec.components}
             selectedId={selectedId}
@@ -151,7 +151,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
         </div>
 
         {/* Center: Spec Card */}
-        <div className="flex flex-1 flex-col overflow-hidden border-r border-slate-700">
+        <div className="flex flex-1 flex-col overflow-hidden border-r border-border">
           <div className="flex-1 overflow-hidden">
             {selectedComponent ? (
               <SpecCard
@@ -159,7 +159,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
                 onNavigate={handleNavigate}
               />
             ) : (
-              <div className="flex h-full items-center justify-center text-slate-500 text-xs">
+              <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
                 Select a component from the tree
               </div>
             )}
@@ -171,7 +171,7 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
           {selectedComponent ? (
             <SpecPreview component={selectedComponent} jobId={jobId} />
           ) : (
-            <div className="flex h-full items-center justify-center text-slate-500 text-xs">
+            <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
               No component selected
             </div>
           )}
@@ -179,23 +179,23 @@ export function SpecBrowser({ spec, jobId }: SpecBrowserProps) {
       </div>
 
       {/* ---- Bottom status bar ---- */}
-      <div className="flex items-center gap-3 border-t border-slate-700 bg-slate-900 px-4 py-2 shrink-0">
-        <span className="text-[11px] text-slate-500">
+      <div className="flex items-center gap-3 border-t border-border bg-background px-4 py-2 shrink-0">
+        <span className="text-[11px] text-muted-foreground">
           {componentMap.size} components
         </span>
         {spec.design_tokens?.colors && (
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-muted-foreground">
             {Object.keys(spec.design_tokens.colors).length} color tokens
           </span>
         )}
         {spec.source && (
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-muted-foreground">
             Source: {spec.source.tool}
             {spec.source.file_name ? ` / ${spec.source.file_name}` : ""}
           </span>
         )}
         <div className="flex-1" />
-        <span className="text-[10px] text-slate-600">
+        <span className="text-[10px] text-muted-foreground">
           v{spec.version}
         </span>
       </div>

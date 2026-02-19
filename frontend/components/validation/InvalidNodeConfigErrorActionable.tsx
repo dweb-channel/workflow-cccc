@@ -56,10 +56,10 @@ export function InvalidNodeConfigErrorActionable({
           <h4 className="text-sm font-semibold text-white">
             节点配置错误
           </h4>
-          <p className="text-sm text-slate-300 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             {message}
           </p>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             节点 ID: <code className="bg-red-900/50 px-1 rounded">{nodeId}</code>
           </p>
         </div>
@@ -68,12 +68,12 @@ export function InvalidNodeConfigErrorActionable({
       {/* Field-level Errors */}
       {fieldErrors.length > 0 && (
         <div className="ml-8 mb-3">
-          <p className="text-sm font-medium text-slate-300 mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             配置问题详情:
           </p>
           <div
             data-testid="config-field-errors"
-            className="bg-slate-800 rounded border border-red-800 divide-y divide-red-900/50"
+            className="bg-card rounded border border-red-800 divide-y divide-red-900/50"
           >
             {fieldErrors.map((fieldError, idx) => (
               <div
@@ -88,9 +88,9 @@ export function InvalidNodeConfigErrorActionable({
                       {fieldError.field}
                     </code>
                   </div>
-                  <p className="text-sm text-slate-300">{fieldError.issue}</p>
+                  <p className="text-sm text-muted-foreground">{fieldError.issue}</p>
                   {fieldError.suggestion && (
-                    <p className="text-xs text-slate-400 mt-1">
+                    <p className="text-xs text-muted-foreground mt-1">
                       💡 {fieldError.suggestion}
                     </p>
                   )}

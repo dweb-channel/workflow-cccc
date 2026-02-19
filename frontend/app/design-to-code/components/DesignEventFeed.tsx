@@ -170,22 +170,22 @@ export function DesignEventFeed({
   }, [events, isCompleted, jobStatus]);
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
+    <div className="flex h-full flex-col rounded-xl border border-border bg-card overflow-hidden">
       {/* ---- Header ---- */}
-      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-white">Pipeline 日志</span>
+          <span className="text-sm font-semibold text-foreground">Pipeline 日志</span>
           {isRunning && (
-            <span className="flex items-center gap-1 rounded-full bg-[#fef2f2] px-2 py-0.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444] animate-pulse" />
-              <span className="text-[10px] font-semibold text-[#dc2626]">
+            <span className="flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-[10px] font-semibold text-red-500">
                 LIVE
               </span>
             </span>
           )}
         </div>
         {currentNode && (
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-muted-foreground">
             当前: {getNodeLabel(currentNode).icon}{" "}
             {getNodeLabel(currentNode).label}
           </span>
@@ -194,7 +194,7 @@ export function DesignEventFeed({
 
       {/* ---- Filter Bar ---- */}
       {events.length > 0 && (
-        <div className="flex items-center gap-1 border-b border-slate-700 bg-slate-900/50 px-3 py-1.5">
+        <div className="flex items-center gap-1 border-b border-border bg-background/50 px-3 py-1.5">
           {FILTER_BUTTONS.map((btn) => {
             const count = filterCounts[btn.key];
             const isActive = activeFilter === btn.key;
@@ -204,8 +204,8 @@ export function DesignEventFeed({
                 onClick={() => setActiveFilter(btn.key)}
                 className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
                   isActive
-                    ? "bg-slate-600 text-white"
-                    : "text-slate-400 hover:bg-slate-700/50 hover:text-slate-300"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
                 {btn.icon && <span className="text-[10px]">{btn.icon}</span>}
@@ -214,8 +214,8 @@ export function DesignEventFeed({
                   <span
                     className={`ml-0.5 rounded-full px-1.5 text-[10px] ${
                       isActive
-                        ? "bg-slate-500 text-white"
-                        : "bg-slate-700 text-slate-500"
+                        ? "bg-muted-foreground text-foreground"
+                        : "bg-muted text-muted-foreground"
                     }`}
                   >
                     {count}
@@ -229,9 +229,9 @@ export function DesignEventFeed({
 
       {/* ---- SSE Disconnect Banner ---- */}
       {!sseConnected && isRunning && (
-        <div className="flex items-center gap-2 bg-[#fef2f2] border-b border-[#fecaca] px-4 py-2">
-          <span className="h-2 w-2 rounded-full bg-[#ef4444] animate-pulse" />
-          <span className="text-xs font-medium text-[#dc2626]">
+        <div className="flex items-center gap-2 bg-red-500/10 border-b border-red-500/20 px-4 py-2">
+          <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs font-medium text-red-500">
             连接已断开，正在重连...
           </span>
         </div>
@@ -248,20 +248,20 @@ export function DesignEventFeed({
           <div className="flex items-center gap-2 px-4 py-8 justify-center">
             {isRunning ? (
               <>
-                <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-                <span className="text-xs text-slate-400">
+                <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                <span className="text-xs text-muted-foreground">
                   等待 Pipeline 启动...
                 </span>
               </>
             ) : (
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-muted-foreground">
                 提交任务后，Pipeline 事件将在此显示
               </span>
             )}
           </div>
         ) : filteredEvents.length === 0 ? (
           <div className="flex items-center justify-center px-4 py-8">
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted-foreground">
               没有匹配「{FILTER_BUTTONS.find((b) => b.key === activeFilter)?.label}」的事件
             </span>
           </div>
@@ -273,11 +273,11 @@ export function DesignEventFeed({
       </div>
 
       {/* ---- Bottom Bar ---- */}
-      <div className="flex items-center gap-2 border-t border-slate-700 bg-slate-900 px-4 py-2.5">
+      <div className="flex items-center gap-2 border-t border-border bg-background px-4 py-2.5">
         {isRunning ? (
           <>
-            <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-            <span className="text-xs text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground">
               {currentNode
                 ? `正在执行: ${getNodeLabel(currentNode).label}`
                 : "处理中..."}
@@ -285,8 +285,8 @@ export function DesignEventFeed({
           </>
         ) : (
           <>
-            <span className="h-2 w-2 rounded-full bg-slate-300" />
-            <span className="text-xs text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
               {jobStatus === "completed"
                 ? "Pipeline 已完成"
                 : jobStatus === "failed"
@@ -296,7 +296,7 @@ export function DesignEventFeed({
           </>
         )}
         <div className="flex-1" />
-        <span className="font-mono text-[11px] text-slate-500">
+        <span className="font-mono text-[11px] text-muted-foreground">
           {activeFilter !== "all"
             ? `${filteredEvents.length}/${events.length} 条事件`
             : `${events.length} 条事件`}
@@ -337,7 +337,7 @@ function CompletionSummary({
       >
         {isFailed ? "Pipeline 失败" : "Pipeline 完成"}
       </span>
-      <span className="text-[11px] text-slate-400">
+      <span className="text-[11px] text-muted-foreground">
         {summary.componentsAnalyzed} 组件分析
       </span>
       {summary.errorCount > 0 && (
@@ -346,11 +346,11 @@ function CompletionSummary({
         </span>
       )}
       {summary.duration && (
-        <span className="text-[11px] text-slate-500">
+        <span className="text-[11px] text-muted-foreground">
           耗时 {summary.duration}
         </span>
       )}
-      <span className="ml-auto text-[11px] text-slate-600">
+      <span className="ml-auto text-[11px] text-muted-foreground">
         {summary.totalEvents} 条事件
       </span>
     </div>
@@ -377,7 +377,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
   if (event.event_type === "node_started" && event.node_id) {
     const { icon, label } = getNodeLabel(event.node_id);
     return (
-      <div className="flex items-center gap-2 bg-violet-500/10 px-4 py-2.5 border-b border-slate-700">
+      <div className="flex items-center gap-2 bg-violet-500/10 px-4 py-2.5 border-b border-border">
         <div className="h-px w-5 bg-violet-500/40" />
         <span className="text-xs font-semibold text-violet-400">
           {icon} {label}
@@ -394,17 +394,17 @@ function EventRow({ event }: { event: PipelineEvent }) {
   if (event.event_type === "node_completed" && event.node_id) {
     const { icon, label } = getNodeLabel(event.node_id);
     return (
-      <div className="flex items-center gap-2 border-b border-slate-700 px-4 py-2">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <span
           className="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium"
           style={{ backgroundColor: cfg.tagBg, color: cfg.tagColor }}
         >
           {cfg.label}
         </span>
-        <span className="text-xs text-slate-300">
+        <span className="text-xs text-foreground">
           {icon} {label}
         </span>
-        <span className="ml-auto font-mono text-[11px] text-slate-500">
+        <span className="ml-auto font-mono text-[11px] text-muted-foreground">
           {formatTime(event.timestamp)}
         </span>
       </div>
@@ -420,7 +420,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
       event.data?.status === "failed" ? "#ef4444" : "#22c55e";
     return (
       <div
-        className="border-b border-slate-700 border-l-[3px] px-4 py-3"
+        className="border-b border-border border-l-[3px] px-4 py-3"
         style={{ borderLeftColor: borderColor }}
       >
         <div className="flex items-center gap-2">
@@ -430,12 +430,12 @@ function EventRow({ event }: { event: PipelineEvent }) {
           >
             {cfg.label}
           </span>
-          <span className="text-xs text-slate-300">
+          <span className="text-xs text-foreground">
             {event.data?.status === "failed"
               ? `Pipeline 失败: ${event.data?.error || "未知错误"}`
               : `Pipeline 完成 — ${event.data?.components_completed || 0}/${event.data?.components_total || 0} 组件`}
           </span>
-          <span className="ml-auto font-mono text-[11px] text-slate-500">
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
             {formatTime(event.timestamp)}
           </span>
         </div>
@@ -447,7 +447,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
   if (event.event_type === "workflow_error") {
     return (
       <div
-        className="border-b border-slate-700 border-l-[3px] px-4 py-3"
+        className="border-b border-border border-l-[3px] px-4 py-3"
         style={{ borderLeftColor: "#ef4444" }}
       >
         <div className="flex items-center gap-2">
@@ -462,7 +462,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
               (event.data?.error as string) ||
               "Pipeline 执行出错"}
           </span>
-          <span className="ml-auto font-mono text-[11px] text-slate-500">
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
             {formatTime(event.timestamp)}
           </span>
         </div>
@@ -478,7 +478,7 @@ function EventRow({ event }: { event: PipelineEvent }) {
     const borderColor = compliant ? "#22c55e" : "#f59e0b";
     return (
       <div
-        className="border-b border-slate-700 border-l-[3px] px-4 py-3"
+        className="border-b border-border border-l-[3px] px-4 py-3"
         style={{ borderLeftColor: borderColor }}
       >
         <div className="flex items-center gap-2">
@@ -488,11 +488,11 @@ function EventRow({ event }: { event: PipelineEvent }) {
           >
             {compliant ? "规格完成" : "规格警告"}
           </span>
-          <span className="text-xs text-slate-300">
+          <span className="text-xs text-foreground">
             {event.data?.components_succeeded as number ?? 0}/{event.data?.components_count as number ?? 0} 组件
             {!compliant && ` — ${inferredNodes.length} 个节点缺少 auto-layout`}
           </span>
-          <span className="ml-auto font-mono text-[11px] text-slate-500">
+          <span className="ml-auto font-mono text-[11px] text-muted-foreground">
             {formatTime(event.timestamp)}
           </span>
         </div>
@@ -510,17 +510,17 @@ function EventRow({ event }: { event: PipelineEvent }) {
 
   // Default event row
   return (
-    <div className="flex items-center gap-2 border-b border-slate-700 px-4 py-2">
+    <div className="flex items-center gap-2 border-b border-border px-4 py-2">
       <span
         className="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium"
         style={{ backgroundColor: cfg.tagBg, color: cfg.tagColor }}
       >
         {cfg.label}
       </span>
-      <span className="text-xs text-slate-300 truncate flex-1">
+      <span className="text-xs text-foreground truncate flex-1">
         {event.message || describeEvent(event)}
       </span>
-      <span className="shrink-0 font-mono text-[11px] text-slate-500">
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
         {formatTime(event.timestamp)}
       </span>
     </div>
@@ -543,10 +543,10 @@ function AiThinkingRow({
   const preview = content.slice(0, 60) + (content.length > 60 ? "..." : "");
 
   return (
-    <div className="border-b border-slate-700">
+    <div className="border-b border-border">
       <button
         onClick={() => setExpanded((p) => !p)}
-        className="flex w-full items-center gap-2 px-4 py-1 text-left hover:bg-slate-700/30 transition-colors"
+        className="flex w-full items-center gap-2 px-4 py-1 text-left hover:bg-muted/30 transition-colors"
       >
         <span
           className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 opacity-60"
@@ -554,18 +554,18 @@ function AiThinkingRow({
         >
           {cfg.label}
         </span>
-        <span className="text-[10px] text-slate-500 truncate flex-1">
+        <span className="text-[10px] text-muted-foreground truncate flex-1">
           {preview}
         </span>
-        <span className="text-[10px] text-slate-600 shrink-0">
+        <span className="text-[10px] text-muted-foreground shrink-0">
           {expanded ? "▼" : "▶"}
         </span>
-        <span className="shrink-0 font-mono text-[10px] text-slate-600">
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
           {formatTime(event.timestamp)}
         </span>
       </button>
       {expanded && (
-        <div className="bg-slate-900/60 px-4 py-2 text-[11px] text-slate-400 whitespace-pre-wrap max-h-[150px] overflow-y-auto">
+        <div className="bg-background/60 px-4 py-2 text-[11px] text-muted-foreground whitespace-pre-wrap max-h-[150px] overflow-y-auto">
           {content}
         </div>
       )}
@@ -589,10 +589,10 @@ function NodeOutputRow({
   const keyFields = extractKeyFields(event);
 
   return (
-    <div className="border-b border-slate-700">
+    <div className="border-b border-border">
       <button
         onClick={() => setExpanded((p) => !p)}
-        className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-slate-700/30 transition-colors"
+        className="flex w-full items-center gap-2 px-4 py-1.5 text-left hover:bg-muted/30 transition-colors"
       >
         <span
           className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0"
@@ -600,7 +600,7 @@ function NodeOutputRow({
         >
           {cfg.label}
         </span>
-        <span className="text-[11px] text-slate-400 truncate flex-1">
+        <span className="text-[11px] text-muted-foreground truncate flex-1">
           {summary}
         </span>
         {keyFields.length > 0 && (
@@ -608,22 +608,22 @@ function NodeOutputRow({
             {keyFields.map((kf, i) => (
               <span
                 key={`${kf}-${i}`}
-                className="rounded bg-slate-700/50 px-1.5 py-0.5 text-[10px] text-slate-500"
+                className="rounded bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground"
               >
                 {kf}
               </span>
             ))}
           </span>
         )}
-        <span className="text-[10px] text-slate-600 shrink-0">
+        <span className="text-[10px] text-muted-foreground shrink-0">
           {expanded ? "▼" : "▶"}
         </span>
-        <span className="shrink-0 font-mono text-[10px] text-slate-600">
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
           {formatTime(event.timestamp)}
         </span>
       </button>
       {expanded && (
-        <pre className="bg-slate-900 px-4 py-2 text-[11px] text-slate-500 overflow-x-auto max-h-[200px] overflow-y-auto font-mono">
+        <pre className="bg-background px-4 py-2 text-[11px] text-muted-foreground overflow-x-auto max-h-[200px] overflow-y-auto font-mono">
           {JSON.stringify(event.data, null, 2)}
         </pre>
       )}

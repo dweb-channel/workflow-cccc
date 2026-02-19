@@ -100,10 +100,10 @@ export function ScanResults({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-white">
+          <h2 className="text-sm font-semibold text-foreground">
             扫描结果 — {pageName}
           </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             检测到 {candidates.length} 个 UI 屏幕，
             {interactionSpecs.length} 条交互说明，
             {designSystem.length} 个设计系统元素
@@ -115,7 +115,7 @@ export function ScanResults({
           </Button>
           <Button
             size="sm"
-            className="h-8 text-xs bg-violet-500 hover:bg-violet-400 text-white"
+            className="h-8 text-xs bg-violet-500 hover:bg-violet-400 text-foreground"
             onClick={handleConfirm}
             disabled={totalSelected === 0}
           >
@@ -258,7 +258,7 @@ export function ScanResults({
         <>
           <button
             onClick={() => setExcludedExpanded((p) => !p)}
-            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors mt-2"
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors mt-2"
           >
             {excludedExpanded ? (
               <ChevronDown className="h-3 w-3" />
@@ -273,14 +273,14 @@ export function ScanResults({
               {excluded.map((item) => (
                 <div
                   key={item.node_id}
-                  className="flex items-center gap-2 text-xs text-slate-500 py-1"
+                  className="flex items-center gap-2 text-xs text-muted-foreground py-1"
                 >
                   <span className="truncate flex-1">{item.name}</span>
-                  <span className="shrink-0 text-slate-600">
+                  <span className="shrink-0 text-muted-foreground">
                     {item.size}
                   </span>
                   {item.exclude_reason && (
-                    <span className="shrink-0 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-500">
+                    <span className="shrink-0 rounded bg-card px-1.5 py-0.5 text-[10px] text-muted-foreground">
                       {item.exclude_reason}
                     </span>
                   )}
@@ -317,12 +317,12 @@ function SectionHeader({
   return (
     <div className="flex items-center gap-2 mt-2">
       <span className="text-base">{icon}</span>
-      <span className="text-sm font-semibold text-white">{title}</span>
-      <span className="text-xs text-slate-500">
+      <span className="text-sm font-semibold text-foreground">{title}</span>
+      <span className="text-xs text-muted-foreground">
         ({selectedCount}/{count})
       </span>
       {subtitle && (
-        <span className="text-[11px] text-slate-500 italic">{subtitle}</span>
+        <span className="text-[11px] text-muted-foreground italic">{subtitle}</span>
       )}
       <button
         onClick={onToggleAll}
@@ -357,11 +357,11 @@ function ScreenCard({
       className={`relative flex flex-col rounded-lg border text-left transition-all ${
         selected
           ? "border-violet-500 bg-violet-500/10"
-          : "border-slate-700 bg-slate-800/50 hover:border-slate-600"
+          : "border-border bg-card/50 hover:border-input"
       }`}
     >
       {/* Thumbnail */}
-      <div className="relative h-36 w-full overflow-hidden rounded-t-lg bg-slate-900">
+      <div className="relative h-36 w-full overflow-hidden rounded-t-lg bg-background">
         {item.thumbnail_url ? (
           <img
             src={item.thumbnail_url}
@@ -369,7 +369,7 @@ function ScreenCard({
             className="h-full w-full object-contain"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-slate-600">
+          <div className="flex h-full items-center justify-center text-muted-foreground">
             <TypeIcon className="h-8 w-8" />
           </div>
         )}
@@ -378,23 +378,23 @@ function ScreenCard({
           className={`absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded border transition-colors ${
             selected
               ? "border-violet-500 bg-violet-500"
-              : "border-slate-500 bg-slate-800/80"
+              : "border-input bg-card/80"
           }`}
         >
-          {selected && <Check className="h-3 w-3 text-white" />}
+          {selected && <Check className="h-3 w-3 text-foreground" />}
         </div>
       </div>
       {/* Info */}
       <div className="p-2.5 space-y-1">
-        <p className="text-xs font-medium text-slate-200 truncate">
+        <p className="text-xs font-medium text-foreground truncate">
           {item.name}
         </p>
         <div className="flex items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-300">
+          <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
             <TypeIcon className="h-2.5 w-2.5" />
             {TYPE_LABELS[item.device_type || "other"]}
           </span>
-          <span className="text-[10px] text-slate-500">{item.size}</span>
+          <span className="text-[10px] text-muted-foreground">{item.size}</span>
         </div>
         {associatedSpecs.length > 0 && (
           <p className="text-[10px] text-violet-400">
@@ -426,7 +426,7 @@ function InteractionSpecCard({
       className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
         selected
           ? "border-violet-500/40 bg-violet-500/5"
-          : "border-slate-700 bg-slate-800/30"
+          : "border-border bg-card/30"
       }`}
     >
       <button
@@ -434,14 +434,14 @@ function InteractionSpecCard({
         className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
           selected
             ? "border-violet-500 bg-violet-500"
-            : "border-slate-500 bg-slate-800"
+            : "border-input bg-card"
         }`}
       >
-        {selected && <Check className="h-2.5 w-2.5 text-white" />}
+        {selected && <Check className="h-2.5 w-2.5 text-foreground" />}
       </button>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-300 truncate">
+          <span className="text-xs font-medium text-foreground truncate">
             {item.name}
           </span>
           {relatedScreenName && (
@@ -451,7 +451,7 @@ function InteractionSpecCard({
           )}
         </div>
         {item.text_content && (
-          <p className="mt-1 text-[11px] text-slate-500 line-clamp-2">
+          <p className="mt-1 text-[11px] text-muted-foreground line-clamp-2">
             {item.text_content}
           </p>
         )}
@@ -478,7 +478,7 @@ function DesignSystemCard({
       className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors ${
         selected
           ? "border-violet-500/40 bg-violet-500/5"
-          : "border-slate-700 bg-slate-800/30"
+          : "border-border bg-card/30"
       }`}
     >
       <button
@@ -486,16 +486,16 @@ function DesignSystemCard({
         className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
           selected
             ? "border-violet-500 bg-violet-500"
-            : "border-slate-500 bg-slate-800"
+            : "border-input bg-card"
         }`}
       >
-        {selected && <Check className="h-2.5 w-2.5 text-white" />}
+        {selected && <Check className="h-2.5 w-2.5 text-foreground" />}
       </button>
       <Palette className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-      <span className="text-xs text-slate-300 truncate flex-1">
+      <span className="text-xs text-foreground truncate flex-1">
         {item.name}
       </span>
-      <span className="text-[10px] text-slate-500">{item.size}</span>
+      <span className="text-[10px] text-muted-foreground">{item.size}</span>
     </div>
   );
 }

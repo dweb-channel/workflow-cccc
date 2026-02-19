@@ -26,11 +26,11 @@ export function PipelineBar({ currentJob, activeBugIndex, onBugSelect }: Pipelin
   const isFinished = ["completed", "failed", "cancelled"].includes(currentJob.job_status);
 
   return (
-    <div className="rounded-xl border border-slate-700 bg-slate-800 px-5 py-3.5">
+    <div className="rounded-xl border border-border bg-card px-5 py-3.5">
       {/* Header row */}
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[13px] font-semibold text-slate-300">执行进度</span>
-        <span className="text-xs text-slate-500">
+        <span className="text-[13px] font-semibold text-card-foreground">执行进度</span>
+        <span className="text-xs text-muted-foreground">
           {isFinished ? (
             <>
               {completed}/{total} 完成
@@ -70,7 +70,7 @@ function BugBadgeGroup({
   return (
     <>
       <BugBadge bug={bug} isActive={isActive} onSelect={onSelect} />
-      {!isLast && <span className="shrink-0 text-slate-600">&rarr;</span>}
+      {!isLast && <span className="shrink-0 text-muted-foreground">&rarr;</span>}
     </>
   );
 }
@@ -143,7 +143,7 @@ function BugBadge({
     <button
       onClick={onSelect}
       className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 transition-shadow ${
-        isActive ? "ring-2 ring-cyan-500 ring-offset-1 ring-offset-slate-800" : ""
+        isActive ? "ring-2 ring-ring ring-offset-1 ring-offset-card" : ""
       }`}
       style={{
         backgroundColor: cfg.bg,

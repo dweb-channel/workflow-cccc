@@ -86,7 +86,7 @@ export function ActivityFeed({
 
   if (!currentJob) {
     return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
         提交任务后，执行日志将在此显示
       </div>
     );
@@ -98,20 +98,20 @@ export function ActivityFeed({
   const isStreaming = aiStats.streaming;
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
+    <div className="flex h-full flex-col rounded-xl border border-border bg-card overflow-hidden">
       {/* ---- Header ---- */}
-      <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-white">执行日志</span>
+          <span className="text-sm font-semibold text-foreground">执行日志</span>
           {isStreaming && (
-            <span className="flex items-center gap-1 rounded-full bg-[#fef2f2] px-2 py-0.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#ef4444] animate-pulse" />
-              <span className="text-[10px] font-semibold text-[#dc2626]">LIVE</span>
+            <span className="flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-[10px] font-semibold text-red-500">LIVE</span>
             </span>
           )}
         </div>
         {currentBugLabel && (
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-muted-foreground">
             当前: {currentBugLabel} (Bug {inProgressIdx + 1}/{total})
           </span>
         )}
@@ -119,9 +119,9 @@ export function ActivityFeed({
 
       {/* ---- SSE Disconnect Banner ---- */}
       {!sseConnected && (
-        <div className="flex items-center gap-2 bg-[#fef2f2] border-b border-[#fecaca] px-4 py-2">
-          <span className="h-2 w-2 rounded-full bg-[#ef4444] animate-pulse" />
-          <span className="text-xs font-medium text-[#dc2626]">
+        <div className="flex items-center gap-2 bg-red-500/10 border-b border-red-500/20 px-4 py-2">
+          <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-xs font-medium text-red-500">
             连接已断开，正在重连... 数据可能不是最新的
           </span>
         </div>
@@ -157,25 +157,25 @@ export function ActivityFeed({
       </div>
 
       {/* ---- Bottom Bar ---- */}
-      <div className="flex items-center gap-2 border-t border-slate-700 bg-slate-900 px-4 py-2.5">
+      <div className="flex items-center gap-2 border-t border-border bg-background px-4 py-2.5">
         {isStreaming ? (
           <>
-            <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-            <span className="text-xs text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground">
               {getStreamingLabel(allAiEvents)}
             </span>
           </>
         ) : (
           <>
-            <span className="h-2 w-2 rounded-full bg-slate-300" />
-            <span className="text-xs text-slate-400">空闲</span>
+            <span className="h-2 w-2 rounded-full bg-muted-foreground/50" />
+            <span className="text-xs text-muted-foreground">空闲</span>
           </>
         )}
         <div className="flex-1" />
-        <span className="font-mono text-[11px] text-[#cbd5e1]">
+        <span className="font-mono text-[11px] text-foreground">
           {aiStats.tokens_in.toLocaleString()} / {aiStats.tokens_out.toLocaleString()} tokens
         </span>
-        <span className="font-mono text-[11px] font-medium text-slate-400">
+        <span className="font-mono text-[11px] font-medium text-muted-foreground">
           ${aiStats.cost.toFixed(2)}
         </span>
       </div>

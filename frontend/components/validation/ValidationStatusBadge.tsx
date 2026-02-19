@@ -36,27 +36,27 @@ const statusConfig: Record<
   valid: {
     label: '有效',
     icon: CheckCircle2,
-    className: 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
   },
   warning: {
     label: '警告',
     icon: AlertTriangle,
-    className: 'border-yellow-200 bg-yellow-50 text-yellow-700'
+    className: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-400'
   },
   error: {
     label: '错误',
     icon: XCircle,
-    className: 'border-red-200 bg-red-50 text-red-700'
+    className: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400'
   },
   validating: {
     label: '验证中',
     icon: Loader2,
-    className: 'border-blue-200 bg-blue-50 text-blue-700'
+    className: 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-400'
   },
   not_validated: {
     label: '未验证',
     icon: MinusCircle,
-    className: 'border-gray-200 bg-gray-50 text-gray-700'
+    className: 'border-border bg-muted text-muted-foreground'
   }
 };
 

@@ -18,16 +18,16 @@ export function SpecPreview({ component, jobId }: SpecPreviewProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
-      <div className="shrink-0 border-b border-slate-700 px-3 py-2.5">
-        <span className="text-xs font-semibold text-slate-300">Preview</span>
+      <div className="shrink-0 border-b border-border px-3 py-2.5">
+        <span className="text-xs font-semibold text-foreground">Preview</span>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Screenshot */}
         {hasScreenshot ? (
           <div className="space-y-2">
-            <span className="text-[10px] text-slate-500">Screenshot</span>
-            <div className="relative rounded-lg border border-slate-700 bg-slate-900 overflow-hidden">
+            <span className="text-[10px] text-muted-foreground">Screenshot</span>
+            <div className="relative rounded-lg border border-border bg-background overflow-hidden">
               <img
                 src={getScreenshotUrl(component.screenshot_path!, jobId)}
                 alt={component.name}
@@ -48,13 +48,13 @@ export function SpecPreview({ component, jobId }: SpecPreviewProps) {
         ) : (
           /* CSS-based preview when no screenshot */
           <div className="space-y-2">
-            <span className="text-[10px] text-slate-500">CSS Preview</span>
+            <span className="text-[10px] text-muted-foreground">CSS Preview</span>
             <CSSPreview component={component} />
           </div>
         )}
 
         {/* Meta info */}
-        <div className="space-y-1.5 border-t border-slate-700/50 pt-3">
+        <div className="space-y-1.5 border-t border-border/50 pt-3">
           <MetaRow label="Node ID" value={component.id} mono />
           <MetaRow
             label="Size"
@@ -89,13 +89,13 @@ function CSSPreview({ component }: { component: ComponentSpec }) {
   const style = buildPreviewStyle(component);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 flex items-center justify-center min-h-[120px]">
+    <div className="rounded-lg border border-border bg-background p-4 flex items-center justify-center min-h-[120px]">
       <div style={style} className="transition-all">
         {component.typography?.content && (
           <span className="block truncate">{component.typography.content}</span>
         )}
         {!component.typography?.content && component.content?.icon?.name && (
-          <span className="text-xs text-slate-400">{component.content.icon.name}</span>
+          <span className="text-xs text-muted-foreground">{component.content.icon.name}</span>
         )}
       </div>
     </div>
@@ -213,9 +213,9 @@ function MetaRow({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-[10px] text-slate-500">{label}</span>
+      <span className="text-[10px] text-muted-foreground">{label}</span>
       <span
-        className={`text-[11px] text-slate-400 ${mono ? "font-mono" : ""}`}
+        className={`text-[11px] text-muted-foreground ${mono ? "font-mono" : ""}`}
       >
         {value}
       </span>

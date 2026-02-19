@@ -49,20 +49,20 @@ export function TypographySection({ typography }: { typography: TypographySpec }
   return (
     <div className="space-y-1.5">
       {typography.content && (
-        <div className="rounded bg-slate-900 px-2 py-1.5">
-          <span className="text-[11px] text-slate-300">
+        <div className="rounded bg-background px-2 py-1.5">
+          <span className="text-[11px] text-foreground">
             &ldquo;{typography.content}&rdquo;
           </span>
         </div>
       )}
       {fontParts.length > 0 && (
         <div className="flex items-center gap-2">
-          <span className="text-[11px] text-slate-300">{fontParts.join(" ")}</span>
+          <span className="text-[11px] text-foreground">{fontParts.join(" ")}</span>
           {typography.color && <ColorDisplay value={typography.color} />}
         </div>
       )}
       {details.length > 0 && (
-        <div className="text-[11px] text-slate-400">{details.join("  |  ")}</div>
+        <div className="text-[11px] text-muted-foreground">{details.join("  |  ")}</div>
       )}
     </div>
   );
@@ -84,14 +84,14 @@ export function ContentSection({ content }: { content: ContentSpec }) {
     <div className="space-y-2">
       {content.image && (
         <div className="space-y-1">
-          <span className="text-[10px] font-medium text-slate-400">图片</span>
+          <span className="text-[10px] font-medium text-muted-foreground">图片</span>
           {content.image.alt && (
-            <div className="text-[11px] text-slate-300">描述: {content.image.alt}</div>
+            <div className="text-[11px] text-foreground">描述: {content.image.alt}</div>
           )}
           {content.image.src && (
-            <div className="text-[10px] text-slate-500 truncate">来源: {content.image.src}</div>
+            <div className="text-[10px] text-muted-foreground truncate">来源: {content.image.src}</div>
           )}
-          <div className="flex flex-wrap gap-2 text-[11px] text-slate-400">
+          <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
             {content.image.fit && <span>{FIT_ZH[content.image.fit] || content.image.fit}</span>}
             {content.image.aspect_ratio && <span>比例 {content.image.aspect_ratio}</span>}
             {content.image.placeholder && (
@@ -102,8 +102,8 @@ export function ContentSection({ content }: { content: ContentSpec }) {
       )}
       {content.icon && (
         <div className="space-y-1">
-          <span className="text-[10px] font-medium text-slate-400">图标</span>
-          <div className="flex items-center gap-2 text-[11px] text-slate-300">
+          <span className="text-[10px] font-medium text-muted-foreground">图标</span>
+          <div className="flex items-center gap-2 text-[11px] text-foreground">
             {content.icon.name && <span>{content.icon.name}</span>}
             {content.icon.size != null && <span>{content.icon.size}px</span>}
             {content.icon.color && <ColorDisplay value={content.icon.color} />}
@@ -122,21 +122,21 @@ export function DesignAnalysisSection({ text }: { text: string }) {
   const lines = text.split("\n");
 
   return (
-    <div className="space-y-1 text-[11px] leading-relaxed text-slate-300">
+    <div className="space-y-1 text-[11px] leading-relaxed text-foreground">
       {lines.map((line, i) => {
         const trimmed = line.trim();
         if (!trimmed) return <div key={`line-${i}`} className="h-1" />;
 
         if (trimmed.startsWith("## ")) {
           return (
-            <div key={`line-${i}`} className="font-semibold text-white text-[12px] mt-2 first:mt-0">
+            <div key={`line-${i}`} className="font-semibold text-foreground text-[12px] mt-2 first:mt-0">
               {renderInline(trimmed.slice(3))}
             </div>
           );
         }
         if (trimmed.startsWith("### ")) {
           return (
-            <div key={`line-${i}`} className="font-medium text-slate-200 text-[11px] mt-1.5">
+            <div key={`line-${i}`} className="font-medium text-foreground text-[11px] mt-1.5">
               {renderInline(trimmed.slice(4))}
             </div>
           );
@@ -144,7 +144,7 @@ export function DesignAnalysisSection({ text }: { text: string }) {
         if (trimmed.startsWith("- ")) {
           return (
             <div key={`line-${i}`} className="flex gap-1.5 pl-2">
-              <span className="text-slate-500 shrink-0">•</span>
+              <span className="text-muted-foreground shrink-0">•</span>
               <span>{renderInline(trimmed.slice(2))}</span>
             </div>
           );
@@ -153,7 +153,7 @@ export function DesignAnalysisSection({ text }: { text: string }) {
         if (numberedMatch) {
           return (
             <div key={`line-${i}`} className="flex gap-1.5 pl-2">
-              <span className="text-slate-500 shrink-0 tabular-nums">{numberedMatch[1]}.</span>
+              <span className="text-muted-foreground shrink-0 tabular-nums">{numberedMatch[1]}.</span>
               <span>{renderInline(numberedMatch[2])}</span>
             </div>
           );
@@ -172,11 +172,11 @@ function renderInline(text: string): React.ReactNode {
     <>
       {parts.map((part, i) => {
         if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={`fmt-${i}`} className="text-white font-medium">{part.slice(2, -2)}</strong>;
+          return <strong key={`fmt-${i}`} className="text-foreground font-medium">{part.slice(2, -2)}</strong>;
         }
         if (part.startsWith("`") && part.endsWith("`")) {
           return (
-            <code key={`fmt-${i}`} className="rounded bg-slate-700/80 px-1 py-0.5 text-[10px] font-mono text-emerald-400">
+            <code key={`fmt-${i}`} className="rounded bg-muted/80 px-1 py-0.5 text-[10px] font-mono text-emerald-400">
               {part.slice(1, -1)}
             </code>
           );

@@ -50,10 +50,10 @@ export function JumpReferenceWarningActionable({
           <h4 className="text-sm font-semibold text-white">
             跳转引用警告
           </h4>
-          <p className="text-sm text-slate-300 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             {message}
           </p>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-muted-foreground mt-1">
             节点 ID: <code className="bg-yellow-900/50 px-1 rounded">{nodeId}</code>
           </p>
         </div>
@@ -62,12 +62,12 @@ export function JumpReferenceWarningActionable({
       {/* Jump Paths Visualization */}
       {jumpPaths.length > 0 && (
         <div className="ml-8 mb-3">
-          <p className="text-sm font-medium text-slate-300 mb-2">
+          <p className="text-sm font-medium text-muted-foreground mb-2">
             跳转路径 ({jumpPaths.length} 个分支):
           </p>
           <div
             data-testid="jump-paths-list"
-            className="bg-slate-800 rounded border border-yellow-800 divide-y divide-yellow-900/50"
+            className="bg-card rounded border border-yellow-800 divide-y divide-yellow-900/50"
           >
             {jumpPaths.map((path, idx) => (
               <div
@@ -79,7 +79,7 @@ export function JumpReferenceWarningActionable({
                   <code className="text-xs font-mono bg-yellow-900/50 text-yellow-300 px-2 py-1 rounded">
                     {path.condition}
                   </code>
-                  <ArrowRight className="h-4 w-4 text-slate-400" />
+                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
                   <code
                     className={`text-xs font-mono px-2 py-1 rounded ${
                       path.exists
@@ -114,7 +114,7 @@ export function JumpReferenceWarningActionable({
 
       {/* Generic message when no jump paths */}
       {jumpPaths.length === 0 && (
-        <div className="ml-8 text-sm text-slate-400">
+        <div className="ml-8 text-sm text-muted-foreground">
           请检查条件节点的跳转配置
         </div>
       )}

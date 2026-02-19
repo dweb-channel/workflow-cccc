@@ -65,7 +65,7 @@ export default function CanvasPage() {
           source: e.source,
           target: e.target,
           animated: false,
-          style: { stroke: "#94a3b8", strokeWidth: 2 },
+          style: { stroke: "rgb(var(--color-border))", strokeWidth: 2 },
         }));
 
         setNodes(flowNodes);
@@ -162,17 +162,17 @@ export default function CanvasPage() {
   return (
     <div className="flex h-screen flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b bg-white px-6 py-4">
+      <div className="flex items-center justify-between border-b border-border bg-background px-6 py-4">
         <div>
           <h1 className="text-xl font-semibold">Agent 编排画布</h1>
-          <p className="text-sm text-slate-500">可视化 Agent 执行流程</p>
+          <p className="text-sm text-muted-foreground">可视化 Agent 执行流程</p>
         </div>
         <div className="flex items-center gap-3">
           <span
-            className={`flex items-center gap-2 text-sm ${isConnected ? "text-emerald-600" : "text-slate-400"}`}
+            className={`flex items-center gap-2 text-sm ${isConnected ? "text-emerald-600" : "text-muted-foreground"}`}
           >
             <span
-              className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-slate-300"}`}
+              className={`h-2 w-2 rounded-full ${isConnected ? "bg-emerald-500" : "bg-border"}`}
             />
             {isConnected ? "已连接" : "未连接"}
           </span>
@@ -193,7 +193,7 @@ export default function CanvasPage() {
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             fitView
-            className="bg-slate-50"
+            className="bg-background"
           >
             <Controls />
             <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
@@ -207,7 +207,7 @@ export default function CanvasPage() {
           </CardHeader>
           <CardContent className="h-[calc(100vh-180px)] overflow-auto p-3">
             {logs.length === 0 ? (
-              <p className="text-sm text-slate-400">点击"连接 Demo 流"开始</p>
+              <p className="text-sm text-muted-foreground">点击"连接 Demo 流"开始</p>
             ) : (
               <div className="space-y-1 font-mono text-xs">
                 {logs.map((log, i) => (
@@ -222,7 +222,7 @@ export default function CanvasPage() {
                             ? "bg-red-50 text-red-700"
                             : log.includes("[OUTPUT]")
                               ? "bg-amber-50 text-amber-700"
-                              : "bg-slate-50 text-slate-600"
+                              : "bg-muted text-muted-foreground"
                     }`}
                   >
                     {log}

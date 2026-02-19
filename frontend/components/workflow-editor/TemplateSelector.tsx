@@ -144,19 +144,19 @@ export function TemplateSelector({ onSelectTemplate, disabled }: TemplateSelecto
           <div className="mt-4">
             {loading && (
               <div className="flex items-center justify-center py-8">
-                <span className="text-sm text-slate-500">加载中...</span>
+                <span className="text-sm text-muted-foreground">加载中...</span>
               </div>
             )}
 
             {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
                 {error}
               </div>
             )}
 
             {!loading && !error && templates.length === 0 && (
               <div className="flex items-center justify-center py-8">
-                <span className="text-sm text-slate-400">暂无可用模板</span>
+                <span className="text-sm text-muted-foreground">暂无可用模板</span>
               </div>
             )}
 
@@ -165,8 +165,8 @@ export function TemplateSelector({ onSelectTemplate, disabled }: TemplateSelecto
                 {templates.map((template) => (
                   <Card
                     key={template.name}
-                    className={`cursor-pointer transition-colors hover:border-blue-300 hover:bg-blue-50 ${
-                      selecting === template.name ? "border-blue-500 bg-blue-50" : ""
+                    className={`cursor-pointer transition-colors hover:border-primary/50 hover:bg-primary/5 ${
+                      selecting === template.name ? "border-primary bg-primary/5" : ""
                     }`}
                     onClick={() => handleSelectTemplate(template.name)}
                   >
@@ -177,11 +177,11 @@ export function TemplateSelector({ onSelectTemplate, disabled }: TemplateSelecto
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-muted-foreground">
                         {template.description}
                       </p>
                       {selecting === template.name && (
-                        <span className="mt-2 block text-xs text-blue-500">加载中...</span>
+                        <span className="mt-2 block text-xs text-primary">加载中...</span>
                       )}
                     </CardContent>
                   </Card>

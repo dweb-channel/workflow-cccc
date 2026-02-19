@@ -142,8 +142,8 @@ export default function TestHarnessPage() {
         <div className="flex items-start gap-3">
           <span className="text-red-600 font-mono text-sm">{error.code}</span>
           <div className="flex-1">
-            <p className="text-gray-900">{error.message}</p>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-foreground">{error.message}</p>
+            <p className="text-sm text-muted-foreground mt-1">
               节点: {error.node_ids.join(', ')}
             </p>
           </div>
@@ -182,8 +182,8 @@ export default function TestHarnessPage() {
         <div className="flex items-start gap-3">
           <span className="text-yellow-700 font-mono text-sm">{warning.code}</span>
           <div className="flex-1">
-            <p className="text-gray-900">{warning.message}</p>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-foreground">{warning.message}</p>
+            <p className="text-sm text-muted-foreground mt-1">
               节点: {warning.node_ids.join(', ')}
             </p>
           </div>
@@ -193,15 +193,15 @@ export default function TestHarnessPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <div className="min-h-screen bg-background py-8 px-4">
       <div className="max-w-5xl mx-auto">
-        <div className="bg-white rounded-lg shadow-sm p-8">
+        <div className="bg-card rounded-lg shadow-sm p-8">
           {/* Header */}
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-foreground mb-2">
               Workflow Validation Test Harness
             </h1>
-            <p className="text-gray-600">
+            <p className="text-muted-foreground">
               E2E 测试工具 - 用于 Playwright 自动化测试
             </p>
           </div>
@@ -211,14 +211,14 @@ export default function TestHarnessPage() {
             <div className="flex-1 min-w-[300px]">
               <label
                 htmlFor="fixture-selector"
-                className="block text-sm font-medium text-gray-700 mb-2"
+                className="block text-sm font-medium text-foreground mb-2"
               >
                 选择测试场景
               </label>
               <select
                 id="fixture-selector"
                 data-testid="fixture-selector"
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-4 py-2 border border-border rounded-md focus:ring-2 focus:ring-primary focus:border-transparent bg-input-bg text-foreground"
                 value={selectedFixture}
                 onChange={(e) => setSelectedFixture(e.target.value)}
               >
@@ -236,14 +236,14 @@ export default function TestHarnessPage() {
                 data-testid="run-validation"
                 onClick={runValidation}
                 disabled={!selectedFixture}
-                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:bg-muted-foreground disabled:cursor-not-allowed transition-colors"
               >
                 运行验证
               </button>
               <button
                 data-testid="clear-result"
                 onClick={clearResult}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+                className="px-6 py-2 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition-colors"
               >
                 清除结果
               </button>
@@ -265,9 +265,9 @@ export default function TestHarnessPage() {
           {validationResult && (
             <div data-testid="validation-result" className="space-y-4">
               {/* Summary with Badge */}
-              <div className="bg-gray-50 rounded-md p-4">
+              <div className="bg-muted rounded-md p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-semibold text-gray-900">
+                  <h2 className="text-xl font-semibold text-foreground">
                     验证结果
                   </h2>
                   <ValidationStatusBadge
@@ -284,7 +284,7 @@ export default function TestHarnessPage() {
                 </div>
                 <div className="grid grid-cols-3 gap-4">
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">有效性</p>
+                    <p className="text-sm text-muted-foreground mb-1">有效性</p>
                     <p
                       data-testid="validation-valid"
                       className={`text-lg font-semibold ${
@@ -295,19 +295,19 @@ export default function TestHarnessPage() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">错误数量</p>
+                    <p className="text-sm text-muted-foreground mb-1">错误数量</p>
                     <p
                       data-testid="validation-error-count"
-                      className="text-lg font-semibold text-gray-900"
+                      className="text-lg font-semibold text-foreground"
                     >
                       {validationResult.errors.length}
                     </p>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-600 mb-1">警告数量</p>
+                    <p className="text-sm text-muted-foreground mb-1">警告数量</p>
                     <p
                       data-testid="validation-warning-count"
-                      className="text-lg font-semibold text-gray-900"
+                      className="text-lg font-semibold text-foreground"
                     >
                       {validationResult.warnings.length}
                     </p>
@@ -318,7 +318,7 @@ export default function TestHarnessPage() {
               {/* Errors with Actionable Components */}
               {validationResult.errors.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  <h3 className="text-lg font-semibold text-foreground mb-3">
                     错误列表 (可交互修复)
                   </h3>
                   <div className="space-y-3">
@@ -332,7 +332,7 @@ export default function TestHarnessPage() {
               {/* Warnings with Actionable Components */}
               {validationResult.warnings.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  <h3 className="text-lg font-semibold text-foreground mb-3">
                     警告列表 (可交互修复)
                   </h3>
                   <div className="space-y-3">
@@ -346,17 +346,17 @@ export default function TestHarnessPage() {
               {/* Action Log */}
               {actionLog.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-3">
+                  <h3 className="text-lg font-semibold text-foreground mb-3">
                     交互操作日志
                   </h3>
                   <div
                     data-testid="action-log"
-                    className="bg-gray-50 rounded-md p-4 space-y-1"
+                    className="bg-muted rounded-md p-4 space-y-1"
                   >
                     {actionLog.map((log, idx) => (
                       <div
                         key={`log-${idx}`}
-                        className="text-sm text-gray-700 font-mono"
+                        className="text-sm text-foreground font-mono"
                       >
                         {idx + 1}. {log}
                       </div>
@@ -367,12 +367,12 @@ export default function TestHarnessPage() {
 
               {/* Raw JSON */}
               <details>
-                <summary className="cursor-pointer text-sm text-gray-700 hover:text-gray-900 font-medium">
+                <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground font-medium">
                   查看完整 JSON 结果
                 </summary>
                 <pre
                   data-testid="validation-result-json"
-                  className="mt-3 bg-gray-100 p-4 rounded-md overflow-x-auto text-xs"
+                  className="mt-3 bg-muted p-4 rounded-md overflow-x-auto text-xs text-foreground"
                 >
                   {JSON.stringify(validationResult, null, 2)}
                 </pre>
@@ -382,9 +382,9 @@ export default function TestHarnessPage() {
 
           {/* Fixture Info */}
           {selectedFixture && (
-            <div className="mt-8 pt-6 border-t border-gray-200">
+            <div className="mt-8 pt-6 border-t border-border">
               <details>
-                <summary className="cursor-pointer text-sm text-gray-700 hover:text-gray-900 font-medium">
+                <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground font-medium">
                   Fixture 信息
                 </summary>
                 <div className="mt-3 space-y-2 text-sm">
@@ -417,7 +417,7 @@ export default function TestHarnessPage() {
         </div>
 
         {/* Footer */}
-        <div className="mt-6 text-center text-sm text-gray-500">
+        <div className="mt-6 text-center text-sm text-muted-foreground">
           <p>
             Fixture Version: {FixtureLoader.getMetadata().version} | Last
             Updated: {FixtureLoader.getMetadata().lastUpdated}

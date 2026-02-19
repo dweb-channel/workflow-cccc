@@ -27,20 +27,20 @@ export function DanglingNodeWarningActionable({
   return (
     <div
       data-testid="warning-actionable-dangling-node"
-      className="border border-yellow-200 bg-yellow-50 rounded-lg p-4"
+      className="border border-yellow-500/30 bg-yellow-500/10 rounded-lg p-4"
     >
       {/* Header */}
       <div className="flex items-start gap-3 mb-3">
-        <AlertCircle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+        <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 mt-0.5" />
         <div className="flex-1">
-          <h4 className="text-sm font-semibold text-gray-900">
+          <h4 className="text-sm font-semibold text-foreground">
             节点未连接
           </h4>
-          <p className="text-sm text-gray-700 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             {message}
           </p>
-          <p className="text-xs text-gray-600 mt-1">
-            节点 ID: <code className="bg-yellow-100 px-1 rounded">{nodeId}</code>
+          <p className="text-xs text-muted-foreground mt-1">
+            节点 ID: <code className="bg-yellow-500/20 px-1 rounded">{nodeId}</code>
           </p>
         </div>
       </div>
@@ -48,7 +48,7 @@ export function DanglingNodeWarningActionable({
       {/* Connection Suggestions */}
       {suggestions && suggestions.length > 0 && (
         <div className="ml-8 space-y-2">
-          <p className="text-sm font-medium text-gray-700">建议连接到：</p>
+          <p className="text-sm font-medium text-foreground">建议连接到：</p>
           <div
             data-testid="connection-suggestions"
             className="flex flex-wrap gap-2"
@@ -71,7 +71,7 @@ export function DanglingNodeWarningActionable({
 
       {/* No Suggestions */}
       {(!suggestions || suggestions.length === 0) && (
-        <div className="ml-8 text-sm text-gray-600">
+        <div className="ml-8 text-sm text-muted-foreground">
           请手动添加连接到其他节点
         </div>
       )}

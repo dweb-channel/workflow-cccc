@@ -96,13 +96,13 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
   };
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border border-border bg-card shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
-        <h3 className="font-semibold text-slate-100">节点配置</h3>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 className="font-semibold text-card-foreground">节点配置</h3>
         <button
           onClick={onClose}
-          className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           ✕
         </button>
@@ -113,8 +113,8 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
         <div className="flex flex-col gap-4">
           {/* Node ID (read-only) */}
           <div className="space-y-1">
-            <Label className="text-xs text-slate-500">节点 ID</Label>
-            <Input value={node.id} disabled className="bg-slate-50 font-mono text-xs" />
+            <Label className="text-xs text-muted-foreground">节点 ID</Label>
+            <Input value={node.id} disabled className="bg-muted font-mono text-xs" />
           </div>
 
           {/* Label */}
@@ -150,10 +150,10 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
 
           {/* Validation summary for type-specific fields */}
           {(errors.prompt || errors.url || errors.condition) && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2">
-              <p className="text-xs font-medium text-red-600">请补充必填字段：</p>
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2">
+              <p className="text-xs font-medium text-destructive">请补充必填字段：</p>
               {Object.entries(errors).filter(([k]) => !["label", "nodeType"].includes(k)).map(([key, msg]) => (
-                <p key={key} className="text-[11px] text-red-500">- {msg}</p>
+                <p key={key} className="text-[11px] text-destructive">- {msg}</p>
               ))}
             </div>
           )}
@@ -182,7 +182,7 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
 
           {/* Raw config JSON */}
           <div className="space-y-1">
-            <Label className="text-xs text-slate-500">高级配置 (JSON)</Label>
+            <Label className="text-xs text-muted-foreground">高级配置 (JSON)</Label>
             <Textarea
               value={configJson}
               onChange={(e) => setConfigJson(e.target.value)}
@@ -194,7 +194,7 @@ export function NodeConfigPanel({ node, onClose, onUpdate, onDelete }: NodeConfi
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-slate-700 px-4 py-3">
+      <div className="flex items-center justify-between border-t border-border px-4 py-3">
         <Button variant="destructive" size="sm" onClick={handleDelete}>
           删除节点
         </Button>
@@ -262,8 +262,8 @@ function LLMAgentConfig({
   const promptError = touched && !prompt.trim() ? "Prompt 不能为空" : undefined;
 
   return (
-    <div className="space-y-4 rounded-md border border-cyan-500/30 bg-cyan-500/5 p-3">
-      <p className="text-xs font-medium text-cyan-400">LLM Agent 配置</p>
+    <div className="space-y-4 rounded-md border border-primary/30 bg-primary/5 p-3">
+      <p className="text-xs font-medium text-primary">LLM Agent 配置</p>
 
       {/* Prompt */}
       <div className="space-y-1">
@@ -276,7 +276,7 @@ function LLMAgentConfig({
           className={`min-h-[100px] font-mono text-xs ${promptError ? "border-red-300 focus-visible:ring-red-400" : ""}`}
         />
         <FieldError message={promptError} />
-        <p className="text-[10px] text-slate-400">
+        <p className="text-[10px] text-muted-foreground">
           使用 {"{字段名}"} 引用上游节点输出
         </p>
       </div>
@@ -284,13 +284,13 @@ function LLMAgentConfig({
       {/* Advanced Settings */}
       <button
         onClick={() => setShowAdvanced(!showAdvanced)}
-        className="flex w-full items-center justify-between text-xs text-slate-500 hover:text-slate-700"
+        className="flex w-full items-center justify-between text-xs text-muted-foreground hover:text-foreground"
       >
         <span>高级设置</span>
         <span>{showAdvanced ? "▼" : "▶"}</span>
       </button>
       {showAdvanced && (
-        <div className="space-y-3 border-t border-cyan-500/20 pt-3">
+        <div className="space-y-3 border-t border-primary/20 pt-3">
           <div className="space-y-1">
             <Label className="text-xs">System Prompt</Label>
             <Textarea
@@ -339,8 +339,8 @@ function HttpRequestConfig({
   }, [url, method]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-3 rounded-md border border-slate-600 bg-slate-700/50 p-3">
-      <p className="text-xs font-medium text-slate-400">HTTP 请求配置</p>
+    <div className="space-y-3 rounded-md border border-border bg-muted/50 p-3">
+      <p className="text-xs font-medium text-muted-foreground">HTTP 请求配置</p>
       <div className="space-y-1">
         <RequiredLabel className="text-xs">URL</RequiredLabel>
         <Input
@@ -382,8 +382,8 @@ function ConditionConfig({
   }, [condition, trueBranch, falseBranch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="space-y-3 rounded-md border border-slate-600 bg-slate-700/50 p-3">
-      <p className="text-xs font-medium text-slate-400">条件分支配置</p>
+    <div className="space-y-3 rounded-md border border-border bg-muted/50 p-3">
+      <p className="text-xs font-medium text-muted-foreground">条件分支配置</p>
       <div className="space-y-1">
         <RequiredLabel className="text-xs">条件表达式</RequiredLabel>
         <Input

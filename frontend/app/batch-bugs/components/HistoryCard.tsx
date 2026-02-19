@@ -44,7 +44,7 @@ export function HistoryCard({
   return (
     <div>
       <div className="flex items-center justify-between pb-3">
-        <h3 className="text-sm font-semibold text-white">历史任务</h3>
+        <h3 className="text-sm font-semibold text-foreground">历史任务</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -60,7 +60,7 @@ export function HistoryCard({
             {historyJobs.map((job) => (
               <div key={job.job_id}>
                 <div
-                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-700 p-3 hover:bg-slate-700/50"
+                  className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted"
                   onClick={() => onToggleDetails(job.job_id)}
                 >
                   <span className="text-lg">
@@ -71,10 +71,10 @@ export function HistoryCard({
                     {job.status === "pending" && "⏳"}
                   </span>
                   <div className="flex-1">
-                    <p className="font-mono text-xs text-slate-400">
+                    <p className="font-mono text-xs text-muted-foreground">
                       {job.job_id}
                     </p>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-muted-foreground">
                       {new Date(job.created_at).toLocaleString()} ·{" "}
                       {job.total_bugs} bugs
                       {job.status === "cancelled" && " · 已取消"}
@@ -90,7 +90,7 @@ export function HistoryCard({
                   </div>
                   {onDelete && (
                     <button
-                      className="rounded p-1 text-slate-500 hover:bg-red-500/20 hover:text-red-400"
+                      className="rounded p-1 text-muted-foreground hover:bg-red-500/20 hover:text-red-400"
                       title="删除"
                       onClick={(e) => {
                         e.stopPropagation();
@@ -100,12 +100,12 @@ export function HistoryCard({
                       ✕
                     </button>
                   )}
-                  <span className="text-slate-500">
+                  <span className="text-muted-foreground">
                     {expandedJobId === job.job_id ? "▼" : "▶"}
                   </span>
                 </div>
                 {expandedJobId === job.job_id && expandedJobDetails && (
-                  <div className="ml-4 mt-2 space-y-1 border-l-2 border-slate-600 pl-4">
+                  <div className="ml-4 mt-2 space-y-1 border-l-2 border-border pl-4">
                     {expandedJobDetails.bugs.map((bug) => (
                       <div
                         key={bug.bug_id}
@@ -118,7 +118,7 @@ export function HistoryCard({
                           {bug.status === "failed" && "❌"}
                           {bug.status === "skipped" && "⏭️"}
                         </span>
-                        <span className="truncate text-slate-400">
+                        <span className="truncate text-muted-foreground">
                           {bug.url}
                         </span>
                         {bug.error && (
@@ -151,7 +151,7 @@ export function HistoryCard({
             )}
           </div>
         ) : (
-          <div className="flex h-[100px] items-center justify-center text-slate-400">
+          <div className="flex h-[100px] items-center justify-center text-muted-foreground">
             <p>{loadingHistory ? "加载中..." : "暂无历史任务"}</p>
           </div>
         )}
@@ -169,7 +169,7 @@ export function HistoryCard({
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
               onClick={() => {
                 if (deleteJobId && onDelete) {
                   onDelete(deleteJobId);

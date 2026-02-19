@@ -26,7 +26,7 @@ export function QualityIndicators({ component }: { component: ComponentSpec }) {
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
-        hasAnalysis ? "bg-emerald-500/10 text-emerald-400" : "bg-slate-700/50 text-slate-500"
+        hasAnalysis ? "bg-emerald-500/10 text-emerald-400" : "bg-muted/50 text-muted-foreground"
       }`}>
         {hasAnalysis ? "\u2713" : "\u2717"} 设计解读
       </span>
@@ -46,7 +46,7 @@ export function QualityIndicators({ component }: { component: ComponentSpec }) {
               : "bg-red-500/10 text-red-400"
         }`}>
           <span className="font-mono">{filledDesc}/{totalDesc}</span> 子描述
-          <span className="ml-0.5 inline-block h-1 w-8 rounded-full bg-slate-700 overflow-hidden">
+          <span className="ml-0.5 inline-block h-1 w-8 rounded-full bg-muted overflow-hidden">
             <span
               className={`block h-full rounded-full ${
                 coveragePercent >= 80

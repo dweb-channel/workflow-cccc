@@ -42,19 +42,19 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       {/* Component header */}
-      <div className="sticky top-0 z-10 border-b border-slate-700 bg-slate-800 px-4 py-3">
+      <div className="sticky top-0 z-10 border-b border-border bg-card px-4 py-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-white truncate">
+          <h2 className="text-sm font-semibold text-foreground truncate">
             {component.name}
           </h2>
           <RoleBadge role={component.role} />
           {(isSpacer || isPlatform) && (
-            <span className="rounded bg-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-foreground">
               {isSpacer ? "Spacer" : "Platform"}
             </span>
           )}
           {component.z_index != null && (
-            <span className="rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">
+            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
               z-index: {component.z_index}
             </span>
           )}
@@ -72,12 +72,12 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
           </button>
         </div>
         {component.description && (
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+          <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
             {component.description}
           </p>
         )}
         {/* Bounds */}
-        <div className="mt-1.5 flex gap-3 text-[10px] text-slate-500 font-mono">
+        <div className="mt-1.5 flex gap-3 text-[10px] text-muted-foreground font-mono">
           <span>x:{Math.round(component.bounds.x)} y:{Math.round(component.bounds.y)}</span>
           <span>{Math.round(component.bounds.width)} x {Math.round(component.bounds.height)}</span>
           <span>id: {component.id}</span>
@@ -134,8 +134,8 @@ export function SpecCard({ component, onNavigate }: SpecCardProps) {
         )}
 
         {component.children_collapsed != null && component.children_collapsed > 0 && (
-          <div className="rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-2">
-            <span className="text-[11px] text-slate-500">
+          <div className="rounded-lg border border-border/50 bg-card/50 px-3 py-2">
+            <span className="text-[11px] text-muted-foreground">
               {component.children_collapsed} 个子节点已折叠（骨架层）
             </span>
           </div>
@@ -174,14 +174,14 @@ function Section({
   const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="rounded-lg border border-slate-700/50 bg-slate-800/50">
+    <div className="rounded-lg border border-border/50 bg-card/50">
       <button
         onClick={() => setOpen((p) => !p)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-700/30 transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/30 transition-colors"
       >
         <span className="text-xs">{SECTION_ICONS[icon] || "\u2699\uFE0F"}</span>
-        <span className="text-xs font-medium text-slate-200">{title}</span>
-        <span className="ml-auto text-slate-500">
+        <span className="text-xs font-medium text-foreground">{title}</span>
+        <span className="ml-auto text-muted-foreground">
           {open ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
@@ -189,7 +189,7 @@ function Section({
           )}
         </span>
       </button>
-      {open && <div className="border-t border-slate-700/50 px-3 py-2">{children}</div>}
+      {open && <div className="border-t border-border/50 px-3 py-2">{children}</div>}
     </div>
   );
 }

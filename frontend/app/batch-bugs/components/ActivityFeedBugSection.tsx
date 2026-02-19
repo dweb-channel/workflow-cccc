@@ -46,7 +46,7 @@ export function CollapsedBugRow({
 
   return (
     <div
-      className="flex w-full items-center gap-2.5 border-b border-slate-700 px-4 py-3 text-left transition-colors hover:bg-slate-700/50 cursor-pointer"
+      className="flex w-full items-center gap-2.5 border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted cursor-pointer"
       style={{ backgroundColor: bgColor }}
       onClick={onExpand}
     >
@@ -60,12 +60,12 @@ export function CollapsedBugRow({
       {bug.status === "failed" && onRetry && (
         <button
           onClick={(e) => { e.stopPropagation(); onRetry(); }}
-          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
+          className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
         >
           \u91CD\u8BD5
         </button>
       )}
-      <span className="text-[11px] text-slate-500">\u5C55\u5F00 \u25BE</span>
+      <span className="text-[11px] text-muted-foreground">\u5C55\u5F00 \u25BE</span>
     </div>
   );
 }
@@ -96,26 +96,26 @@ export function ExpandedBugSection({
   );
 
   return (
-    <div className="border-b border-slate-700">
+    <div className="border-b border-border">
       {bug.status !== "in_progress" && (
         <div
           onClick={onCollapse}
-          className="flex w-full items-center gap-2.5 bg-slate-900 px-4 py-2 text-left border-b border-slate-700 hover:bg-slate-700/50 transition-colors cursor-pointer"
+          className="flex w-full items-center gap-2.5 bg-background px-4 py-2 text-left border-b border-border hover:bg-muted transition-colors cursor-pointer"
         >
           <span className="text-sm">
             {bug.status === "completed" ? "\u2705" : bug.status === "failed" ? "\u274C" : "\u23F3"}
           </span>
-          <span className="font-mono text-[13px] font-semibold text-white">{bug.bug_id}</span>
+          <span className="font-mono text-[13px] font-semibold text-foreground">{bug.bug_id}</span>
           <div className="flex-1" />
           {bug.status === "failed" && onRetry && (
             <button
               onClick={(e) => { e.stopPropagation(); onRetry(); }}
-              className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 transition-colors"
+              className="shrink-0 rounded px-2 py-1 text-[11px] font-medium text-primary bg-primary/10 hover:bg-primary/20 transition-colors"
             >
               \u91CD\u8BD5
             </button>
           )}
-          <span className="text-[11px] text-slate-500">\u6536\u8D77 \u25B4</span>
+          <span className="text-[11px] text-muted-foreground">\u6536\u8D77 \u25B4</span>
         </div>
       )}
 
@@ -130,8 +130,8 @@ export function ExpandedBugSection({
 
       {/* Step summary strip */}
       {completedSteps.length > 0 && (
-        <div className="border-b border-slate-700 bg-slate-900/50 px-4 py-2.5 space-y-1.5">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">\u6B65\u9AA4\u6458\u8981</span>
+        <div className="border-b border-border bg-background/50 px-4 py-2.5 space-y-1.5">
+          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">\u6B65\u9AA4\u6458\u8981</span>
           {completedSteps.map((step, i) => (
             <StepOutputRow key={`step-${i}`} step={step} />
           ))}
@@ -141,8 +141,8 @@ export function ExpandedBugSection({
       <div className="space-y-0">
         {feedItems.length === 0 ? (
           <div className="flex items-center gap-2 px-4 py-3">
-            <span className="h-2 w-2 rounded-full bg-[#3b82f6] animate-pulse" />
-            <span className="text-xs text-slate-400">\u7B49\u5F85 AI \u5F00\u59CB\u5206\u6790...</span>
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-xs text-muted-foreground">\u7B49\u5F85 AI \u5F00\u59CB\u5206\u6790...</span>
           </div>
         ) : (
           feedItems.map((item, i) => {
@@ -167,13 +167,13 @@ export function ExpandedBugSection({
 function NodeSeparatorLine({ nodeId, timestamp, bugId }: { nodeId: string; timestamp: string; bugId: string }) {
   const { icon, label } = getNodeLabel(nodeId);
   return (
-    <div className="flex items-center gap-2 bg-cyan-500/10 px-4 py-2.5 border-b border-slate-700">
-      <div className="h-px w-5 bg-cyan-500/40" />
-      <span className="text-xs font-semibold text-cyan-400">
+    <div className="flex items-center gap-2 bg-primary/10 px-4 py-2.5 border-b border-border">
+      <div className="h-px w-5 bg-primary/40" />
+      <span className="text-xs font-semibold text-primary">
         {icon} {label} — {bugId}
       </span>
-      <span className="font-mono text-[11px] text-cyan-500/50">{formatTime(timestamp)}</span>
-      <div className="h-px flex-1 bg-cyan-500/40" />
+      <span className="font-mono text-[11px] text-primary/50">{formatTime(timestamp)}</span>
+      <div className="h-px flex-1 bg-primary/40" />
     </div>
   );
 }
@@ -191,22 +191,22 @@ function StepOutputRow({ step }: { step: BugStep }) {
   return (
     <div className="flex items-start gap-2 text-xs">
       <span className="shrink-0 mt-0.5">{icon}</span>
-      <span className="shrink-0 font-medium text-slate-300">{step.label}</span>
+      <span className="shrink-0 font-medium text-card-foreground">{step.label}</span>
       <div className="min-w-0 flex-1">
-        <span className={`text-slate-400 ${!expanded && isLong ? "line-clamp-1" : ""}`}>
+        <span className={`text-muted-foreground ${!expanded && isLong ? "line-clamp-1" : ""}`}>
           <OutputPreviewText text={expanded ? preview : (isLong ? preview.slice(0, 80) + "..." : preview)} />
         </span>
         {isLong && (
           <button
             onClick={() => setExpanded(!expanded)}
-            className="ml-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300"
+            className="ml-1 text-[11px] font-medium text-primary hover:text-primary"
           >
             {expanded ? "\u6536\u8D77" : "\u5C55\u5F00"}
           </button>
         )}
       </div>
       {step.duration_ms != null && step.duration_ms > 0 && (
-        <span className="shrink-0 font-mono text-[10px] text-slate-500">
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
           {Math.round(step.duration_ms / 1000)}s
         </span>
       )}
@@ -227,7 +227,7 @@ function OutputPreviewText({ text }: { text: string }) {
             href={part}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-cyan-400 underline hover:text-cyan-300"
+            className="text-primary underline hover:text-primary"
             onClick={(e) => e.stopPropagation()}
           >
             {part}

@@ -15,7 +15,7 @@ interface NodeDetailPanelProps {
 }
 
 const STATUS_INFO: Record<AgentNodeStatus, { label: string; color: string }> = {
-  pending: { label: "等待中", color: "bg-slate-400" },
+  pending: { label: "等待中", color: "bg-muted-foreground" },
   running: { label: "执行中", color: "bg-blue-500" },
   completed: { label: "已完成", color: "bg-emerald-500" },
   failed: { label: "失败", color: "bg-red-500" },
@@ -62,12 +62,12 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
   const decodedOutput = node.data.output ? decodeOutput(node.data.output) : undefined;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex w-[400px] flex-col border-l border-slate-700 bg-slate-800 shadow-xl">
+    <div className="fixed inset-y-0 right-0 z-50 flex w-[400px] flex-col border-l border-border bg-card shadow-xl">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
           <span className={`h-3 w-3 rounded-full ${statusInfo.color}`} />
-          <h2 className="text-lg font-semibold">{nodeLabel}</h2>
+          <h2 className="text-lg font-semibold text-card-foreground">{nodeLabel}</h2>
         </div>
         <Button variant="ghost" size="sm" onClick={onClose}>
           <X className="h-4 w-4" />
@@ -78,8 +78,8 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
       <div className="flex-1 overflow-y-auto p-4">
         {/* Status */}
         <div className="mb-4">
-          <h3 className="mb-2 text-sm font-medium text-slate-400">状态</h3>
-          <Badge className="text-sm border-slate-600 bg-slate-700 text-slate-200">
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">状态</h3>
+          <Badge className="text-sm border-border bg-muted text-foreground">
             <span className={`mr-2 h-2 w-2 rounded-full ${statusInfo.color}`} />
             {statusInfo.label}
           </Badge>
@@ -87,16 +87,16 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
 
         {/* Node ID */}
         <div className="mb-4">
-          <h3 className="mb-2 text-sm font-medium text-slate-400">节点 ID</h3>
-          <code className="rounded bg-slate-700 px-2 py-1 text-xs text-cyan-300">{node.id}</code>
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">节点 ID</h3>
+          <code className="rounded bg-muted px-2 py-1 text-xs text-primary">{node.id}</code>
         </div>
 
         {/* Input */}
         <div className="mb-4">
-          <h3 className="mb-2 text-sm font-medium text-slate-400">📥 输入</h3>
-          <div className="rounded-lg bg-slate-900 p-3">
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">📥 输入</h3>
+          <div className="rounded-lg bg-background p-3">
             {node.data.input ? (
-              <div className="text-sm text-slate-300 prose prose-sm prose-invert max-w-none">
+              <div className="text-sm text-foreground prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown>
                   {typeof node.data.input === 'string'
                     ? node.data.input
@@ -104,17 +104,17 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
                 </ReactMarkdown>
               </div>
             ) : (
-              <p className="text-xs text-slate-500">等待执行...</p>
+              <p className="text-xs text-muted-foreground">等待执行...</p>
             )}
           </div>
         </div>
 
         {/* Output */}
         <div className="mb-4">
-          <h3 className="mb-2 text-sm font-medium text-slate-400">📤 输出</h3>
-          <div className="rounded-lg bg-slate-900 p-3">
+          <h3 className="mb-2 text-sm font-medium text-muted-foreground">📤 输出</h3>
+          <div className="rounded-lg bg-background p-3">
             {decodedOutput ? (
-              <div className="max-h-[400px] overflow-auto text-sm text-slate-300 prose prose-sm prose-invert max-w-none">
+              <div className="max-h-[400px] overflow-auto text-sm text-foreground prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown>{decodedOutput}</ReactMarkdown>
               </div>
             ) : status === "running" ? (
@@ -128,15 +128,15 @@ export function NodeDetailPanel({ node, onClose }: NodeDetailPanelProps) {
                 等待 Agent 响应...
               </div>
             ) : (
-              <p className="text-xs text-slate-500">等待执行...</p>
+              <p className="text-xs text-muted-foreground">等待执行...</p>
             )}
           </div>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="border-t border-slate-700 px-4 py-3">
-        <p className="text-xs text-slate-500">
+      <div className="border-t border-border px-4 py-3">
+        <p className="text-xs text-muted-foreground">
           点击画布其他区域或按 ESC 关闭面板
         </p>
       </div>

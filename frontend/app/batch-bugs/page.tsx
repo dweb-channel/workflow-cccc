@@ -45,7 +45,7 @@ const LS_KEY_CWD = "batch-bugs-target-cwd";
 
 export default function BatchBugsPage() {
   return (
-    <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-400">加载中...</div>}>
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-muted-foreground">加载中...</div>}>
       <BatchBugsContent />
     </Suspense>
   );
@@ -248,11 +248,11 @@ function BatchBugsContent() {
       {/* Main content area — full width */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* ---- Header ---- */}
-        <div className="shrink-0 bg-slate-800 px-6 pt-5 pb-3">
+        <div className="shrink-0 bg-card px-6 pt-5 pb-3">
           <div className="flex items-center gap-3 flex-wrap">
-            <h1 className="text-lg font-semibold text-white">批量 Bug 修复</h1>
+            <h1 className="text-lg font-semibold text-foreground">批量 Bug 修复</h1>
             {/* Workspace pills — same line as title */}
-            <div className="flex items-center gap-1.5 border-l border-slate-600 pl-3">
+            <div className="flex items-center gap-1.5 border-l border-border pl-3">
               <WorkspaceTabs
                 workspaces={workspaces}
                 activeWorkspaceId={activeWsId}
@@ -267,7 +267,7 @@ function BatchBugsContent() {
             </div>
             {currentJob && (
               <div className="ml-auto flex items-center gap-2">
-                <span className="rounded-full bg-cyan-500/10 px-2.5 py-0.5 font-mono text-xs text-cyan-400">
+                <span className="rounded-full bg-primary/10 px-2.5 py-0.5 font-mono text-xs text-primary">
                   {currentJob.job_id}
                 </span>
                 <JobStatusBadge status={currentJob.job_status} />
@@ -275,14 +275,14 @@ function BatchBugsContent() {
             )}
           </div>
           {activeWorkspace && (
-            <code className="mt-1.5 block text-xs text-slate-400">{activeWorkspace.repo_path}</code>
+            <code className="mt-1.5 block text-xs text-muted-foreground">{activeWorkspace.repo_path}</code>
           )}
         </div>
         {/* Gradient accent line */}
-        <div className="h-[2px] bg-gradient-to-r from-cyan-500 via-cyan-400 to-emerald-400 shrink-0" />
+        <div className="h-[2px] bg-gradient-to-r from-primary via-primary/80 to-emerald-400 shrink-0" />
 
         {/* ---- Content with padding ---- */}
-        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-[#0F172A]">
+        <div className="flex flex-1 flex-col overflow-hidden p-6 bg-background">
 
         {/* ---- Two Big Tabs ---- */}
         <Tabs
@@ -290,10 +290,10 @@ function BatchBugsContent() {
           onValueChange={setActiveTab}
           className="flex flex-1 flex-col overflow-hidden"
         >
-          <TabsList className="mb-4 w-fit shrink-0 bg-slate-800 p-1 rounded-lg" data-testid="main-tabs">
+          <TabsList className="mb-4 w-fit shrink-0 bg-card p-1 rounded-lg" data-testid="main-tabs">
             <TabsTrigger
               value="config"
-              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-cyan-500 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm text-slate-400"
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm text-muted-foreground"
               data-testid="tab-config"
             >
               <span className="inline-flex items-center gap-1.5">
@@ -303,7 +303,7 @@ function BatchBugsContent() {
             <TabsTrigger
               value="execution"
               disabled={!hasJob}
-              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-cyan-500 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm text-slate-400 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm text-muted-foreground disabled:opacity-40 disabled:cursor-not-allowed"
               data-testid="tab-execution"
             >
               <span className="inline-flex items-center gap-1.5">
@@ -312,7 +312,7 @@ function BatchBugsContent() {
             </TabsTrigger>
             <TabsTrigger
               value="metrics"
-              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-cyan-500 data-[state=active]:text-slate-900 data-[state=active]:shadow-sm text-slate-400"
+              className="rounded-md px-4 py-2 text-sm font-medium data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm text-muted-foreground"
               data-testid="tab-metrics"
             >
               <span className="inline-flex items-center gap-1.5">
@@ -338,7 +338,7 @@ function BatchBugsContent() {
                         value={targetCwd}
                         onChange={setTargetCwd}
                       />
-                      <p className="text-xs text-slate-400">
+                      <p className="text-xs text-muted-foreground">
                         Claude CLI 的工作目录，指向需要修复的项目代码库
                       </p>
                     </CardContent>
@@ -368,7 +368,7 @@ function BatchBugsContent() {
                     {dryRunLoading ? "预览中..." : "预览"}
                   </Button>
                   <Button
-                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-900"
+                    className="bg-primary hover:bg-primary/80 text-primary-foreground"
                     onClick={handleSubmit}
                     disabled={submitting || parseJiraUrls().length === 0}
                   >
@@ -443,16 +443,16 @@ function BatchBugsContent() {
                   <Card className="h-full flex flex-col">
                     <CardContent className="p-0 flex-1 flex flex-col overflow-hidden">
                       <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
-                        <TabsList className="w-full justify-start rounded-none border-b border-slate-700 bg-transparent px-2 pt-1 shrink-0">
+                        <TabsList className="w-full justify-start rounded-none border-b border-border bg-transparent px-2 pt-1 shrink-0">
                           <TabsTrigger
                             value="overview"
-                            className="data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 data-[state=active]:text-cyan-300 rounded-none text-[13px] text-slate-400"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none text-[13px] text-muted-foreground"
                           >
                             总览
                           </TabsTrigger>
                           <TabsTrigger
                             value="history"
-                            className="data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 data-[state=active]:text-cyan-300 rounded-none text-[13px] text-slate-400"
+                            className="data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:text-primary rounded-none text-[13px] text-muted-foreground"
                           >
                             历史记录
                           </TabsTrigger>
@@ -531,7 +531,7 @@ function BatchBugsContent() {
             <AlertDialogFooter>
               <AlertDialogCancel>继续执行</AlertDialogCancel>
               <AlertDialogAction
-                className="bg-red-600 hover:bg-red-700 text-white"
+                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground"
                 onClick={() => {
                   cancel();
                   setShowCancelConfirm(false);
@@ -564,23 +564,23 @@ function DryRunPreviewPanel({
   submitting: boolean;
 }) {
   return (
-    <Card className="border-cyan-500/30 bg-cyan-500/5">
+    <Card className="border-primary/30 bg-primary/5">
       <CardContent className="pt-4 pb-3 space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-cyan-300">
+          <h3 className="text-sm font-semibold text-primary">
             Dry Run 预览
           </h3>
           <button
             onClick={onDismiss}
-            className="text-slate-500 hover:text-slate-300"
+            className="text-muted-foreground hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex gap-4 text-xs text-slate-400">
+        <div className="flex gap-4 text-xs text-muted-foreground">
           <span>Bug 数量: <strong>{result.total_bugs}</strong></span>
-          <span>工作目录: <code className="bg-slate-700 px-1.5 py-0.5 rounded text-[11px] text-cyan-300">{result.cwd}</code></span>
+          <span>工作目录: <code className="bg-muted px-1.5 py-0.5 rounded text-[11px] text-primary">{result.cwd}</code></span>
           <span>验证级别: <strong>{result.config.validation_level}</strong></span>
           <span>失败策略: <strong>{result.config.failure_policy}</strong></span>
         </div>
@@ -590,19 +590,19 @@ function DryRunPreviewPanel({
           {result.bugs.map((bug, i) => (
             <div
               key={bug.jira_key}
-              className="flex items-center gap-2 rounded bg-slate-700/50 px-3 py-1.5 text-xs"
+              className="flex items-center gap-2 rounded bg-muted/50 px-3 py-1.5 text-xs"
             >
-              <span className="shrink-0 rounded-full bg-cyan-500/20 px-1.5 py-0.5 font-mono text-[10px] text-cyan-400">
+              <span className="shrink-0 rounded-full bg-primary/20 px-1.5 py-0.5 font-mono text-[10px] text-primary">
                 #{i + 1}
               </span>
-              <span className="font-medium text-slate-200">{bug.jira_key}</span>
-              <span className="truncate text-slate-500">{bug.url}</span>
+              <span className="font-medium text-foreground">{bug.jira_key}</span>
+              <span className="truncate text-muted-foreground">{bug.url}</span>
             </div>
           ))}
         </div>
 
         {/* Expected steps */}
-        <div className="text-xs text-slate-400">
+        <div className="text-xs text-muted-foreground">
           <span className="font-medium">每个 Bug 的执行步骤: </span>
           {result.expected_steps_per_bug.join(" → ")}
         </div>

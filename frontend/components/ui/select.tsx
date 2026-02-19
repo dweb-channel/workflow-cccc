@@ -15,14 +15,14 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-9 w-full items-center justify-between rounded-md border border-slate-600 bg-slate-700 px-3 text-sm text-slate-100",
+      "flex h-9 w-full items-center justify-between rounded-md border border-input bg-input-bg px-3 text-sm text-foreground",
       className
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon>
-      <ChevronDown className="h-4 w-4 text-slate-500" />
+      <ChevronDown className="h-4 w-4 text-muted-foreground" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -36,7 +36,7 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       className={cn(
-        "z-50 min-w-[8rem] overflow-hidden rounded-md border border-slate-600 bg-slate-800 shadow-md",
+        "z-50 min-w-[8rem] overflow-hidden rounded-md border border-border bg-card shadow-md",
         className
       )}
       {...props}
@@ -56,7 +56,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-7 pr-2 text-sm text-slate-100 focus:bg-slate-700",
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-7 pr-2 text-sm text-foreground focus:bg-muted",
       className
     )}
     {...props}

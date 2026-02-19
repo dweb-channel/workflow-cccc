@@ -43,9 +43,9 @@ import { ExecutionLog } from "./components/ExecutionLog";
 const nodeTypes = { agentNode: AgentNode };
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
-  draft: { label: "草稿", color: "bg-slate-500" },
+  draft: { label: "草稿", color: "bg-muted-foreground" },
   published: { label: "已发布", color: "bg-blue-500" },
-  archived: { label: "已归档", color: "bg-gray-500" },
+  archived: { label: "已归档", color: "bg-muted-foreground" },
   running: { label: "运行中", color: "bg-emerald-500" },
   success: { label: "成功", color: "bg-green-500" },
   failed: { label: "失败", color: "bg-red-500" },
@@ -110,7 +110,7 @@ function WorkflowPage() {
   if (crud.loading) {
     return (
       <main className="flex min-h-screen items-center justify-center">
-        <p className="text-slate-500">加载中...</p>
+        <p className="text-muted-foreground">加载中...</p>
       </main>
     );
   }
@@ -125,7 +125,7 @@ function WorkflowPage() {
 
   const { workflow } = crud;
   const statusInfo = workflow
-    ? STATUS_MAP[workflow.status] || { label: workflow.status, color: "bg-slate-500" }
+    ? STATUS_MAP[workflow.status] || { label: workflow.status, color: "bg-muted-foreground" }
     : null;
 
   return (
@@ -157,7 +157,7 @@ function WorkflowPage() {
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>{workflow.name}</CardTitle>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted-foreground">
               版本 {workflow.version} · 最近更新 {formatRelativeTime(workflow.updated_at)}
             </p>
           </div>
@@ -223,7 +223,7 @@ function WorkflowPage() {
               deleteKeyCode={editorMode === "edit" ? "Backspace" : null}
               fitView
               fitViewOptions={{ maxZoom: 1 }}
-              className={editorMode === "edit" ? "bg-slate-900/50" : "bg-[#0F172A]"}
+              className={editorMode === "edit" ? "bg-background/50" : "bg-background"}
             >
               <Controls />
               <Background
@@ -254,14 +254,14 @@ function WorkflowPage() {
                 onDelete={editor.handleEdgeDelete}
               />
             ) : (
-              <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
-                <div className="border-b border-slate-700 px-4 py-3">
-                  <h3 className="font-semibold text-slate-100">工作流设置</h3>
+              <div className="flex h-full flex-col rounded-xl border border-border bg-card shadow-sm">
+                <div className="border-b border-border px-4 py-3">
+                  <h3 className="font-semibold text-card-foreground">工作流设置</h3>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4">
                   <div className="space-y-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-400">最大循环迭代次数</label>
+                      <label className="text-xs font-medium text-muted-foreground">最大循环迭代次数</label>
                       <input
                         type="number"
                         min={1}
@@ -271,14 +271,14 @@ function WorkflowPage() {
                           editor.setMaxIterations(Math.max(1, Math.min(100, Number(e.target.value) || 10)));
                           editor.setGraphChanged(true);
                         }}
-                        className="w-full rounded-md border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                        className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-ring"
                       />
-                      <p className="text-[10px] text-slate-400">
+                      <p className="text-[10px] text-muted-foreground">
                         循环路径中节点的最大重复执行次数（防止无限循环），默认 10
                       </p>
                     </div>
-                    <hr className="border-slate-700" />
-                    <p className="text-xs text-slate-500">点击节点或连接进行配置</p>
+                    <hr className="border-border" />
+                    <p className="text-xs text-muted-foreground">点击节点或连接进行配置</p>
                   </div>
                 </div>
               </div>
@@ -296,9 +296,9 @@ function WorkflowPage() {
                   placeholder="请输入工作流的初始输入，例如：实现一个用户登录功能，支持邮箱和手机号登录"
                   value={execution.requestText}
                   onChange={(e) => execution.setRequestText(e.target.value)}
-                  className="min-h-[120px] border-slate-600 focus:border-cyan-400"
+                  className="min-h-[120px] border-input focus:border-primary"
                 />
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-muted-foreground">
                   作为 initial_state.request 传递给工作流入口节点
                 </p>
               </div>
@@ -323,7 +323,7 @@ function WorkflowPage() {
       ) : (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
-            <p className="text-slate-500">请从左侧选择工作流，或点击 + 创建新工作流</p>
+            <p className="text-muted-foreground">请从左侧选择工作流，或点击 + 创建新工作流</p>
           </div>
         </div>
       )}

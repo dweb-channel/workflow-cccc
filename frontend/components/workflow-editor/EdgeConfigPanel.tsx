@@ -66,13 +66,13 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
   };
 
   return (
-    <div className="flex h-full flex-col rounded-xl border border-slate-700 bg-slate-800 shadow-sm">
+    <div className="flex h-full flex-col rounded-xl border border-border bg-card shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
-        <h3 className="font-semibold text-slate-200">连接配置</h3>
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <h3 className="font-semibold text-card-foreground">连接配置</h3>
         <button
           onClick={onClose}
-          className="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-300"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           ✕
         </button>
@@ -83,20 +83,20 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
         <div className="flex flex-col gap-4">
           {/* Edge ID */}
           <div className="space-y-1">
-            <Label className="text-xs text-slate-500">连接 ID</Label>
-            <Input value={edge.id} disabled className="bg-slate-900 font-mono text-xs" />
+            <Label className="text-xs text-muted-foreground">连接 ID</Label>
+            <Input value={edge.id} disabled className="bg-muted font-mono text-xs" />
           </div>
 
           {/* Source → Target */}
           <div className="flex gap-2">
             <div className="flex-1 space-y-1">
-              <Label className="text-xs text-slate-500">来源节点</Label>
-              <Input value={edge.source} disabled className="bg-slate-900 font-mono text-xs" />
+              <Label className="text-xs text-muted-foreground">来源节点</Label>
+              <Input value={edge.source} disabled className="bg-muted font-mono text-xs" />
             </div>
-            <div className="flex items-end pb-0.5 text-slate-400">→</div>
+            <div className="flex items-end pb-0.5 text-muted-foreground">→</div>
             <div className="flex-1 space-y-1">
-              <Label className="text-xs text-slate-500">目标节点</Label>
-              <Input value={edge.target} disabled className="bg-slate-900 font-mono text-xs" />
+              <Label className="text-xs text-muted-foreground">目标节点</Label>
+              <Input value={edge.target} disabled className="bg-muted font-mono text-xs" />
             </div>
           </div>
 
@@ -117,7 +117,7 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
               {isConditional && (
                 <button
                   onClick={handleClearCondition}
-                  className="text-xs text-slate-400 hover:text-slate-300"
+                  className="text-xs text-muted-foreground hover:text-foreground"
                 >
                   清除条件
                 </button>
@@ -129,38 +129,38 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
               placeholder="留空为普通连接，填写后变为条件边&#10;例: result.score > 80"
               className="min-h-[80px] font-mono text-xs"
             />
-            <p className="text-[10px] text-slate-400">
+            <p className="text-[10px] text-muted-foreground">
               {isConditional ? "条件边 - 紫色虚线显示" : "普通连接 - 灰色实线显示"}
             </p>
             {/* Syntax guide */}
-            <div className="mt-1 rounded border border-slate-600 bg-slate-700/50 p-2 text-[10px] text-slate-400">
-              <p className="font-medium text-slate-300">表达式语法</p>
+            <div className="mt-1 rounded border border-border bg-muted/50 p-2 text-[10px] text-muted-foreground">
+              <p className="font-medium text-foreground">表达式语法</p>
               <ul className="mt-1 space-y-0.5">
-                <li>比较: <code className="text-cyan-400">result.score &gt; 80</code></li>
-                <li>相等: <code className="text-cyan-400">status == &quot;success&quot;</code></li>
-                <li>布尔: <code className="text-cyan-400">count &gt; 0 and is_valid</code></li>
-                <li>字段: <code className="text-cyan-400">data.output.approved</code></li>
+                <li>比较: <code className="text-primary">result.score &gt; 80</code></li>
+                <li>相等: <code className="text-primary">status == &quot;success&quot;</code></li>
+                <li>布尔: <code className="text-primary">count &gt; 0 and is_valid</code></li>
+                <li>字段: <code className="text-primary">data.output.approved</code></li>
               </ul>
-              <p className="mt-1 text-slate-400">禁止: 函数调用、lambda、import</p>
+              <p className="mt-1 text-muted-foreground">禁止: 函数调用、lambda、import</p>
             </div>
           </div>
 
           {/* Loop indicator */}
           {isLoop && (
-            <div className="rounded-md border border-orange-200 bg-orange-50 p-3">
+            <div className="rounded-md border border-orange-500/30 bg-orange-500/10 p-3">
               <div className="flex items-center gap-2">
                 <span className="text-sm">🔄</span>
-                <span className="text-xs font-medium text-orange-700">循环回路边</span>
+                <span className="text-xs font-medium text-orange-600 dark:text-orange-400">循环回路边</span>
               </div>
-              <p className="mt-1 text-[10px] text-orange-600">
+              <p className="mt-1 text-[10px] text-orange-500 dark:text-orange-400">
                 此连接形成循环。需要循环路径中有 condition 节点控制退出。
               </p>
             </div>
           )}
 
           {/* Preview */}
-          <div className="rounded-md border border-slate-600 bg-slate-700/50 p-3">
-            <p className="text-xs font-medium text-slate-400">预览样式</p>
+          <div className="rounded-md border border-border bg-muted/50 p-3">
+            <p className="text-xs font-medium text-muted-foreground">预览样式</p>
             <div className="mt-2 flex items-center gap-2">
               <svg width="80" height="20">
                 {isLoop ? (
@@ -185,7 +185,7 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
                   />
                 )}
               </svg>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-muted-foreground">
                 {isLoop ? "循环回路边" : isConditional ? "条件边" : "普通连接"}
               </span>
             </div>
@@ -194,7 +194,7 @@ export function EdgeConfigPanel({ edge, onClose, onUpdate, onDelete }: EdgeConfi
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between border-t border-slate-700 px-4 py-3">
+      <div className="flex items-center justify-between border-t border-border px-4 py-3">
         <Button variant="destructive" size="sm" onClick={handleDelete}>
           删除连接
         </Button>

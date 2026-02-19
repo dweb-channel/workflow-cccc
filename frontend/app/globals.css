@@ -2,10 +2,66 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light theme (default) */
 :root {
+  color-scheme: light;
+
+  --color-background: 248 250 252;       /* #F8FAFC slate-50 */
+  --color-foreground: 15 23 42;          /* #0F172A slate-900 */
+  --color-muted: 241 245 249;            /* #F1F5F9 slate-100 */
+  --color-muted-foreground: 100 116 139; /* #64748B slate-500 */
+  --color-border: 226 232 240;           /* #E2E8F0 slate-200 */
+  --color-input: 226 232 240;            /* #E2E8F0 slate-200 */
+  --color-ring: 8 145 178;              /* #0891B2 cyan-600 */
+  --color-primary: 8 145 178;           /* #0891B2 cyan-600 */
+  --color-primary-foreground: 255 255 255; /* #FFFFFF white */
+  --color-secondary: 241 245 249;        /* #F1F5F9 slate-100 */
+  --color-secondary-foreground: 15 23 42; /* #0F172A slate-900 */
+  --color-accent: 8 145 178;            /* #0891B2 cyan-600 */
+  --color-accent-foreground: 255 255 255; /* #FFFFFF white */
+  --color-card: 255 255 255;             /* #FFFFFF white */
+  --color-card-foreground: 15 23 42;     /* #0F172A slate-900 */
+  --color-sidebar: 255 255 255;          /* #FFFFFF white */
+  --color-sidebar-foreground: 51 65 85;  /* #334155 slate-700 */
+  --color-destructive: 220 38 38;       /* #DC2626 red-600 */
+  --color-destructive-foreground: 255 255 255; /* #FFFFFF white */
+
+  /* Component-specific */
+  --color-input-bg: 255 255 255;         /* #FFFFFF white */
+  --color-overlay: 0 0 0;               /* black */
+  --overlay-opacity: 0.5;
+}
+
+/* Dark theme */
+.dark {
   color-scheme: dark;
+
+  --color-background: 15 23 42;          /* #0F172A */
+  --color-foreground: 248 250 252;       /* #F8FAFC slate-50 */
+  --color-muted: 30 41 59;              /* #1E293B slate-800 */
+  --color-muted-foreground: 148 163 184; /* #94A3B8 slate-400 */
+  --color-border: 51 65 85;             /* #334155 slate-700 */
+  --color-input: 51 65 85;              /* #334155 slate-700 */
+  --color-ring: 34 211 238;             /* #22D3EE cyan-400 */
+  --color-primary: 34 211 238;          /* #22D3EE cyan-400 */
+  --color-primary-foreground: 15 23 42;  /* #0F172A */
+  --color-secondary: 30 41 59;           /* #1E293B slate-800 */
+  --color-secondary-foreground: 248 250 252; /* #F8FAFC */
+  --color-accent: 34 211 238;           /* #22D3EE cyan-400 */
+  --color-accent-foreground: 15 23 42;   /* #0F172A */
+  --color-card: 30 41 59;               /* #1E293B slate-800 */
+  --color-card-foreground: 248 250 252;  /* #F8FAFC */
+  --color-sidebar: 10 15 28;            /* #0A0F1C */
+  --color-sidebar-foreground: 148 163 184; /* #94A3B8 slate-400 */
+  --color-destructive: 239 68 68;       /* #EF4444 red-500 */
+  --color-destructive-foreground: 248 250 252; /* #F8FAFC */
+
+  /* Component-specific */
+  --color-input-bg: 51 65 85;           /* #334155 slate-700 */
+  --color-overlay: 0 0 0;               /* black */
+  --overlay-opacity: 0.8;
 }
 
 body {
-  @apply bg-[#0F172A] text-slate-100;
+  @apply bg-background text-foreground;
 }

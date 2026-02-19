@@ -87,7 +87,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
           readOnly
           value={value || ""}
           placeholder="点击右侧按钮选择目录..."
-          className="text-sm font-mono flex-1 bg-slate-900 cursor-pointer"
+          className="text-sm font-mono flex-1 bg-input-bg cursor-pointer"
           onClick={() => setOpen(true)}
         />
         <Button
@@ -131,14 +131,14 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
           </div>
 
           {/* Breadcrumb */}
-          <div className="flex items-center gap-1 text-xs text-slate-400 overflow-x-auto">
+          <div className="flex items-center gap-1 text-xs text-muted-foreground overflow-x-auto">
             {currentPath.split("/").filter(Boolean).map((segment, i, arr) => {
               const segPath = "/" + arr.slice(0, i + 1).join("/");
               return (
                 <span key={segPath} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-slate-600">/</span>}
+                  {i > 0 && <span className="text-muted-foreground">/</span>}
                   <button
-                    className="hover:text-cyan-400 hover:underline"
+                    className="hover:text-primary hover:underline"
                     onClick={() => browse(segPath)}
                   >
                     {segment}
@@ -155,7 +155,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
             )}
 
             {loading && (
-              <div className="p-3 text-sm text-slate-400">加载中...</div>
+              <div className="p-3 text-sm text-muted-foreground">加载中...</div>
             )}
 
             {!loading && !error && (
@@ -163,27 +163,27 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
                 {/* Parent directory */}
                 {parentPath && (
                   <button
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/50 border-b border-slate-700 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-muted border-b border-border flex items-center gap-2"
                     onClick={() => browse(parentPath)}
                   >
-                    <span className="text-slate-500">↑</span>
-                    <span className="text-slate-400">..</span>
+                    <span className="text-muted-foreground">↑</span>
+                    <span className="text-muted-foreground">..</span>
                   </button>
                 )}
 
                 {/* Directories */}
                 {entries.length === 0 && (
-                  <div className="p-3 text-sm text-slate-400">
+                  <div className="p-3 text-sm text-muted-foreground">
                     此目录下没有子目录
                   </div>
                 )}
                 {entries.map((entry) => (
                   <button
                     key={entry.path}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-cyan-500/10 border-b border-slate-700 last:border-b-0 flex items-center gap-2"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-primary/10 border-b border-border last:border-b-0 flex items-center gap-2"
                     onClick={() => browse(entry.path)}
                   >
-                    <span className="text-cyan-400">📁</span>
+                    <span className="text-primary">📁</span>
                     <span>{entry.name}</span>
                   </button>
                 ))}
@@ -193,7 +193,7 @@ export function DirectoryPicker({ value, onChange }: DirectoryPickerProps) {
 
           <DialogFooter>
             <div className="flex items-center justify-between w-full">
-              <span className="text-xs text-slate-500 font-mono truncate max-w-[300px]">
+              <span className="text-xs text-muted-foreground font-mono truncate max-w-[300px]">
                 {currentPath}
               </span>
               <Button onClick={handleSelect} size="sm">

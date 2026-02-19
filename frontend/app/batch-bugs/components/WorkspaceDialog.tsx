@@ -87,7 +87,7 @@ export function WorkspaceDialog({
             <div className="space-y-2">
               <Label>仓库路径</Label>
               <DirectoryPicker value={repoPath} onChange={setRepoPath} />
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-muted-foreground">
                 该仓库将绑定到此项目组，后续创建任务时自动使用
               </p>
             </div>

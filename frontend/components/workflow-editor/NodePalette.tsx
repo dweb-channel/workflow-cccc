@@ -58,7 +58,7 @@ export function NodePalette() {
       <CardContent className="flex flex-col gap-3 px-3 pb-3">
         {Object.entries(grouped).map(([category, items]) => (
           <div key={category}>
-            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400">
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               {CATEGORY_LABELS[category] || category}
             </p>
             <div className="flex flex-col gap-1">
@@ -67,10 +67,10 @@ export function NodePalette() {
                   key={info.type}
                   draggable
                   onDragStart={(e) => onDragStart(e, info)}
-                  className="flex cursor-grab items-center gap-2 rounded-lg border border-slate-600 bg-slate-700/50 px-3 py-2 text-sm shadow-sm transition-colors hover:border-cyan-500/50 hover:bg-cyan-500/10 active:cursor-grabbing"
+                  className="flex cursor-grab items-center gap-2 rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm shadow-sm transition-colors hover:border-primary/50 hover:bg-primary/10 active:cursor-grabbing"
                 >
                   <span>{info.icon}</span>
-                  <span className="text-slate-300">{info.label}</span>
+                  <span className="text-foreground">{info.label}</span>
                 </div>
               ))}
             </div>

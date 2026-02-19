@@ -56,7 +56,7 @@ export function LayoutSection({ layout }: { layout: LayoutSpec }) {
   return (
     <div className="space-y-0.5">
       {lines.map((line, i) => (
-        <div key={`layout-${i}`} className="text-[11px] text-slate-300">{line}</div>
+        <div key={`layout-${i}`} className="text-[11px] text-foreground">{line}</div>
       ))}
     </div>
   );
@@ -94,7 +94,7 @@ export function SizingSection({ sizing }: { sizing: SizingSpec }) {
   return (
     <div className="space-y-0.5">
       {lines.map((line, i) => (
-        <div key={`sizing-${i}`} className="text-[11px] text-slate-300">{line}</div>
+        <div key={`sizing-${i}`} className="text-[11px] text-foreground">{line}</div>
       ))}
     </div>
   );

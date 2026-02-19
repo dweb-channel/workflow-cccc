@@ -16,14 +16,14 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
     <div className="space-y-2">
       {interaction.behaviors && interaction.behaviors.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">行为</span>
+          <span className="text-[10px] font-medium text-muted-foreground">行为</span>
           {interaction.behaviors.map((b, i) => (
-            <div key={`${b.trigger}-${b.action}-${i}`} className="mt-1 rounded bg-slate-900 px-2 py-1.5 text-[11px]">
+            <div key={`${b.trigger}-${b.action}-${i}`} className="mt-1 rounded bg-background px-2 py-1.5 text-[11px]">
               <span className="text-orange-400">{TRIGGER_ZH[b.trigger || "click"] || b.trigger}</span>
-              <span className="text-slate-500"> → </span>
-              <span className="text-slate-300">{b.action}</span>
+              <span className="text-muted-foreground"> → </span>
+              <span className="text-foreground">{b.action}</span>
               {b.target && (
-                <span className="ml-1 text-slate-500">({b.target})</span>
+                <span className="ml-1 text-muted-foreground">({b.target})</span>
               )}
             </div>
           ))}
@@ -31,17 +31,17 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
       )}
       {interaction.states && interaction.states.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">状态变化</span>
+          <span className="text-[10px] font-medium text-muted-foreground">状态变化</span>
           {interaction.states.map((s, i) => (
-            <div key={s.name || `state-${i}`} className="mt-1 rounded bg-slate-900 px-2 py-1.5">
+            <div key={s.name || `state-${i}`} className="mt-1 rounded bg-background px-2 py-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] font-medium text-violet-400">{s.name}</span>
                 {s.description && (
-                  <span className="text-[10px] text-slate-500">{s.description}</span>
+                  <span className="text-[10px] text-muted-foreground">{s.description}</span>
                 )}
               </div>
               {s.style_overrides && (
-                <pre className="mt-1 text-[10px] text-slate-500 font-mono overflow-x-auto">
+                <pre className="mt-1 text-[10px] text-muted-foreground font-mono overflow-x-auto">
                   {JSON.stringify(s.style_overrides, null, 2)}
                 </pre>
               )}
@@ -51,9 +51,9 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
       )}
       {interaction.transitions && interaction.transitions.length > 0 && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">过渡动画</span>
+          <span className="text-[10px] font-medium text-muted-foreground">过渡动画</span>
           {interaction.transitions.map((t, i) => (
-            <div key={`${t.property}-${t.duration_ms}-${i}`} className="mt-1 text-[11px] text-slate-400">
+            <div key={`${t.property}-${t.duration_ms}-${i}`} className="mt-1 text-[11px] text-muted-foreground">
               {t.property} {t.duration_ms}ms {t.easing || "ease"}
             </div>
           ))}
@@ -61,8 +61,8 @@ export function InteractionSection({ interaction }: { interaction: InteractionSp
       )}
       {interaction.raw_notes && (
         <div>
-          <span className="text-[10px] font-medium text-slate-400">备注</span>
-          <p className="mt-1 text-[11px] text-slate-500 italic">{interaction.raw_notes}</p>
+          <span className="text-[10px] font-medium text-muted-foreground">备注</span>
+          <p className="mt-1 text-[11px] text-muted-foreground italic">{interaction.raw_notes}</p>
         </div>
       )}
     </div>
@@ -104,21 +104,21 @@ export function ChildrenSection({
           className="group flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-violet-500/10 border border-transparent hover:border-violet-500/20 transition-colors"
         >
           <div className="flex items-center gap-1.5 w-full">
-            <span className="text-[11px] text-slate-300 truncate flex-1 group-hover:text-white transition-colors">
+            <span className="text-[11px] text-foreground truncate flex-1 group-hover:text-white transition-colors">
               {getChildDisplayName(child)}
             </span>
             <RoleBadge role={child.role} small />
-            <ArrowRight className="h-3 w-3 text-slate-600 group-hover:text-violet-400 transition-colors" />
+            <ArrowRight className="h-3 w-3 text-muted-foreground group-hover:text-violet-400 transition-colors" />
           </div>
           {child.description && (
-            <div className="text-[10px] text-slate-500 truncate leading-tight">
+            <div className="text-[10px] text-muted-foreground truncate leading-tight">
               {child.description.slice(0, 80)}{child.description.length > 80 ? "..." : ""}
             </div>
           )}
-          <div className="flex items-center gap-2 text-[10px] font-mono text-slate-500">
+          <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
             <span>{Math.round(child.bounds.width)} × {Math.round(child.bounds.height)}</span>
             {child.children && child.children.length > 0 && (
-              <span className="text-slate-600">{child.children.length} 子组件</span>
+              <span className="text-muted-foreground">{child.children.length} 子组件</span>
             )}
           </div>
         </button>

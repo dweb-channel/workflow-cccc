@@ -12,7 +12,7 @@ export function ColorDisplay({ value }: { value: ColorValue }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
-        className="inline-block h-3 w-3 shrink-0 rounded border border-slate-600"
+        className="inline-block h-3 w-3 shrink-0 rounded border border-input"
         style={{ backgroundColor: hex }}
       />
       <span>{hex}</span>
@@ -112,10 +112,10 @@ export function StyleSection({ style }: { style: StyleSpec }) {
   return (
     <div className="space-y-0.5">
       {lines.map((line, i) => (
-        <div key={`style-${i}`} className="flex items-center gap-1.5 text-[11px] text-slate-300">
+        <div key={`style-${i}`} className="flex items-center gap-1.5 text-[11px] text-foreground">
           {line.color && (
             <span
-              className="inline-block h-3 w-3 shrink-0 rounded border border-slate-600"
+              className="inline-block h-3 w-3 shrink-0 rounded border border-input"
               style={{ backgroundColor: line.color }}
             />
           )}
@@ -123,7 +123,7 @@ export function StyleSection({ style }: { style: StyleSpec }) {
         </div>
       ))}
       {lines.length === 0 && (
-        <div className="text-[11px] text-slate-500">无样式</div>
+        <div className="text-[11px] text-muted-foreground">无样式</div>
       )}
     </div>
   );
