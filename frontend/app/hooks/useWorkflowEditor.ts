@@ -101,7 +101,13 @@ export function useWorkflowEditor({
       const raw = event.dataTransfer.getData("application/reactflow");
       if (!raw) return;
 
-      const { type, label } = JSON.parse(raw);
+      let type: string;
+      let label: string;
+      try {
+        ({ type, label } = JSON.parse(raw));
+      } catch {
+        return;
+      }
       const position = reactFlowInstance.screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,

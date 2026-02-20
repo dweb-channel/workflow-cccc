@@ -25,6 +25,8 @@ import { ScanResults } from "./components/ScanResults";
 import { SpecBrowser } from "./spec-browser";
 import { SpecTree } from "./spec-browser";
 import { scanFigma, type FigmaScanResponse } from "@/lib/api";
+import { useDesignJobHistory } from "./hooks/useDesignJobHistory";
+import { DesignHistoryCard } from "./components/DesignHistoryCard";
 
 // ---- Scan state machine (useReducer) ----
 type ScanState = {
@@ -90,6 +92,16 @@ function DesignToCodeContent() {
 
   // Scan step state machine: idle → scanning → selecting
   const [scan, dispatchScan] = useReducer(scanReducer, SCAN_INITIAL);
+
+  // Design job history
+  const {
+    historyJobs,
+    loadingHistory,
+    expandedJobId,
+    expandedJobDetails,
+    loadHistory,
+    toggleJobDetails,
+  } = useDesignJobHistory();
 
   // Hook
   const {
@@ -336,8 +348,8 @@ function DesignToCodeContent() {
                     </Button>
                   </div>
 
-                  {/* Right: Pipeline info card */}
-                  <div className="w-[360px] shrink-0 overflow-y-auto">
+                  {/* Right: Pipeline info card + History */}
+                  <div className="w-[360px] shrink-0 overflow-y-auto space-y-4">
                     <Card>
                       <CardContent className="p-4 space-y-3">
                         <h3 className="text-sm font-semibold text-foreground">
@@ -361,6 +373,20 @@ function DesignToCodeContent() {
                             </div>
                           ))}
                         </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* History card */}
+                    <Card>
+                      <CardContent className="p-4">
+                        <DesignHistoryCard
+                          historyJobs={historyJobs}
+                          loadingHistory={loadingHistory}
+                          expandedJobId={expandedJobId}
+                          expandedJobDetails={expandedJobDetails}
+                          onRefresh={loadHistory}
+                          onToggleDetails={toggleJobDetails}
+                        />
                       </CardContent>
                     </Card>
                   </div>

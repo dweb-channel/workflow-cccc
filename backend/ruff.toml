@@ -1,0 +1,26 @@
+# Ruff linter configuration for Work-Flow backend
+# Docs: https://docs.astral.sh/ruff/
+
+line-length = 120
+target-version = "py310"
+
+[lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # flake8-bugbear
+  "UP",   # pyupgrade
+]
+ignore = [
+  "E501",   # line too long (handled by formatter)
+  "B008",   # do not perform function calls in argument defaults (FastAPI Depends)
+]
+
+[lint.isort]
+known-first-party = ["app", "workflow"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

@@ -538,6 +538,9 @@ async def cancel_design_job(
 # Allowed file extensions for the files endpoint
 _CODE_EXTENSIONS = {".tsx", ".ts", ".jsx", ".js", ".css", ".json", ".html"}
 
+# Maximum file size to read into memory (10 MB) — prevents OOM on oversized files
+_MAX_CODE_FILE_SIZE = 10 * 1024 * 1024
+
 
 @router.get("/{job_id}/files", response_model=DesignFilesResponse)
 async def get_design_job_files(
@@ -565,7 +568,7 @@ async def get_design_job_files(
 
     # Only scan files if job is completed (or failed — partial results may exist)
     if job.status in ("completed", "failed") and os.path.isdir(output_dir):
-        for dirpath, _, filenames in os.walk(output_dir):
+        for dirpath, _, filenames in os.walk(output_dir, followlinks=False):
             for filename in sorted(filenames):
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in _CODE_EXTENSIONS:
@@ -573,6 +576,13 @@ async def get_design_job_files(
                 abs_path = os.path.join(dirpath, filename)
                 rel_path = os.path.relpath(abs_path, output_dir)
                 try:
+                    file_size = os.path.getsize(abs_path)
+                    if file_size > _MAX_CODE_FILE_SIZE:
+                        logger.warning(
+                            "Job %s: Skipping oversized file %s (%d bytes)",
+                            job_id, rel_path, file_size,
+                        )
+                        continue
                     with open(abs_path, "r", encoding="utf-8") as f:
                         content = f.read()
                     files.append(DesignFileEntry(

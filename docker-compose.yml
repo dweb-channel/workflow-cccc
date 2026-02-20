@@ -5,7 +5,7 @@
 services:
   # ---- Temporal Dev Server ----
   temporal:
-    image: temporalio/auto-setup:latest
+    image: temporalio/auto-setup:1.25.2
     ports:
       - "7233:7233"   # gRPC
       - "8080:8080"   # Web UI

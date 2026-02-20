@@ -5,6 +5,7 @@ import {
   submitSpecRun,
   getDesignJobStatus,
   getDesignJobStreamUrl,
+  getActiveDesignJob,
   type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
@@ -26,6 +27,34 @@ export function useDesignJob() {
   const [specComplete, setSpecComplete] = useState(false);
   const [validation, setValidation] = useState<Record<string, unknown> | null>(null);
   const [tokenUsage, setTokenUsage] = useState<{ input_tokens: number; output_tokens: number } | null>(null);
+
+  // Recovery: on mount, check for active (non-terminal) job in DB
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const activeJob = await getActiveDesignJob();
+        if (controller.signal.aborted || !activeJob) return;
+        setCurrentJob({
+          job_id: activeJob.job_id,
+          job_status: activeJob.status,
+          design_file: activeJob.design_file || "",
+          output_dir: activeJob.output_dir,
+          created_at: activeJob.created_at,
+          completed_at: activeJob.completed_at,
+          error: activeJob.error,
+          components_total: activeJob.components_total,
+          components_completed: activeJob.components_completed,
+          components_failed: activeJob.components_failed,
+          result: activeJob.result,
+        });
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        console.warn("Failed to recover active design job on mount");
+      }
+    })();
+    return () => controller.abort();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Computed Stats ---
   const stats = currentJob

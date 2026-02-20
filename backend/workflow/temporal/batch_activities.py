@@ -492,6 +492,14 @@ async def _execute_workflow(
                         await _persist_bug_steps(
                             job_id, _db_index(last_synced_index, bug_index_offset, index_map), steps,
                         )
+                        # Memory cleanup: remove persisted bug data
+                        bug_steps.pop(last_synced_index, None)
+                        stale_keys = [
+                            k for k in node_start_times
+                            if k.startswith(f"{last_synced_index}:")
+                        ]
+                        for k in stale_keys:
+                            node_start_times.pop(k, None)
 
                     # --- failure_policy "stop": abort on first failure ---
                     fp = config.get("failure_policy", "skip")

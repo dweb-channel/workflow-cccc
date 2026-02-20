@@ -5,14 +5,20 @@ Provides JQL-based bug querying for the batch bug fix workflow.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
+import socket
 from typing import List, Literal, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("workflow.routes.jira")
+
+# Maximum allowed JQL query length to prevent abuse
+_MAX_JQL_LENGTH = 2000
 
 router = APIRouter(prefix="/api/v2/jira", tags=["jira"])
 
@@ -118,6 +124,19 @@ async def query_jira_bugs(payload: JiraQueryRequest):
                 "error_type": "auth_failed",
             },
         )
+
+    # Validate JQL length
+    if len(payload.jql) > _MAX_JQL_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": f"JQL query too long ({len(payload.jql)} chars, max {_MAX_JQL_LENGTH})",
+                "error_type": "jql_error",
+            },
+        )
+
+    # Validate Jira URL to prevent SSRF
+    _validate_jira_url(jira_url)
 
     # Normalize Jira URL (remove trailing slash)
     jira_url = jira_url.rstrip("/")
@@ -244,3 +263,90 @@ async def query_jira_bugs(payload: JiraQueryRequest):
         total=total,
         jql=payload.jql,
     )
+
+
+# --- SSRF Protection ---
+
+# Private/reserved IP ranges that must not be accessed
+_PRIVATE_RANGES = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _validate_jira_url(url: str) -> None:
+    """Validate a Jira URL to prevent SSRF attacks.
+
+    Checks:
+    - Scheme must be https (or http for localhost dev)
+    - Hostname must not resolve to private/reserved IP ranges
+    - Hostname must not be an IP address literal
+
+    Raises:
+        HTTPException if URL is invalid or points to a private network.
+    """
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("https", "http"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Jira URL must use https",
+                "error_type": "connection_error",
+            },
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Invalid Jira URL: missing hostname",
+                "error_type": "connection_error",
+            },
+        )
+
+    # Reject raw IP addresses — Jira instances should use domain names
+    try:
+        addr = ipaddress.ip_address(hostname)
+        # Allow localhost for local development
+        if addr == ipaddress.ip_address("127.0.0.1") or addr == ipaddress.ip_address("::1"):
+            logger.warning("Jira URL points to localhost — allowed for dev only")
+            return
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Jira URL must use a domain name, not an IP address",
+                "error_type": "connection_error",
+            },
+        )
+    except ValueError:
+        pass  # Not an IP — it's a domain name, continue validation
+
+    # Resolve hostname and check against private ranges
+    try:
+        resolved = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _, _, _, _, sockaddr in resolved:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for private_range in _PRIVATE_RANGES:
+                if ip in private_range:
+                    logger.warning(
+                        "Jira URL %s resolves to private IP %s — blocked",
+                        hostname, ip,
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": "Jira URL resolves to a private/reserved IP address",
+                            "error_type": "connection_error",
+                        },
+                    )
+    except socket.gaierror:
+        # DNS resolution failed — let httpx handle the connection error later
+        pass

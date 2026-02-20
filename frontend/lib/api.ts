@@ -705,3 +705,23 @@ export function getDesignJobStreamUrl(jobId: string): string {
   return `${API_BASE}/api/v2/design/${jobId}/stream`;
 }
 
+/**
+ * List design-to-code job history.
+ * Returns all design jobs (most recent first).
+ */
+export async function getDesignJobHistory(): Promise<DesignJobStatusResponse[]> {
+  const response = await fetch(`${API_BASE}/api/v2/design`);
+  return handleResponse<DesignJobStatusResponse[]>(response);
+}
+
+/**
+ * Get the most recent active (non-terminal) design job, if any.
+ * Used for page refresh recovery — restores running job state from DB.
+ */
+export async function getActiveDesignJob(): Promise<DesignJobStatusResponse | null> {
+  const jobs = await getDesignJobHistory();
+  const active = jobs.find((j) => ["started", "running"].includes(j.status));
+  if (!active) return null;
+  return getDesignJobStatus(active.job_id);
+}
+

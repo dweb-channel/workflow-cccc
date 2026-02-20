@@ -6,6 +6,7 @@ Controlled by DATABASE_URL environment variable.
 
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -88,6 +89,7 @@ async def init_db():
 
 async def _migrate_add_missing_columns(conn):
     """Add columns that were added after initial table creation (no-op if already present)."""
+    logger = logging.getLogger(__name__)
     migrations = [
         ("batch_jobs", "workspace_id", "VARCHAR(64)"),
     ]
@@ -96,9 +98,14 @@ async def _migrate_add_missing_columns(conn):
             await conn.execute(sqlalchemy.text(
                 f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
             ))
-        except Exception:
-            # Column already exists — ignore
-            pass
+            logger.info(f"Migration: added column {table}.{column}")
+        except sqlalchemy.exc.OperationalError as e:
+            err_msg = str(e).lower()
+            if "duplicate column" in err_msg or "already exists" in err_msg:
+                pass  # Column already exists — expected, ignore
+            else:
+                logger.error(f"Migration failed for {table}.{column}: {e}")
+                raise
 
 
 async def close_db():

@@ -14,6 +14,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
+from workflow.engine.safe_eval import safe_eval as _safe_eval
+
 from .registry import BaseNodeImpl, register_node_type
 
 logger = logging.getLogger(__name__)
@@ -403,8 +405,8 @@ class UpdateStateNode(BaseNodeImpl):
         logger.debug(f"UpdateStateNode: Evaluating '{eval_expr}' (from '{expr}')")
 
         try:
-            # Use eval with restricted builtins for safety
-            result = eval(eval_expr, {"__builtins__": {}}, {})
+            # Use AST-based safe_eval — no arbitrary code execution
+            result = _safe_eval(eval_expr, {})
             return result
         except Exception as e:
             logger.error(f"UpdateStateNode: Expression evaluation failed: {e}")

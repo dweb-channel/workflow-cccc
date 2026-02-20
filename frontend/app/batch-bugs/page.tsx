@@ -87,6 +87,7 @@ function BatchBugsContent() {
   const [activeTab, setActiveTab] = useState<string>("config");
   const [dryRunResult, setDryRunResult] = useState<DryRunResponse | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
+  const [dryRunError, setDryRunError] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
   // When workspace changes, auto-fill targetCwd from workspace repo_path
@@ -218,6 +219,7 @@ function BatchBugsContent() {
     const urls = parseJiraUrls();
     if (urls.length === 0) return;
     setDryRunLoading(true);
+    setDryRunError(null);
     try {
       const result = await submitDryRun({
         jira_urls: urls,
@@ -229,8 +231,9 @@ function BatchBugsContent() {
         },
       });
       setDryRunResult(result);
-    } catch {
+    } catch (err) {
       setDryRunResult(null);
+      setDryRunError(err instanceof Error ? err.message : "预览请求失败，请稍后重试");
     } finally {
       setDryRunLoading(false);
     }
@@ -376,6 +379,14 @@ function BatchBugsContent() {
                     {submitting ? "提交中..." : "开始修复"}
                   </Button>
                 </div>
+
+                {/* Dry-run error message */}
+                {dryRunError && (
+                  <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+                    {dryRunError}
+                    <button className="ml-2 underline" onClick={() => setDryRunError(null)}>关闭</button>
+                  </div>
+                )}
 
                 {/* Dry-run preview panel */}
                 {dryRunResult && (

@@ -61,6 +61,7 @@ class EventBus:
         self._buffers: dict[str, dict] = {}
         self._buffer_max_events = buffer_max_events
         self._buffer_max_age_secs = buffer_max_age_secs
+        self._lock = asyncio.Lock()
 
     def push(self, job_id: str, event_type: str, data: dict) -> None:
         """Push an event to a connected client or buffer it.
@@ -68,6 +69,10 @@ class EventBus:
         This is the single entry point for all SSE event publishing.
         Called directly by in-process code, or via the internal HTTP
         endpoint for cross-process callers (Temporal Worker).
+
+        Note: This method is synchronous. In asyncio single-threaded context,
+        dict reads/writes are atomic (no yield points), so the lock is not
+        needed here. The lock protects subscribe/cleanup which have await points.
 
         Args:
             job_id: Job/run identifier
@@ -111,19 +116,21 @@ class EventBus:
 
         logger.info(f"Client subscribed: {job_id}")
         queue: asyncio.Queue = asyncio.Queue()
-        self._streams[job_id] = queue
+
+        # Atomically register stream and flush buffered events
+        async with self._lock:
+            self._streams[job_id] = queue
+            buf = self._buffers.pop(job_id, None)
+
+        buffered = buf["events"] if buf else []
+        if buffered:
+            logger.info(
+                f"Flushing {len(buffered)} buffered events for {job_id}"
+            )
+        for event in buffered:
+            yield _format_sse(event)
 
         try:
-            # Flush buffered events
-            buf = self._buffers.pop(job_id, None)
-            buffered = buf["events"] if buf else []
-            if buffered:
-                logger.info(
-                    f"Flushing {len(buffered)} buffered events for {job_id}"
-                )
-            for event in buffered:
-                yield _format_sse(event)
-
             # Stream live events
             while True:
                 try:
@@ -139,8 +146,9 @@ class EventBus:
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            self._streams.pop(job_id, None)
-            self._buffers.pop(job_id, None)
+            async with self._lock:
+                self._streams.pop(job_id, None)
+                self._buffers.pop(job_id, None)
 
     def _buffer_event(
         self, job_id: str, event: dict, event_type: str
@@ -175,9 +183,12 @@ class EventBus:
             if now - buf["created_at"] > self._buffer_max_age_secs
         ]
         for rid in stale:
-            count = len(self._buffers[rid]["events"])
-            del self._buffers[rid]
-            logger.info(f"Cleaned up stale buffer for {rid} ({count} events)")
+            removed = self._buffers.pop(rid, None)
+            if removed:
+                logger.info(
+                    f"Cleaned up stale buffer for {rid} "
+                    f"({len(removed['events'])} events)"
+                )
 
 
 def _format_sse(event: dict) -> str:

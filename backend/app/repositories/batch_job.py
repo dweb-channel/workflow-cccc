@@ -405,6 +405,7 @@ class BatchJobRepository:
             .options(selectinload(BatchJobModel.bugs))
             .where(BatchJobModel.status.in_(["completed", "failed", "cancelled"]))
             .order_by(BatchJobModel.created_at.desc())
+            .limit(1000)
         )
         jobs = list(result.scalars().all())
 

@@ -5,6 +5,8 @@ Manages Temporal client lifecycle and provides workflow start functions.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Optional
 from uuid import uuid4
 
@@ -12,8 +14,11 @@ from temporalio.client import Client
 
 from workflow.config import TASK_QUEUE as TEMPORAL_TASK_QUEUE, TEMPORAL_ADDRESS
 
+logger = logging.getLogger(__name__)
+
 # Singleton client instance (initialized via lifespan)
 _client: Optional[Client] = None
+_client_lock = asyncio.Lock()
 
 
 async def init_temporal_client() -> Optional[Client]:
@@ -22,14 +27,17 @@ async def init_temporal_client() -> Optional[Client]:
     Returns None if Temporal is not available (graceful degradation).
     """
     global _client
-    if _client is None:
-        try:
-            _client = await Client.connect(TEMPORAL_ADDRESS)
-            print(f"✅ Temporal 已连接: {TEMPORAL_ADDRESS}")
-        except Exception as e:
-            print(f"⚠️ Temporal 未连接 ({TEMPORAL_ADDRESS}): {e}")
-            print("   工作流执行接口将返回 503，其他接口正常工作")
-            _client = None
+    async with _client_lock:
+        if _client is None:
+            try:
+                _client = await Client.connect(TEMPORAL_ADDRESS)
+                logger.info(f"Temporal 已连接: {TEMPORAL_ADDRESS}")
+            except Exception as e:
+                logger.warning(
+                    f"Temporal 未连接 ({TEMPORAL_ADDRESS}): {e} — "
+                    "工作流执行接口将返回 503，其他接口正常工作"
+                )
+                _client = None
     return _client
 
 

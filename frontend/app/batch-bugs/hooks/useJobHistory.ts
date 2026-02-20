@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getBatchJobHistory, getBatchJobStatus, deleteBatchJob, type BatchJobHistoryItem } from "@/lib/api";
 import { useToast } from "@/components/hooks/use-toast";
 import type { BatchJob } from "../types";
@@ -11,14 +11,21 @@ export function useJobHistory() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [expandedJobDetails, setExpandedJobDetails] = useState<BatchJob | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const loadHistory = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoadingHistory(true);
     try {
       const data = await getBatchJobHistory(historyPage, 10);
+      if (controller.signal.aborted) return;
       setHistoryJobs(data.jobs);
       setHistoryTotal(data.total);
     } catch (err) {
+      if (controller.signal.aborted) return;
       console.error("Failed to load history:", err);
       toast({
         title: "加载历史失败",
@@ -26,13 +33,16 @@ export function useJobHistory() {
         variant: "destructive",
       });
     } finally {
-      setLoadingHistory(false);
+      if (!controller.signal.aborted) {
+        setLoadingHistory(false);
+      }
     }
   }, [historyPage, toast]);
 
   // Load history on mount and when page changes
   useEffect(() => {
     loadHistory();
+    return () => { abortRef.current?.abort(); };
   }, [loadHistory]);
 
   const toggleJobDetails = useCallback(

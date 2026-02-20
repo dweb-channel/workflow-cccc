@@ -42,6 +42,11 @@ export function ActivityFeed({
   const [expandedBugs, setExpandedBugs] = useState<Set<number>>(new Set());
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const bugStatusKey = useMemo(
+    () => currentJob?.bugs.map((b) => `${b.bug_id}:${b.status}`).join(",") ?? "",
+    [currentJob?.bugs]
+  );
+
   useEffect(() => {
     if (!currentJob) return;
     const inProgressIndices = currentJob.bugs
@@ -55,7 +60,7 @@ export function ActivityFeed({
         return next;
       });
     }
-  }, [currentJob?.bugs.map((b) => `${b.bug_id}:${b.status}`).join(",")]);
+  }, [bugStatusKey]);
 
   useEffect(() => {
     if (scrollRef.current) {
