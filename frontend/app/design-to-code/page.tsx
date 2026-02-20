@@ -143,13 +143,19 @@ function DesignToCodeContent() {
     else localStorage.removeItem(LS_KEY_OUTPUT_DIR);
   }, [outputDir]);
 
-  // Auto-switch to execution tab when job starts
+  // Auto-switch to execution tab when job is active or recovered
   const jobActive =
     currentJob &&
     !["completed", "failed", "cancelled"].includes(currentJob.job_status);
   useEffect(() => {
     if (jobActive) setActiveTab("execution");
   }, [jobActive]);
+  // Also switch to execution tab when a completed job with spec is recovered on mount
+  useEffect(() => {
+    if (currentJob && designSpec && ["completed", "failed", "cancelled"].includes(currentJob.job_status)) {
+      setActiveTab("execution");
+    }
+  }, [currentJob?.job_id, designSpec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasJob = !!currentJob;
 
@@ -297,18 +303,18 @@ function DesignToCodeContent() {
                   />
                 </div>
               ) : (
-                <div className="flex flex-1 h-full gap-6 overflow-hidden">
+                <div className="flex flex-1 h-full gap-8 overflow-hidden">
                   {/* Left: Input form */}
-                  <div className="flex flex-1 flex-col gap-4 overflow-y-auto pr-2 max-w-2xl">
+                  <div className="flex flex-1 flex-col gap-5 overflow-y-auto pr-2">
                     <Card>
-                      <CardContent className="pt-4 pb-3 space-y-4">
-                        <div className="space-y-2">
-                          <Label className="text-xs">Figma 设计稿 URL</Label>
+                      <CardContent className="p-6 space-y-5">
+                        <div className="space-y-2.5">
+                          <Label className="text-sm font-medium">Figma 设计稿 URL</Label>
                           <Input
                             value={figmaUrl}
                             onChange={(e) => setFigmaUrl(e.target.value)}
                             placeholder="https://www.figma.com/design/6kGd851.../...?node-id=16650-538"
-                            className="font-mono text-sm"
+                            className="font-mono text-sm h-10"
                           />
                           <p className="text-xs text-muted-foreground">
                             粘贴 Figma 设计稿链接，支持 /design/ 和 /file/
@@ -316,13 +322,13 @@ function DesignToCodeContent() {
                           </p>
                         </div>
 
-                        <div className="space-y-2">
-                          <Label className="text-xs">输出目录</Label>
+                        <div className="space-y-2.5">
+                          <Label className="text-sm font-medium">输出目录</Label>
                           <Input
                             value={outputDir}
                             onChange={(e) => setOutputDir(e.target.value)}
                             placeholder="output/spec"
-                            className="font-mono text-sm"
+                            className="font-mono text-sm h-10"
                           />
                           <p className="text-xs text-muted-foreground">
                             生成的 design_spec.json 将输出到此目录
@@ -332,34 +338,34 @@ function DesignToCodeContent() {
                     </Card>
 
                     {(submitError || scan.error) && (
-                      <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-2.5">
+                      <div className="rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3">
                         <p className="text-sm text-red-400">{submitError || scan.error}</p>
                       </div>
                     )}
 
                     {/* Direct submit for both modes */}
                     <Button
-                      className="w-fit bg-violet-500 hover:bg-violet-400 text-white"
+                      className="w-fit bg-violet-500 hover:bg-violet-400 text-white h-10 px-6"
                       onClick={handleSubmit}
                       disabled={submitting || !canSubmit}
                     >
-                      <Play className="mr-1.5 h-3.5 w-3.5" />
+                      <Play className="mr-2 h-4 w-4" />
                       {submitting ? "提交中..." : "生成设计规格"}
                     </Button>
                   </div>
 
                   {/* Right: Pipeline info card + History */}
-                  <div className="w-[360px] shrink-0 overflow-y-auto space-y-4">
+                  <div className="w-[440px] shrink-0 overflow-y-auto space-y-4">
                     <Card>
-                      <CardContent className="p-4 space-y-3">
+                      <CardContent className="p-5 space-y-3">
                         <h3 className="text-sm font-semibold text-foreground">
                           Pipeline 流程
                         </h3>
-                        <div className="space-y-2">
-                          {PIPELINE_STAGES.map((stage, i) => (
+                        <div className="space-y-2.5">
+                          {PIPELINE_STAGES.map((stage) => (
                             <div
                               key={stage.icon}
-                              className="flex items-start gap-2.5 text-xs"
+                              className="flex items-start gap-3 text-xs"
                             >
                               <span className="shrink-0 mt-0.5 text-base">
                                 {stage.icon}
@@ -368,7 +374,7 @@ function DesignToCodeContent() {
                                 <p className="font-medium text-foreground">
                                   {stage.label}
                                 </p>
-                                <p className="text-muted-foreground">{stage.desc}</p>
+                                <p className="text-muted-foreground leading-relaxed">{stage.desc}</p>
                               </div>
                             </div>
                           ))}
@@ -378,7 +384,7 @@ function DesignToCodeContent() {
 
                     {/* History card */}
                     <Card>
-                      <CardContent className="p-4">
+                      <CardContent className="p-5">
                         <DesignHistoryCard
                           historyJobs={historyJobs}
                           loadingHistory={loadingHistory}

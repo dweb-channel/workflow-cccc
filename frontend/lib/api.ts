@@ -701,6 +701,11 @@ export async function cancelDesignJob(jobId: string): Promise<{ success: boolean
   return handleResponse<{ success: boolean; job_id: string; status: string }>(response);
 }
 
+export async function getDesignJobSpec(jobId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${API_BASE}/api/v2/design/${jobId}/spec`);
+  return handleResponse<Record<string, unknown>>(response);
+}
+
 export function getDesignJobStreamUrl(jobId: string): string {
   return `${API_BASE}/api/v2/design/${jobId}/stream`;
 }
@@ -715,13 +720,18 @@ export async function getDesignJobHistory(): Promise<DesignJobStatusResponse[]> 
 }
 
 /**
- * Get the most recent active (non-terminal) design job, if any.
- * Used for page refresh recovery — restores running job state from DB.
+ * Get the most recent recoverable design job, if any.
+ * Priority: running/started jobs first, then most recent completed job.
+ * Used for page refresh recovery — restores job state from DB.
  */
 export async function getActiveDesignJob(): Promise<DesignJobStatusResponse | null> {
   const jobs = await getDesignJobHistory();
+  // Prefer running job
   const active = jobs.find((j) => ["started", "running"].includes(j.status));
-  if (!active) return null;
-  return getDesignJobStatus(active.job_id);
+  if (active) return getDesignJobStatus(active.job_id);
+  // Fall back to most recent completed job (jobs are sorted by recency)
+  const completed = jobs.find((j) => j.status === "completed");
+  if (completed) return getDesignJobStatus(completed.job_id);
+  return null;
 }
 

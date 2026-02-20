@@ -168,8 +168,8 @@ def _job_to_status(job: DesignJobModel) -> DesignJobStatus:
         status=job.status,
         design_file=job.design_file,
         output_dir=job.output_dir,
-        created_at=job.created_at.isoformat() if job.created_at else "",
-        completed_at=job.completed_at.isoformat() if job.completed_at else None,
+        created_at=job.created_at.isoformat() + "Z" if job.created_at else "",
+        completed_at=job.completed_at.isoformat() + "Z" if job.completed_at else None,
         error=job.error,
         components_total=job.components_total,
         components_completed=job.components_completed,
@@ -187,8 +187,8 @@ def _job_to_dict(job: DesignJobModel) -> Dict[str, Any]:
         "output_dir": job.output_dir,
         "cwd": job.cwd,
         "max_retries": job.max_retries,
-        "created_at": job.created_at.isoformat() if job.created_at else "",
-        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "created_at": job.created_at.isoformat() + "Z" if job.created_at else "",
+        "completed_at": job.completed_at.isoformat() + "Z" if job.completed_at else None,
         "error": job.error,
         "components_total": job.components_total,
         "components_completed": job.components_completed,
@@ -422,7 +422,7 @@ async def run_spec_pipeline(
         status="started",
         design_file=spec_path,
         output_dir=output_dir,
-        created_at=job.created_at.isoformat(),
+        created_at=job.created_at.isoformat() + "Z",
     )
 
 
@@ -438,6 +438,30 @@ async def get_design_job_status(
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
 
     return _job_to_status(job)
+
+
+@router.get("/{job_id}/spec")
+async def get_design_job_spec(
+    job_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the design_spec.json content for a completed (or in-progress) job.
+
+    Used by the frontend to recover designSpec state after page navigation.
+    """
+    repo = DesignJobRepository(session)
+    job = await repo.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+
+    spec_path = job.design_file
+    if not spec_path or not os.path.isfile(spec_path):
+        raise HTTPException(status_code=404, detail="design_spec.json not found on disk")
+
+    with open(spec_path, "r", encoding="utf-8") as f:
+        spec_data = json.load(f)
+
+    return spec_data
 
 
 @router.get("/{job_id}/stream")

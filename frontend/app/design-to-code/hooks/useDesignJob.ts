@@ -6,6 +6,7 @@ import {
   getDesignJobStatus,
   getDesignJobStreamUrl,
   getActiveDesignJob,
+  getDesignJobSpec,
   type SpecRunRequest,
   type DesignRunResponse,
 } from "@/lib/api";
@@ -28,14 +29,15 @@ export function useDesignJob() {
   const [validation, setValidation] = useState<Record<string, unknown> | null>(null);
   const [tokenUsage, setTokenUsage] = useState<{ input_tokens: number; output_tokens: number } | null>(null);
 
-  // Recovery: on mount, check for active (non-terminal) job in DB
+  // Recovery: on mount, check for active/completed job in DB and load spec if available
   useEffect(() => {
     const controller = new AbortController();
     (async () => {
       try {
         const activeJob = await getActiveDesignJob();
         if (controller.signal.aborted || !activeJob) return;
-        setCurrentJob({
+
+        const job: DesignJob = {
           job_id: activeJob.job_id,
           job_status: activeJob.status,
           design_file: activeJob.design_file || "",
@@ -47,7 +49,28 @@ export function useDesignJob() {
           components_completed: activeJob.components_completed,
           components_failed: activeJob.components_failed,
           result: activeJob.result,
-        });
+        };
+        setCurrentJob(job);
+
+        // Also load design spec if the job has a design_file on disk
+        if (job.design_file && ["completed", "running", "started"].includes(job.job_status)) {
+          try {
+            const raw = await getDesignJobSpec(job.job_id);
+            if (controller.signal.aborted) return;
+            const components = (raw.components ?? []) as DesignSpec["components"];
+            if (components.length > 0) {
+              setDesignSpec({
+                version: "1.0",
+                source: (raw.source as DesignSpec["source"]) ?? { tool: "figma", file_key: "" },
+                page: (raw.page as DesignSpec["page"]) ?? {},
+                design_tokens: raw.design_tokens as DesignSpec["design_tokens"] | undefined,
+                components,
+              });
+            }
+          } catch {
+            // Spec file may not exist yet — ignore
+          }
+        }
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return;
         console.warn("Failed to recover active design job on mount");
